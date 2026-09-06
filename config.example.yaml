@@ -1,0 +1,113 @@
+docling_url: "http://192.168.68.63:5001"
+input_dir: "/data/input"
+output_dir: "/data/output"
+database_path: "/data/db/jobs.db"
+poll_interval_seconds: 3
+docling_poll_interval_seconds: 2
+document_timeout_minutes: 120
+# How long to wait for a single /v1/status/poll response before treating it
+# as a transient failure. Docling can be slow to answer while its worker is
+# busy converting a large/OCR-heavy document, so this is deliberately more
+# generous than a typical request timeout.
+docling_poll_timeout_seconds: 180
+# How many consecutive poll failures (timeouts, brief network hiccups) to
+# tolerate before giving up on the job. Each one is retried with backoff
+# rather than failing the job immediately.
+poll_max_consecutive_errors: 5
+# Discovery is always on. false = wait for Start; true = continuously auto-run.
+watcher_auto_run: false
+to_formats: ["md", "json"]
+target_type: "zip"
+do_ocr: true
+table_mode: "accurate"
+pipeline: "standard"
+# These mirror the manual Convert page's option panel so the folder-watcher
+# produces output just as rich (headings, classified pictures, referenced
+# images) as a manual conversion.
+image_export_mode: "referenced"
+force_ocr: false
+ocr_engine: "auto"
+pdf_backend: "docling_parse"
+do_pdf_heading_hierarchy: true
+abort_on_error: false
+do_code_enrichment: false
+do_formula_enrichment: false
+do_picture_classification: true
+do_picture_description: false
+supported_extensions:
+  - ".pdf"
+  - ".docx"
+  - ".doc"
+  - ".pptx"
+  - ".ppt"
+  - ".xlsx"
+  - ".xls"
+  - ".csv"
+  - ".txt"
+  - ".md"
+  - ".html"
+  - ".htm"
+  - ".png"
+  - ".jpg"
+  - ".jpeg"
+  - ".tif"
+  - ".tiff"
+  - ".bmp"
+  - ".webp"
+
+# Stage 2A: non-destructive quality profiling and routing.
+postprocess_enabled: true
+processed_dir: "/data/processed"
+postprocess_poll_interval_seconds: 5
+max_routes_per_document: 500
+picture_review_confidence: 0.55
+# Validate heading hierarchy against the document's own numbered-outline pattern.
+# Level 6 (or deeper) is NOT an error by itself.
+heading_consistency_min_group: 4
+heading_validation_min_coverage: 0.10
+# Conservative layout-aware reading-order check.
+reading_order_inversion_threshold: 0.18
+reading_order_min_items: 5
+reading_order_min_coverage: 0.10
+pi5_url: "http://192.168.68.55:8080"
+oneplus_url: "http://192.168.68.60:8080"
+# Stage 2A creates routes but does not automatically call or trust model
+# corrections. Enable later after routing validation.
+external_verifiers_enabled: false
+verifier_health_interval_seconds: 30
+
+# Stage 2B external verification execution. Manual mode is the safe default.
+stage2b_enabled: true
+stage2b_poll_interval_seconds: 2
+stage2b_pi5_auto_run: false
+stage2b_oneplus_auto_run: false
+stage2b_pi5_paused: false
+stage2b_oneplus_paused: false
+stage2b_request_timeout_seconds: 240
+stage2b_pi5_job_timeout_seconds: 300
+# OnePlus vision streams output. Allow up to 20 minutes before the first generated
+# content, then require some stream activity at least every 5 minutes. A normal
+# request finishes immediately on finish_reason/[DONE]. Set job timeout to 0 so
+# there is no arbitrary total-duration ceiling; first-output/idle timers still detect a dead stream.
+stage2b_oneplus_first_token_timeout_seconds: 1200
+stage2b_oneplus_stream_idle_timeout_seconds: 300
+stage2b_oneplus_job_timeout_seconds: 0
+stage2b_retry_delay_seconds: 15
+stage2b_retry_max_delay_seconds: 300
+# Retryable network/server failures get at most two re-attempts after the
+# initial request. This prevents a dead endpoint from cycling forever.
+stage2b_max_retries: 2
+stage2b_pi5_max_tokens: 160
+stage2b_oneplus_max_tokens: 384
+stage2b_vision_crops_enabled: true
+stage2b_vision_crop_overlap: 0.20
+stage2b_vision_crop_upscale: 1.25
+stage2b_vision_max_crops: 4
+
+# OnePlus Termux llama.cpp control. The SSH password is supplied via the
+# ONEPLUS_SSH_PASSWORD container environment variable, never via this file.
+oneplus_ssh_host: "192.168.68.60"
+oneplus_ssh_port: 8022
+oneplus_ssh_user: "u0_a202"
+oneplus_ssh_password_env: "ONEPLUS_SSH_PASSWORD"
+oneplus_control_script_path: "$HOME/bin/oneplus-llama-control"

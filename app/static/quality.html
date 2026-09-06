@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Document quality · Docling Auto-Convert</title>
+<link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+<header class="mobile-topbar">
+  <button class="hamburger" id="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  <a class="brand" href="/"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a>
+</header>
+<div id="nav-backdrop" hidden></div>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <button class="sidebar-close" id="sidebar-close" type="button" aria-label="Close navigation">×</button>
+    <a class="brand" href="/"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a>
+    <div class="sidebar-label">Workspace</div>
+    <nav class="nav" aria-label="Primary navigation">
+      <a href="/"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></svg>Overview</span><small>Queue</small></a>
+      <a href="/convert"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0-12 4 4m-4-4L8 7"/><path d="M5 13v5a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-5"/></svg>Convert</span><small>One-off</small></a>
+      <a class="active" href="/quality" aria-current="page"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.5 2.8 8.2 7 10 4.2-1.8 7-5.5 7-10V6z"/><path d="m9 12 2 2 4-4"/></svg>Quality</span><small>Review</small></a>
+      <a href="/verification"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M4 12h7M4 17h5"/><path d="m15 15 2 2 4-5"/></svg>Verification</span><small>Pi5 + OnePlus</small></a>
+      <a href="/oneplus"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M10 5h4M11 18.5h2"/></svg>OnePlus</span><small>Script</small></a>
+      <a href="/errors"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 3.8 19h16.4L12 4Z"/><path d="M12 9v4m0 3h.01"/></svg>Error log</span><small id="failed-nav">0</small></a>
+    </nav>
+    <div class="sidebar-footer"><span class="footer-dot"></span><span><strong>Safe analysis</strong><br />Original files preserved</span></div>
+  </aside>
+  <main class="main-content">
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">Document quality</p>
+        <h1>Quality & routing</h1>
+        <p class="subtle">Review extraction quality, flag uncertain evidence, and prepare text or vision checks without changing the original Docling output.</p>
+      </div>
+      <div class="connection-chip" id="quality-state"><span class="indicator"></span><span>Loading quality worker</span></div>
+    </header>
+    <div class="status-message page-feedback" id="quality-feedback" role="status" aria-live="polite" hidden></div>
+
+    <section class="metrics" aria-label="Post-processing counts">
+      <article class="metric-card pending-card"><div class="metric-top"><span class="metric-kicker">Queue</span></div><p>Pending</p><strong id="q-pending">0</strong><span>Waiting for analysis</span></article>
+      <article class="metric-card processing-card"><div class="metric-top"><span class="metric-kicker">Active</span></div><p>Processing</p><strong id="q-processing">0</strong><span>One analysis at a time</span></article>
+      <article class="metric-card completed-card"><div class="metric-top"><span class="metric-kicker">Ready</span></div><p>Completed</p><strong id="q-completed">0</strong><span>Profiles and routes created</span></article>
+      <article class="metric-card failure-metric"><div class="metric-top"><span class="metric-kicker">Attention</span></div><p>Failed</p><strong id="q-failed">0</strong><span>Safe to retry</span></article>
+    </section>
+
+    <section class="panel queue-panel">
+      <div class="panel-heading"><div><p class="eyebrow">Analysis history</p><h2>Documents</h2></div><p class="format-note" id="processed-dir">—</p></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Document</th><th>Pipeline</th><th>Quality</th><th>Profile</th><th>Routes</th><th class="align-right">Actions</th></tr></thead>
+        <tbody id="quality-jobs"><tr class="empty-row"><td colspan="6" class="empty-state">Loading…</td></tr></tbody>
+      </table></div>
+    </section>
+  </main>
+</div>
+<script src="/assets/nav.js"></script>
+<script src="/assets/quality.js"></script>
+</body>
+</html>

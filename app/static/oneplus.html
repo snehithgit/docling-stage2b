@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OnePlus Script Control · Docling Auto-Convert</title>
+<link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+<header class="mobile-topbar">
+  <button class="hamburger" id="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  <a class="brand" href="/"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a>
+</header>
+<div id="nav-backdrop" hidden></div>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <button class="sidebar-close" id="sidebar-close" type="button" aria-label="Close navigation">×</button>
+    <a class="brand" href="/"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a>
+    <div class="sidebar-label">Workspace</div>
+    <nav class="nav" aria-label="Primary navigation">
+      <a href="/"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></svg>Overview</span><small>Queue</small></a>
+      <a href="/convert"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0-12 4 4m-4-4L8 7"/><path d="M5 13v5a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-5"/></svg>Convert</span><small>One-off</small></a>
+      <a href="/quality"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.5 2.8 8.2 7 10 4.2-1.8 7-5.5 7-10V6z"/><path d="m9 12 2 2 4-4"/></svg>Quality</span><small>Review</small></a>
+      <a href="/verification"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M4 12h7M4 17h5"/><path d="m15 15 2 2 4-5"/></svg>Verification</span><small>Pi5 + OnePlus</small></a>
+      <a class="active" href="/oneplus" aria-current="page"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M10 5h4M11 18.5h2"/></svg>OnePlus</span><small>Script</small></a>
+      <a href="/errors"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 3.8 19h16.4L12 4Z"/><path d="M12 9v4m0 3h.01"/></svg>Error log</span><small id="failed-nav">0</small></a>
+    </nav>
+    <div class="sidebar-footer"><span class="footer-dot"></span><span><strong>Phone-side control</strong><br />SSH script commands only</span></div>
+  </aside>
+
+  <main class="main-content oneplus-page">
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">Phone control</p>
+        <h1>OnePlus script control</h1>
+        <p class="subtle">The N150 only connects to Termux over SSH and runs the phone-side control script. llama.cpp lifecycle and wake-lock handling stay on the phone.</p>
+      </div>
+      <div class="oneplus-header-actions">
+        <div class="connection-chip" id="oneplus-state"><span class="indicator"></span><span>Checking SSH</span></div>
+        <button class="secondary-button" id="refresh-status" type="button">Refresh</button>
+      </div>
+    </header>
+
+    <div id="action-feedback" class="status-message page-feedback" role="status" aria-live="polite" hidden></div>
+
+    <section class="oneplus-status-grid" aria-label="OnePlus controller state">
+      <article class="panel oneplus-status-card">
+        <span class="metric-kicker">Termux SSH</span>
+        <div class="server-state-row"><strong id="ssh-state">Checking…</strong><span class="mode-badge paused" id="ssh-badge">Checking</span></div>
+        <p class="subtle" id="ssh-detail">Connecting to 192.168.68.60:8022</p>
+      </article>
+      <article class="panel oneplus-status-card">
+        <span class="metric-kicker">Phone script</span>
+        <div class="server-state-row"><strong id="script-state">Checking…</strong><span class="mode-badge paused" id="script-badge">Checking</span></div>
+        <p class="subtle" id="script-detail">$HOME/bin/oneplus-llama-control</p>
+      </article>
+      <article class="panel oneplus-status-card">
+        <span class="metric-kicker">SSH credential</span>
+        <div class="server-state-row"><strong id="credential-state">Checking…</strong><span class="mode-badge paused" id="credential-badge">Checking</span></div>
+        <p class="subtle" id="credential-detail">Server-side only</p>
+      </article>
+    </section>
+
+    <section class="panel oneplus-command-panel">
+      <div class="panel-heading">
+        <div><p class="eyebrow">Server commands</p><h2>llama.cpp lifecycle</h2></div>
+        <p class="format-note">Executed on the phone</p>
+      </div>
+      <div class="oneplus-panel-body">
+        <p class="subtle oneplus-panel-intro">The phone script owns the wake lock, PID/log files and your fixed Qwen vision launch command. These buttons only send <code>start</code>, <code>restart</code> or <code>stop</code> over SSH.</p>
+        <div class="oneplus-server-actions" role="group" aria-label="llama.cpp server commands">
+          <button class="primary-button" id="start-server" type="button">Start llama server</button>
+          <button class="secondary-button" id="restart-server" type="button">Restart llama server</button>
+          <button class="secondary-button danger-outline" id="stop-server" type="button">Stop llama server</button>
+        </div>
+        <div class="oneplus-response-box" aria-live="polite">
+          <span>Last script response</span>
+          <code id="last-action">No command sent yet.</code>
+        </div>
+      </div>
+    </section>
+
+    <div class="oneplus-secondary-grid">
+      <section class="panel oneplus-setup-panel">
+        <div class="panel-heading"><div><p class="eyebrow">One-time setup</p><h2>Phone script</h2></div></div>
+        <div class="oneplus-panel-body compact-body">
+          <p class="subtle">Copy or update the bundled script at <code>$HOME/bin/oneplus-llama-control</code>. Normal server controls only execute it.</p>
+          <button class="secondary-button full-width-button" id="install-script" type="button">Install / update script</button>
+        </div>
+      </section>
+
+      <section class="panel oneplus-ssh-panel">
+        <div class="panel-heading"><div><p class="eyebrow">Connection</p><h2>Termux SSH</h2></div></div>
+        <div class="oneplus-panel-body compact-body">
+          <p class="subtle">Reconnect only checks SSH. Stopping SSH does not stop llama.cpp; start <code>sshd</code> on the phone to connect again.</p>
+          <div class="oneplus-ssh-actions" role="group" aria-label="Termux SSH commands">
+            <button class="secondary-button" id="reconnect-ssh" type="button">Reconnect SSH</button>
+            <button class="secondary-button danger-outline" id="stop-ssh" type="button">Stop SSH</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+<script src="/assets/nav.js"></script>
+<script src="/assets/oneplus.js"></script>
+</body>
+</html>

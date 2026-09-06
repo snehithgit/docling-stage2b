@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Convert · Docling Auto-Convert</title>
+<link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+<header class="mobile-topbar">
+  <button class="hamburger" id="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg></button>
+  <a class="brand" href="/" aria-label="Docling Auto-Convert"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a>
+  <span class="mobile-status" title="Checking Docling Serve"><span class="indicator"></span></span>
+</header>
+<div id="nav-backdrop" hidden></div>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <button class="sidebar-close" id="sidebar-close" type="button" aria-label="Close navigation">×</button>
+    <a class="brand" href="/"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a>
+    <div class="sidebar-label">Workspace</div>
+    <nav class="nav" aria-label="Primary navigation">
+      <a href="/"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></svg>Overview</span><small>Queue</small></a>
+      <a class="active" href="/convert" aria-current="page"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0-12 4 4m-4-4L8 7"/><path d="M5 13v5a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-5"/></svg>Convert</span><small>One-off</small></a>
+      <a href="/quality"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.5 2.8 8.2 7 10 4.2-1.8 7-5.5 7-10V6z"/><path d="m9 12 2 2 4-4"/></svg>Quality</span><small>Review</small></a>
+      <a href="/verification"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M4 12h7M4 17h5"/><path d="m15 15 2 2 4-5"/></svg>Verification</span><small>Pi5 + OnePlus</small></a>
+      <a href="/oneplus"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M10 5h4M11 18.5h2"/></svg>OnePlus</span><small>Script</small></a>
+      <a href="/errors"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 3.8 19h16.4L12 4Z"/><path d="M12 9v4m0 3h.01"/></svg>Error log</span><small id="failed-nav">0</small></a>
+    </nav>
+    <a class="settings-trigger" href="/"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="M19 12h2M3 12h2M12 3v2m0 14v2M18.4 5.6 17 7m-10 10-1.4 1.4m0-12.8L7 7m10 10 1.4 1.4"/></svg>Back to queue</span><span class="nav-arrow" aria-hidden="true">←</span></a>
+    <div class="sidebar-footer"><span class="footer-dot"></span><span><strong>Local pipeline</strong><br />Single-worker mode</span></div>
+  </aside>
+  <main class="main-content">
+    <header class="page-header"><div><p class="eyebrow">On-demand conversion</p><h1>Manual convert</h1><p class="subtle">Convert a single URL or file with the same options Docling Serve exposes.</p></div><div class="connection-chip" id="connection-chip"><span class="indicator"></span><span>Checking Docling Serve</span></div></header>
+    <section class="panel convert-panel">
+      <div class="convert-tabs" role="tablist" aria-label="Conversion source"><button class="convert-tab active" id="tab-url" type="button" role="tab" aria-selected="true" aria-controls="source-url"><span class="tab-icon">↗</span>Convert URL</button><button class="convert-tab" id="tab-file" type="button" role="tab" aria-selected="false" aria-controls="source-file"><span class="tab-icon">↑</span>Convert File</button></div>
+      <div class="convert-body"><div class="convert-input-col">
+        <div class="convert-source active" id="source-url"><label class="field-label" for="url-input">URL input source</label><input class="text-input" id="url-input" type="url" placeholder="https://arxiv.org/pdf/2501.17887" /><p class="field-help">Paste a public document URL to start a one-off conversion.</p></div>
+        <div class="convert-source" id="source-file"><label class="field-label" for="file-input">Upload file</label><div class="drop-zone" id="drop-zone"><input id="file-input" type="file" hidden /><div class="drop-zone-empty" id="drop-zone-empty"><span class="drop-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0 4 4m-4-4L8 8"/><path d="M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg></span><p>Drop a document here</p><p class="drop-or">or</p><button class="link-button" id="drop-zone-browse" type="button">Choose a file</button></div><div class="drop-zone-file" id="drop-zone-file" hidden><span class="file-name" id="picked-file-name"></span><span class="file-size" id="picked-file-size"></span><button class="icon-button" id="clear-file" type="button" aria-label="Remove file">×</button></div></div><p class="field-help">The file is submitted directly to your configured Docling Serve instance.</p></div>
+      </div><div class="convert-actions-col"><button class="primary-button" id="process-button" type="button">Process URL</button><button class="secondary-button" id="reset-button" type="button">Reset form</button></div></div>
+      <button class="options-toggle" id="options-toggle" type="button" aria-expanded="true" aria-controls="options-panel"><span><span class="options-toggle-icon">⚙</span> Conversion options</span><span class="chevron" aria-hidden="true">⌄</span></button>
+      <div class="options-panel" id="options-panel"><div class="options-intro">These options are sent with this conversion only and are not saved to the local pipeline.</div><div class="options-grid">
+        <fieldset class="option-group"><legend>To formats</legend><label class="checkbox-row"><input type="checkbox" name="to_formats" value="json" checked /><span>Docling (JSON)</span></label><label class="checkbox-row"><input type="checkbox" name="to_formats" value="md" checked /><span>Markdown</span></label><label class="checkbox-row"><input type="checkbox" name="to_formats" value="html" /><span>HTML</span></label><label class="checkbox-row"><input type="checkbox" name="to_formats" value="text" /><span>Plain Text</span></label><label class="checkbox-row"><input type="checkbox" name="to_formats" value="doctags" /><span>Doc Tags</span></label></fieldset>
+        <fieldset class="option-group"><legend>Image export mode</legend><label class="radio-row"><input type="radio" name="image_export_mode" value="embedded" /><span>Embedded</span></label><label class="radio-row"><input type="radio" name="image_export_mode" value="placeholder" /><span>Placeholder</span></label><label class="radio-row"><input type="radio" name="image_export_mode" value="referenced" checked /><span>Referenced</span></label></fieldset>
+        <fieldset class="option-group span-2"><legend>Pipeline type</legend><div class="choice-grid"><label class="radio-row"><input type="radio" name="pipeline" value="legacy" /><span>Legacy</span></label><label class="radio-row"><input type="radio" name="pipeline" value="standard" checked /><span>Standard</span></label><label class="radio-row"><input type="radio" name="pipeline" value="vlm" /><span>VLM</span></label><label class="radio-row"><input type="radio" name="pipeline" value="asr" /><span>ASR</span></label></div></fieldset>
+        <fieldset class="option-group"><legend>OCR</legend><label class="checkbox-row"><input type="checkbox" id="do_ocr" checked /><span>Enable OCR</span></label><label class="checkbox-row"><input type="checkbox" id="force_ocr" /><span>Force OCR</span></label></fieldset>
+        <fieldset class="option-group"><legend>OCR engine</legend><label class="radio-row"><input type="radio" name="ocr_engine" value="auto" checked /><span>Auto</span></label><label class="radio-row"><input type="radio" name="ocr_engine" value="easyocr" /><span>EasyOCR</span></label><label class="radio-row"><input type="radio" name="ocr_engine" value="tesseract" /><span>Tesseract</span></label><label class="radio-row"><input type="radio" name="ocr_engine" value="rapidocr" /><span>RapidOCR</span></label></fieldset>
+        <fieldset class="option-group"><legend>PDF backend</legend><label class="radio-row"><input type="radio" name="pdf_backend" value="docling_parse" checked /><span>docling_parse</span></label><label class="radio-row"><input type="radio" name="pdf_backend" value="pypdfium2" /><span>pypdfium2</span></label></fieldset>
+        <fieldset class="option-group"><legend>Table mode</legend><label class="radio-row"><input type="radio" name="table_mode" value="fast" /><span>Fast</span></label><label class="radio-row"><input type="radio" name="table_mode" value="accurate" checked /><span>Accurate</span></label></fieldset>
+        <fieldset class="option-group"><legend>Structure</legend><label class="checkbox-row"><input type="checkbox" id="do_pdf_heading_hierarchy" checked /><span>Infer heading levels</span></label><p class="option-hint">Use PDF bookmarks, numbering and font style to infer section hierarchy.</p><label class="checkbox-row"><input type="checkbox" id="abort_on_error" /><span>Abort on error</span></label></fieldset>
+        <fieldset class="option-group"><legend>Enrichment</legend><label class="checkbox-row"><input type="checkbox" id="do_code_enrichment" /><span>Enable code enrichment</span></label><label class="checkbox-row"><input type="checkbox" id="do_formula_enrichment" /><span>Enable formula enrichment</span></label></fieldset>
+        <fieldset class="option-group"><legend>Pictures</legend><label class="checkbox-row"><input type="checkbox" id="do_picture_classification" checked /><span>Enable picture classification</span></label><label class="checkbox-row"><input type="checkbox" id="do_picture_description" /><span>Enable picture description</span></label></fieldset>
+      </div></div>
+      <div class="convert-status" id="convert-status" hidden><div class="task-id-row"><span class="field-label">Task id</span><code class="task-id" id="task-id-value"></code></div><div class="status-message" id="status-message"></div></div>
+    </section>
+  </main>
+</div>
+<script src="/assets/nav.js"></script><script src="/assets/convert.js"></script>
+</body>
+</html>

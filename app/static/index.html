@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Docling Auto-Convert</title>
+<link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+<header class="mobile-topbar">
+  <button class="hamburger" id="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+  </button>
+  <a class="brand" href="/" aria-label="Docling Auto-Convert"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a>
+  <span class="mobile-status" id="mobile-status" title="Checking Docling Serve"><span class="indicator"></span><span class="visually-hidden">Checking Docling Serve</span></span>
+</header>
+<div id="nav-backdrop" hidden></div>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <button class="sidebar-close" id="sidebar-close" type="button" aria-label="Close navigation">×</button>
+    <a class="brand" href="/" aria-label="Docling Auto-Convert dashboard"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a>
+    <div class="sidebar-label">Workspace</div>
+    <nav class="nav" aria-label="Primary navigation">
+      <a class="active" href="/" aria-current="page"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></svg>Overview</span><small>Queue</small></a>
+      <a href="/convert"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0-12 4 4m-4-4L8 7"/><path d="M5 13v5a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-5"/></svg>Convert</span><small>One-off</small></a>
+      <a href="/quality"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.5 2.8 8.2 7 10 4.2-1.8 7-5.5 7-10V6z"/><path d="m9 12 2 2 4-4"/></svg>Quality</span><small>Review</small></a>
+      <a href="/verification"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M4 12h7M4 17h5"/><path d="m15 15 2 2 4-5"/></svg>Verification</span><small>Pi5 + OnePlus</small></a>
+      <a href="/oneplus"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M10 5h4M11 18.5h2"/></svg>OnePlus</span><small>Script</small></a>
+      <a href="/errors"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 3.8 19h16.4L12 4Z"/><path d="M12 9v4m0 3h.01"/></svg>Error log</span><small id="failed-nav">0</small></a>
+    </nav>
+    <button class="settings-trigger" id="open-settings" type="button"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="m19.4 15 .1.1a2 2 0 0 1-2.8 2.8l-.1-.1a2 2 0 0 0-3.4 1.4v.2a2 2 0 0 1-4 0v-.2a2 2 0 0 0-3.4-1.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A2 2 0 0 0 1.7 12a2 2 0 0 1 0-4h.2a2 2 0 0 0 1.4-3.4l-.1-.1A2 2 0 1 1 6 1.7l.1.1A2 2 0 0 0 9.5.4V.2a2 2 0 0 1 4 0v.2a2 2 0 0 0 3.4 1.4l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A2 2 0 0 0 21.1 8h.2a2 2 0 0 1 0 4h-.2a2 2 0 0 0-1.7 3Z" transform="scale(.82) translate(2.6 2.6)"/></svg>Settings</span><span class="nav-arrow" aria-hidden="true">→</span></button>
+    <div class="sidebar-footer"><span class="footer-dot"></span><span><strong>Local pipeline</strong><br />Single-worker mode</span></div>
+  </aside>
+  <main class="main-content">
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">Document operations</p>
+        <h1>Conversion overview</h1>
+        <p class="subtle">Monitor documents arriving in your watched folder and review their current state.</p>
+      </div>
+      <div class="connection-chip" id="connection-chip"><span class="indicator"></span><span>Checking Docling Serve</span></div>
+    </header>
+
+    <section class="watcher-control" aria-label="Watcher controls">
+      <div class="watcher-control-main">
+        <span class="watcher-control-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h7"/><path d="m17 15 3 2-3 2z"/></svg></span>
+        <div class="watcher-control-copy">
+          <div class="watcher-title-row"><h2>Folder watcher</h2><span class="mode-badge paused" id="watcher-state">Waiting for Start</span></div>
+          <p id="watcher-description">Files are detected and queued, but Docling waits until you start the batch.</p>
+        </div>
+      </div>
+      <div class="watcher-rules" aria-label="Queue behavior">
+        <span class="rule-chip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h12M4 12h9M4 17h6"/><path d="m17 14 3 3-3 3"/></svg>Smallest first</span>
+        <span class="rule-chip"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="3"/><path d="M12 9v6"/></svg>One at a time</span>
+      </div>
+      <div class="watcher-actions">
+        <button class="primary-button start-button" id="start-watcher" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 9 6-9 6z"/></svg><span>Start queued files</span>
+        </button>
+        <button class="auto-run-control" id="auto-run-toggle" type="button" aria-pressed="false" aria-label="Toggle Auto Run">
+          <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+          <span class="switch-copy"><strong>Auto Run</strong><small id="auto-run-label">Off</small></span>
+        </button>
+      </div>
+    </section>
+    <div class="status-message page-feedback" id="dashboard-feedback" role="status" aria-live="polite" hidden></div>
+
+    <section class="metrics" aria-label="Job counts">
+      <article class="metric-card pending-card"><div class="metric-top"><span class="metric-icon icon-pending" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 1.8"/></svg></span><span class="metric-kicker">Queue</span></div><p>Pending</p><strong id="pending-count">0</strong><span>Queued for conversion</span></article>
+      <article class="metric-card processing-card"><div class="metric-top"><span class="metric-icon icon-processing" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M19 12a7 7 0 1 1-2-4.9"/><path d="M19 5v5h-5"/></svg></span><span class="metric-kicker">Active</span></div><p>Processing</p><strong id="processing-count">0</strong><span>One document at a time</span></article>
+      <article class="metric-card completed-card"><div class="metric-top"><span class="metric-icon icon-completed" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 12.5 4.4 4.4L19 7.3"/></svg></span><span class="metric-kicker">History</span></div><p>Completed</p><strong id="completed-count">0</strong><span>Preserved in output folder</span></article>
+      <article class="metric-card failure-metric"><div class="metric-top"><span class="metric-icon icon-failed" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m8 8 8 8m0-8-8 8"/></svg></span><span class="metric-kicker">Attention</span></div><p>Failed</p><strong id="failed-count">0</strong><span>Ready for review</span></article>
+    </section>
+    <section class="panel queue-panel">
+      <div class="panel-heading">
+        <div><div class="section-title-row"><span class="section-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h10l4 4v12H5z"/><path d="M15 4v5h4M8 13h8M8 17h6"/></svg></span><div><p class="eyebrow">Live queue</p><h2>Recent documents</h2></div></div></div>
+        <p class="format-note" id="format-note">Output: —</p>
+      </div>
+      <div class="table-wrap"><table><thead><tr><th>Document</th><th>Status</th><th>Selected formats</th><th>Timeline</th><th class="align-right">Result</th></tr></thead><tbody id="jobs-body"><tr class="empty-row"><td colspan="5" class="empty-state">Loading conversion history…</td></tr></tbody></table></div>
+    </section>
+  </main>
+</div>
+<div class="drawer-backdrop" id="settings-backdrop" hidden></div>
+<aside class="settings-drawer" id="settings-drawer" aria-labelledby="settings-title" aria-hidden="true">
+  <div class="drawer-header"><div><p class="eyebrow">Pipeline setup</p><h2 id="settings-title">Settings</h2></div><button id="close-settings" class="icon-button" type="button" aria-label="Close settings">×</button></div>
+  <p class="drawer-copy">Configure folders, Docling connection, and output formats. Start/Auto Run controls stay on the Overview page.</p>
+  <form id="settings-form">
+    <label>Docling Serve URL<input id="docling_url" name="docling_url" type="url" required /></label>
+    <label>Input folder<input id="input_dir" name="input_dir" type="text" required /></label>
+    <label>Output folder<input id="output_dir" name="output_dir" type="text" required /></label>
+    <fieldset class="option-group watcher-format-group">
+      <legend>Watcher output formats</legend>
+      <p class="field-help">Choose any combination. New files added to the watch folder will use exactly this set.</p>
+      <label class="checkbox-row"><input type="checkbox" name="output_formats" value="json" /><span>Docling (JSON)</span></label>
+      <label class="checkbox-row"><input type="checkbox" name="output_formats" value="md" /><span>Markdown</span></label>
+      <label class="checkbox-row"><input type="checkbox" name="output_formats" value="html" /><span>HTML</span></label>
+      <label class="checkbox-row"><input type="checkbox" name="output_formats" value="text" /><span>Plain text</span></label>
+      <label class="checkbox-row"><input type="checkbox" name="output_formats" value="doctags" /><span>Doc Tags</span></label>
+    </fieldset>
+    <p class="form-status" id="form-status" role="status"></p>
+    <button class="primary-button" type="submit">Save pipeline settings</button>
+  </form>
+</aside>
+<script src="/assets/nav.js"></script>
+<script src="/assets/dashboard.js"></script>
+</body>
+</html>
