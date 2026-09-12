@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Audit OCR correction</title>
+  <link rel="stylesheet" href="/assets/styles.css?v=2026.09.12.26">
+  <link rel="stylesheet" href="/assets/review.css?v=2026.09.12.26">
+</head>
+<body>
+<main class="review-page">
+  <a id="back-workflow" class="back-link" href="/">← Back to book workflow</a>
+  <div class="review-heading-row">
+    <div>
+      <h1>Audit OCR correction</h1>
+      <p class="intro">Automatic source-image corrections are applied without a Save click. Use this page only to audit the applied result or make a manual override.</p>
+    </div>
+    <div id="entry-meta" class="entry-meta" aria-live="polite"></div>
+  </div>
+
+  <div id="message" class="review-message" aria-live="polite"></div>
+
+  <section class="review-grid">
+    <div class="page-card">
+      <div class="card-title-row">
+        <h2>Original PDF page</h2>
+        <span id="page-label" class="page-label"></span>
+      </div>
+      <img id="page-image" alt="Original PDF page">
+    </div>
+
+    <div class="edit-card">
+      <section class="docling-context-card" aria-labelledby="docling-context-heading">
+        <div class="text-panel-heading">
+          <div>
+            <span class="eyebrow">RAW DOCLING READING ORDER</span>
+            <h2 id="docling-context-heading">Text around the suspicious block</h2>
+          </div>
+          <span class="status-pill source-pill">Not Pi5</span>
+        </div>
+        <p class="field-note">These blocks come directly from the immutable Docling JSON on the same page. They are shown only as context and are never edited here.</p>
+
+        <div class="context-stack">
+          <div class="context-section above-context">
+            <div class="context-label">TEXT ABOVE</div>
+            <div id="docling-above" class="context-blocks"></div>
+          </div>
+
+          <div class="context-section target-context">
+            <div class="context-label">OCR TARGET BLOCK</div>
+            <textarea id="original" readonly spellcheck="false"></textarea>
+            <div id="target-source-meta" class="context-meta"></div>
+          </div>
+
+          <div class="context-section below-context">
+            <div class="context-label">TEXT BELOW</div>
+            <div id="docling-below" class="context-blocks"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="pi5-suggestion-card" class="pi5-suggestion-card" hidden>
+        <div class="text-panel-heading">
+          <div>
+            <span class="eyebrow">OPTIONAL RECONSTRUCTION</span>
+            <h2>Pending reconstruction candidate</h2>
+          </div>
+          <span class="status-pill suggestion-pill">Not applied</span>
+        </div>
+        <pre id="pi5-suggestion" class="pi5-suggestion-text"></pre>
+        <div class="inline-actions">
+          <button id="use-pi5-suggestion" class="secondary-button" type="button">Use reconstruction</button>
+        </div>
+        <p class="field-note">This section is shown only for a pending/proposed item. Automatically applied source-image reconstructions do not require manual saving.</p>
+      </section>
+
+      <section class="manual-edit-card">
+        <div class="text-panel-heading">
+          <div>
+            <span class="eyebrow">APPLIED RESULT / MANUAL OVERRIDE</span>
+            <h2 id="edit-heading">Correction text</h2>
+          </div>
+          <span id="edit-status" class="status-pill status-after">Editable</span>
+        </div>
+        <textarea id="correction" spellcheck="false" placeholder="Type the corrected target block only. Do not copy the text above/below into this field. Use [UNREADABLE] where the page cannot be read safely."></textarea>
+        <div class="inline-actions">
+          <button id="reset" class="secondary-button" type="button">Reset to Docling text</button>
+        </div>
+        <p id="edit-note" class="field-note">If an automatic reconstruction is already applied, the editor starts with that applied text. No Save click is required unless you want to override it manually.</p>
+      </section>
+
+      <section class="diff-card" aria-labelledby="diff-heading">
+        <div class="diff-heading-row">
+          <div>
+            <span class="eyebrow">APPLIED / OVERRIDE DIFF</span>
+            <h2 id="diff-heading">Difference from raw Docling</h2>
+          </div>
+          <div id="diff-counts" class="diff-counts"></div>
+        </div>
+        <div class="diff-legend">
+          <span><i class="legend-swatch removed-swatch"></i>Wrong OCR removed</span>
+          <span><i class="legend-swatch added-swatch"></i>Text you filled</span>
+        </div>
+        <div id="diff" class="diff-output" aria-live="polite"></div>
+      </section>
+
+      <div class="review-actions">
+        <button id="save" class="primary-button" type="button">Save manual override</button>
+        <button id="reject" class="secondary-button" type="button">Original text is correct</button>
+        <button id="rerun" class="secondary-button" type="button">Open verification</button>
+      </div>
+      <p class="hint">Automatic applied corrections are already present in the overlay. Saving here is only for a human override. The original PDF, converted ZIP, and raw Docling JSON remain unchanged.</p>
+    </div>
+  </section>
+</main>
+<script src="/assets/review.js?v=2026.09.12.26"></script>
+</body>
+</html>

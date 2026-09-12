@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Book workflow · Docling Auto-Convert</title>
+<link rel="stylesheet" href="/assets/styles.css?v=2026.09.12.26" />
+<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.12.26" />
+</head>
+<body>
+<header class="mobile-topbar">
+  <button class="hamburger" id="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  <a class="brand" href="/"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a>
+</header>
+<div id="nav-backdrop" hidden></div>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <button class="sidebar-close" id="sidebar-close" type="button" aria-label="Close navigation">×</button>
+    <a class="brand" href="/"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a>
+    <div class="sidebar-label">Workspace</div>
+    <nav class="nav" aria-label="Primary navigation">
+      <a class="active" href="/"><span class="nav-item-label">My books</span><small>Workflow</small></a>
+      <a href="/queue"><span class="nav-item-label">Convert files</span><small>Queue</small></a>
+      <a href="/quality"><span class="nav-item-label">Extraction checks</span><small>2A details</small></a>
+      <a href="/verification"><span class="nav-item-label">Device checks</span><small>2B details</small></a>
+      <a href="/vision-audit"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z"/><circle cx="12" cy="12" r="2.5"/></svg>Vision verifier audit</span><small>Read-only</small></a>
+      <a href="/oneplus"><span class="nav-item-label">OnePlus</span><small>Server</small></a>
+      <a href="/errors"><span class="nav-item-label">Error log</span><small id="failed-nav">0</small></a>
+    </nav>
+    <div class="sidebar-footer"><span class="footer-dot"></span><span><strong>Stage-wise workflow</strong><br />One next action at a time</span></div>
+  </aside>
+
+  <main class="main-content book-workflow-main">
+    <a class="back-link" href="/">← My books</a>
+    <header class="book-workflow-header">
+      <div>
+        <p class="eyebrow">Book workflow</p>
+        <h1 id="book-title">Loading book…</h1>
+        <p class="subtle" id="book-subtitle">Checking current stage.</p>
+      </div>
+      <span class="workflow-tag" id="book-status-tag">Loading</span>
+    </header>
+    <div id="book-feedback" class="status-message page-feedback" hidden role="status" aria-live="polite"></div>
+    <div id="book-quota-alert" class="status-message page-feedback warning" hidden role="status" aria-live="polite"></div>
+
+    <nav class="stage-rail" aria-label="Book stages" id="stage-rail">
+      <div><span>1</span><strong>Docling</strong><small>Convert</small></div>
+      <div><span>2A</span><strong>Extraction</strong><small>Analyze</small></div>
+      <div><span>2B</span><strong>Verification</strong><small>Cloud + vision</small></div>
+      <div><span>2C</span><strong>Finalize</strong><small>Automatic</small></div>
+      <div><span>3</span><strong>Chunks</strong><small>Hybrid</small></div>
+    </nav>
+
+    <section id="stage-cards" class="stage-card-stack" aria-live="polite">
+      <p class="empty-state">Loading stage status…</p>
+    </section>
+  </main>
+</div>
+<script src="/assets/nav.js?v=2026.09.12.26"></script>
+<script src="/assets/book.js?v=2026.09.12.26"></script>
+</body>
+</html>

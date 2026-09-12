@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Vision Verifier Audit · Docling Auto-Convert</title>
+<link rel="stylesheet" href="/assets/styles.css?v=2026.09.12.26" />
+<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.12.26" />
+</head>
+<body>
+<header class="mobile-topbar">
+  <button class="hamburger" id="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  <a class="brand" href="/"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a>
+</header>
+<div id="nav-backdrop" hidden></div>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <button class="sidebar-close" id="sidebar-close" type="button" aria-label="Close navigation">×</button>
+    <a class="brand" href="/"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a>
+    <div class="sidebar-label">Workspace</div>
+    <nav class="nav" aria-label="Primary navigation">
+      <a href="/"><span class="nav-item-label">My books</span><small>Start here</small></a>
+      <a href="/queue"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/></svg>Convert files</span><small>Queue</small></a>
+      <a href="/convert"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0-12 4 4m-4-4L8 7"/><path d="M5 13v5a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-5"/></svg>Convert</span><small>One-off</small></a>
+      <a href="/quality"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.5 2.8 8.2 7 10 4.2-1.8 7-5.5 7-10V6z"/><path d="m9 12 2 2 4-4"/></svg>Extraction checks</span><small>2A</small></a>
+      <a href="/verification"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M4 12h7M4 17h5"/><path d="m15 15 2 2 4-5"/></svg>Device checks</span><small>2B</small></a>
+      <a class="active" href="/vision-audit" aria-current="page"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z"/><circle cx="12" cy="12" r="2.5"/></svg>Vision verifier audit</span><small>Read-only</small></a>
+      <a href="/oneplus"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M10 5h4M11 18.5h2"/></svg>OnePlus</span><small>Script</small></a>
+      <a href="/errors"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 3.8 19h16.4L12 4Z"/><path d="M12 9v4m0 3h.01"/></svg>Error log</span><small id="failed-nav">0</small></a>
+    </nav>
+    <div class="sidebar-footer"><span class="footer-dot"></span><span><strong>Audit only</strong><br />No verifier jobs are changed</span></div>
+  </aside>
+
+  <main class="main-content vision-audit-workspace">
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">Stage 2B · Read-only</p>
+        <h1>Vision Verifier Audit</h1>
+        <p class="subtle">See exactly why each picture was sent to the selected vision verifier, what image regions it inspected, what it returned, and what Stage 2C did with the result.</p>
+      </div>
+      <div class="document-actions"><button class="secondary-button" id="refresh-audit" type="button">Refresh audit</button></div>
+    </header>
+
+    <section class="crossover-explainer vision-audit-notice">
+      <strong>No classification is performed on this page.</strong>
+      <p>Images and crops are reconstructed from the immutable converted Docling ZIP. Opening this audit does not rerun OnePlus, Pi5, Groq, Stage 2A, or Stage 2B.</p>
+    </section>
+
+    <section class="vision-audit-summary" aria-label="Audit totals">
+      <div class="vision-audit-stat"><span>Completed / failed</span><strong id="va-total">0 / 0</strong></div>
+      <div class="vision-audit-stat"><span>Technical useful</span><strong id="va-technical">0</strong></div>
+      <div class="vision-audit-stat"><span>Decorative / low value</span><strong id="va-decorative">0</strong></div>
+      <div class="vision-audit-stat"><span>Uncertain</span><strong id="va-uncertain">0</strong></div>
+      <div class="vision-audit-stat"><span>Used crops</span><strong id="va-crops">0</strong></div>
+      <div class="vision-audit-stat"><span>Stage 2C applied / excluded</span><strong id="va-downstream">0 / 0</strong></div>
+    </section>
+
+    <section class="panel vision-audit-filter-panel">
+      <div class="vision-audit-filters">
+        <label>Book<select id="va-book"><option value="">All books</option></select></label>
+        <label>Decision<select id="va-verdict"><option value="">All decisions</option><option value="TECHNICAL_USEFUL">Technical useful</option><option value="DECORATIVE_OR_LOW_VALUE">Decorative / low value</option><option value="UNCERTAIN">Uncertain</option><option value="FAILED">Failed</option></select></label>
+        <label>Search<input id="va-search" type="search" placeholder="route, page, category, reason, visible text…" /></label>
+      </div>
+      <div class="vision-audit-filter-footer"><span id="va-count">0 results</span><button class="mini-action" id="va-clear" type="button">Clear filters</button></div>
+    </section>
+
+    <div class="status-message page-feedback" id="va-feedback" role="status" aria-live="polite" hidden></div>
+    <section id="va-results" class="vision-audit-results" aria-live="polite"><div class="empty-state">Loading vision audit…</div></section>
+    <nav class="vision-audit-pager" aria-label="Audit pagination"><button class="secondary-button" id="va-prev" type="button">Previous</button><span id="va-page">Page 1</span><button class="secondary-button" id="va-next" type="button">Next</button></nav>
+  </main>
+</div>
+<script src="/assets/nav.js?v=2026.09.12.26"></script>
+<script src="/assets/vision-audit.js?v=2026.09.12.26"></script>
+</body>
+</html>
