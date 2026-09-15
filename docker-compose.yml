@@ -1,0 +1,17 @@
+services:
+  docling-autoconvert:
+    build: .
+    container_name: docling-autoconvert
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      CONFIG_PATH: /app/config.yaml
+      ONEPLUS_SSH_PASSWORD: ${ONEPLUS_SSH_PASSWORD:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+    volumes:
+      - ./config.yaml:/app/config.yaml
+      - ./input:/data/input
+      - ./converted:/data/output
+      - ./processed:/data/processed
+      - ./data:/data/db

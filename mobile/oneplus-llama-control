@@ -1,0 +1,169 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -u
+
+STATE_DIR="$HOME/.local/state/oneplus-llama"
+PID_FILE="$STATE_DIR/llama-server.pid"
+LOG_FILE="$STATE_DIR/llama-server.log"
+DOWNLOAD_DIR="/storage/emulated/0/Download"
+MODEL="$DOWNLOAD_DIR/Qwen3.5-2B-Qwen3.6-plus-Distilled-q8_0.gguf"
+MMPROJ="$DOWNLOAD_DIR/Qwen3.5-2B-Opus-Distilled-Heretic-Thinking-Multistage-SFT-v1.0.mmproj-q8_0.gguf"
+
+mkdir -p "$STATE_DIR"
+
+start_termux_app() {
+  if command -v su >/dev/null 2>&1; then
+    su -c 'am start -n com.termux/.app.TermuxActivity >/dev/null 2>&1' >/dev/null 2>&1 || true
+  fi
+}
+
+acquire_wake_lock() {
+  if command -v termux-wake-lock >/dev/null 2>&1; then
+    termux-wake-lock >/dev/null 2>&1 || true
+  fi
+  # Rooted fallback: keep Termux out of Doze if the wake-lock helper is absent/fails.
+  if command -v su >/dev/null 2>&1; then
+    su -c 'cmd deviceidle whitelist +com.termux >/dev/null 2>&1' >/dev/null 2>&1 || true
+  fi
+}
+
+release_wake_lock() {
+  if command -v termux-wake-unlock >/dev/null 2>&1; then
+    termux-wake-unlock >/dev/null 2>&1 || true
+  fi
+  if command -v su >/dev/null 2>&1; then
+    su -c 'cmd deviceidle whitelist -com.termux >/dev/null 2>&1' >/dev/null 2>&1 || true
+  fi
+}
+
+pid_is_live() {
+  [ -f "$PID_FILE" ] || return 1
+  local pid
+  pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
+find_existing_pid() {
+  if pid_is_live; then
+    cat "$PID_FILE"
+    return 0
+  fi
+  local pid=""
+  if command -v pgrep >/dev/null 2>&1; then
+    pid="$(pgrep -n -f '[l]lama-server' 2>/dev/null || true)"
+  fi
+  if [ -n "$pid" ]; then
+    printf '%s\n' "$pid" > "$PID_FILE"
+    printf '%s\n' "$pid"
+    return 0
+  fi
+  rm -f "$PID_FILE"
+  return 1
+}
+
+start_server() {
+  start_termux_app
+  acquire_wake_lock
+
+  if existing="$(find_existing_pid 2>/dev/null)"; then
+    echo "ALREADY_RUNNING pid=$existing"
+    return 0
+  fi
+
+  local bin
+  bin="$(command -v llama-server 2>/dev/null || true)"
+  if [ -z "$bin" ]; then
+    echo "ERROR llama-server not found. Run: pkg install llama-cpp -y" >&2
+    return 20
+  fi
+  if [ ! -f "$MODEL" ]; then
+    echo "ERROR model missing: $MODEL" >&2
+    return 21
+  fi
+  if [ ! -f "$MMPROJ" ]; then
+    echo "ERROR mmproj missing: $MMPROJ" >&2
+    return 22
+  fi
+
+  cd "$DOWNLOAD_DIR" || return 23
+
+  if command -v setsid >/dev/null 2>&1; then
+    nohup setsid "$bin" \
+      -m "$MODEL" \
+      --mmproj "$MMPROJ" \
+      -t 4 -tb 6 \
+      -c 4096 \
+      -np 1 \
+      --reasoning off \
+      --reasoning-budget 0 \
+      --image-max-tokens 1024 \
+      --host 0.0.0.0 \
+      --port 8080 \
+      >"$LOG_FILE" 2>&1 </dev/null &
+  else
+    nohup "$bin" \
+      -m "$MODEL" \
+      --mmproj "$MMPROJ" \
+      -t 4 -tb 6 \
+      -c 4096 \
+      -np 1 \
+      --reasoning off \
+      --reasoning-budget 0 \
+      --image-max-tokens 1024 \
+      --host 0.0.0.0 \
+      --port 8080 \
+      >"$LOG_FILE" 2>&1 </dev/null &
+  fi
+
+  local pid=$!
+  printf '%s\n' "$pid" > "$PID_FILE"
+  sleep 1
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "STARTED pid=$pid log=$LOG_FILE"
+    return 0
+  fi
+
+  echo "ERROR llama-server exited during startup. Check $LOG_FILE" >&2
+  rm -f "$PID_FILE"
+  return 24
+}
+
+stop_server() {
+  local pid=""
+  pid="$(find_existing_pid 2>/dev/null || true)"
+  if [ -n "$pid" ]; then
+    kill -TERM "$pid" 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 1
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -KILL "$pid" 2>/dev/null || true
+    fi
+  fi
+  rm -f "$PID_FILE"
+  release_wake_lock
+  if [ -n "$pid" ]; then
+    echo "STOPPED pid=$pid"
+  else
+    echo "STOPPED no-running-server"
+  fi
+}
+
+status_server() {
+  if pid="$(find_existing_pid 2>/dev/null)"; then
+    echo "RUNNING pid=$pid"
+  else
+    echo "STOPPED"
+  fi
+}
+
+case "${1:-}" in
+  start) start_server ;;
+  restart) stop_server; sleep 1; start_server ;;
+  stop) stop_server ;;
+  status) status_server ;;
+  *)
+    echo "Usage: $0 {start|restart|stop|status}" >&2
+    exit 2
+    ;;
+esac

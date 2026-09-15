@@ -1,0 +1,194 @@
+docling_url: "http://192.168.68.63:5001"
+input_dir: "/data/input"
+output_dir: "/data/output"
+database_path: "/data/db/jobs.db"
+poll_interval_seconds: 3
+docling_poll_interval_seconds: 2
+document_timeout_minutes: 120
+# How long to wait for a single /v1/status/poll response before treating it
+# as a transient failure. Docling can be slow to answer while its worker is
+# busy converting a large/OCR-heavy document, so this is deliberately more
+# generous than a typical request timeout.
+docling_poll_timeout_seconds: 180
+# How many consecutive poll failures (timeouts, brief network hiccups) to
+# tolerate before giving up on the job. Each one is retried with backoff
+# rather than failing the job immediately.
+poll_max_consecutive_errors: 5
+# Discovery is always on. false = wait for Start; true = continuously auto-run.
+watcher_auto_run: false
+to_formats: ["md", "json"]
+target_type: "zip"
+do_ocr: true
+table_mode: "accurate"
+pipeline: "standard"
+# These mirror the manual Convert page's option panel so the folder-watcher
+# produces output just as rich (headings, classified pictures, referenced
+# images) as a manual conversion.
+image_export_mode: "referenced"
+force_ocr: false
+ocr_engine: "auto"
+pdf_backend: "docling_parse"
+do_pdf_heading_hierarchy: true
+abort_on_error: false
+do_code_enrichment: false
+do_formula_enrichment: false
+do_picture_classification: true
+do_picture_description: false
+supported_extensions:
+  - ".pdf"
+  - ".docx"
+  - ".doc"
+  - ".pptx"
+  - ".ppt"
+  - ".xlsx"
+  - ".xls"
+  - ".csv"
+  - ".txt"
+  - ".md"
+  - ".html"
+  - ".htm"
+  - ".png"
+  - ".jpg"
+  - ".jpeg"
+  - ".tif"
+  - ".tiff"
+  - ".bmp"
+  - ".webp"
+
+# Stage 2A: non-destructive quality profiling and routing.
+postprocess_enabled: true
+processed_dir: "/data/processed"
+postprocess_poll_interval_seconds: 5
+max_routes_per_document: 500
+# Generic OCR recall based only on evidence inside each document. Candidates
+# are routed to the selected source-image reconstruction processor; Stage 2A never edits Docling text.
+stage2a_ocr_recall_enabled: true
+stage2a_ocr_recall_max_candidates: 300
+stage2a_ocr_recall_common_min_count: 5
+stage2a_ocr_recall_rare_max_count: 2
+picture_review_confidence: 0.55
+# Validate heading hierarchy against the document's own numbered-outline pattern.
+# Level 6 (or deeper) is NOT an error by itself.
+heading_consistency_min_group: 4
+heading_validation_min_coverage: 0.10
+# Conservative layout-aware reading-order check.
+reading_order_inversion_threshold: 0.18
+reading_order_min_items: 5
+reading_order_min_coverage: 0.10
+pi5_url: "http://192.168.68.55:8080"
+oneplus_url: "http://192.168.68.60:8080"
+# Stage 2A creates routes but does not automatically call or trust model
+# corrections. Enable later after routing validation.
+external_verifiers_enabled: false
+verifier_health_interval_seconds: 30
+
+# Cloud-first text verifier. The route key remains "pi5" internally only for
+# backwards-compatible database/schema handling; the UI labels it Cloud Text.
+text_verifier_provider: pi5
+text_cloud_base_url: "https://api.groq.com/openai/v1"
+text_cloud_model: "openai/gpt-oss-20b"
+text_cloud_fallback_model: "openai/gpt-oss-120b"
+text_cloud_api_key_env: "GROQ_API_KEY"
+text_cloud_timeout_seconds: 120
+text_cloud_reasoning_effort: "low"
+text_cloud_fallback_on_uncertain: false
+text_cloud_local_fallback_enabled: false
+# Free-tier guard: warn at 80%, stop new Groq calls at 90%. Groq's RPD
+# header is authoritative for requests; daily token use is tracked from this
+# app's actual response usage over a rolling 24-hour window.
+text_cloud_quota_guard_enabled: true
+text_cloud_free_daily_request_limit: 1000
+text_cloud_free_daily_token_limit: 200000
+text_cloud_quota_warn_fraction: 0.80
+text_cloud_quota_stop_fraction: 0.90
+text_cloud_quota_state_path: "/data/db/groq_quota.json"
+text_cloud_health_interval_seconds: 21600
+
+# Explicit provider selection. No automatic cloud↔offline fallback.
+# Text: groq = Cloud, pi5 = Offline. Vision: groq = Cloud, oneplus = Offline.
+vision_verifier_provider: oneplus
+vision_cloud_model: "qwen/qwen3.8-27b"
+# OCR/text reconstruction always uses a source-image crop around the Docling target.
+# Whole-page fallback is disabled by default to prevent unrelated transcription.
+stage2b_text_target_crop_scale: 2.5
+stage2b_text_target_crop_x_margin_points: 30
+stage2b_text_target_crop_y_margin_points: 14
+stage2b_text_target_crop_max_vertical_fraction: 0.12
+stage2b_text_allow_full_page_fallback: false
+vision_cloud_timeout_seconds: 120
+groq_usage_log_max_entries: 2000
+# Paid-equivalent estimate only; free-tier usage remains ₹0 while within allowance.
+text_cloud_input_cost_per_million_usd: 0.075
+text_cloud_output_cost_per_million_usd: 0.30
+text_cloud_fallback_input_cost_per_million_usd: 0.15
+text_cloud_fallback_output_cost_per_million_usd: 0.60
+vision_cloud_input_cost_per_million_usd: 0.80
+vision_cloud_output_cost_per_million_usd: 4.00
+
+# Stage 2B external verification execution. Manual mode is the safe default.
+stage2b_enabled: true
+stage2b_poll_interval_seconds: 2
+stage2b_pi5_auto_run: false
+stage2b_oneplus_auto_run: false
+stage2b_pi5_paused: false
+stage2b_oneplus_paused: false
+stage2b_request_timeout_seconds: 240
+stage2b_pi5_job_timeout_seconds: 300
+# OnePlus vision streams output. Allow up to 20 minutes before the first generated
+# content, then require some stream activity at least every 5 minutes. A normal
+# request finishes immediately on finish_reason/[DONE]. Set job timeout to 0 so
+# there is no arbitrary total-duration ceiling; first-output/idle timers still detect a dead stream.
+stage2b_oneplus_first_token_timeout_seconds: 1200
+stage2b_oneplus_stream_idle_timeout_seconds: 300
+stage2b_oneplus_job_timeout_seconds: 0
+stage2b_retry_delay_seconds: 15
+stage2b_retry_max_delay_seconds: 300
+# Retryable network/server failures get at most two re-attempts after the
+# initial request. This prevents a dead endpoint from cycling forever.
+stage2b_max_retries: 2
+stage2b_pi5_max_tokens: 512
+stage2b_oneplus_max_tokens: 384
+stage2b_vision_crops_enabled: true
+stage2b_vision_crop_overlap: 0.20
+stage2b_vision_crop_upscale: 1.25
+stage2b_vision_max_crops: 4
+
+# Stage 2C conservative text correction + vision enrichment overlays.
+stage2c_enabled: true
+stage2c_text_correction_enabled: true
+stage2c_vision_enrichment_enabled: true
+stage2c_correction_min_confidence: 0.85
+stage2c_correction_min_garble_score: 0.12
+stage2c_pi5_correction_max_tokens: 512
+stage2c_correction_min_similarity: 0.45
+stage2c_correction_min_length_ratio: 0.50
+stage2c_correction_max_length_ratio: 1.80
+# Source-image text reconstruction is automatic. Human Review remains available only as
+# audit/manual override; unresolved cloud items retain immutable Docling text.
+stage2c_require_human_review: false
+stage2c_auto_finalize_after_stage2b: true
+stage2c_cloud_auto_apply: true
+stage2c_cloud_secondary_min_confidence: 0.90
+stage2b_text_auto_visual_crosscheck: false
+
+# Stage 3 HybridChunker runs on the existing Docling Serve IP above.
+# The app uploads corrected json_docling, so PDF/OCR conversion is not repeated.
+stage3_enabled: true
+stage3_chunk_tokenizer: "sentence-transformers/all-MiniLM-L6-v2"
+stage3_chunk_max_tokens: 256
+stage3_chunk_merge_peers: true
+stage3_chunk_use_markdown_tables: true
+stage3_chunk_include_raw_text: true
+# Docling may intentionally keep a coherent Markdown table slightly above max_tokens.
+# The local validator safely splits only oversized Markdown tables by whole rows.
+stage3_enforce_max_tokens: true
+stage3_table_split_repeat_header: true
+stage3_timeout_minutes: 30
+
+# OnePlus Termux llama.cpp control. The SSH password is supplied via the
+# ONEPLUS_SSH_PASSWORD container environment variable, never via this file.
+oneplus_ssh_host: "192.168.68.60"
+oneplus_ssh_port: 8022
+oneplus_ssh_user: "u0_a202"
+oneplus_ssh_password_env: "ONEPLUS_SSH_PASSWORD"
+oneplus_control_script_path: "$HOME/bin/oneplus-llama-control"
