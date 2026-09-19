@@ -1,0 +1,177 @@
+{
+  "schema": "docling-electrical-troubleshooting-holdout/v1",
+  "created_at": "2026-09-19",
+  "frozen": true,
+  "items": [
+    {
+      "id": "EH-001",
+      "query": "Breaker UVT won\u2019t trip. What should I inspect if there is not enough tripping force?",
+      "expected_postprocess_job_id": 2,
+      "expected_equipment_id": null,
+      "expected_source_filename": "marine-electrical-maintenance-and-troubleshooting-engine-room-equipment-pdf.pdf",
+      "expected_chunk_id": "CHK-000296",
+      "expected_pages": [
+        72
+      ],
+      "category": "troubleshooting",
+      "scope_status": "awaiting_equipment_assignment",
+      "note": "Frozen electrical troubleshooting holdout v1; do not tune against this set."
+    },
+    {
+      "id": "EH-002",
+      "query": "ACB does not trip on overload or short circuit \u2014 what should I check on the shunt release?",
+      "expected_postprocess_job_id": 2,
+      "expected_equipment_id": null,
+      "expected_source_filename": "marine-electrical-maintenance-and-troubleshooting-engine-room-equipment-pdf.pdf",
+      "expected_chunk_id": "CHK-000303",
+      "expected_pages": [
+        73
+      ],
+      "category": "troubleshooting",
+      "scope_status": "awaiting_equipment_assignment",
+      "note": "Frozen electrical troubleshooting holdout v1; do not tune against this set."
+    },
+    {
+      "id": "EH-003",
+      "query": "Manual trip push button won\u2019t trip the breaker and the anti-burnout switch is defective. What is the remedy?",
+      "expected_postprocess_job_id": 2,
+      "expected_equipment_id": null,
+      "expected_source_filename": "marine-electrical-maintenance-and-troubleshooting-engine-room-equipment-pdf.pdf",
+      "expected_chunk_id": "CHK-000317",
+      "expected_pages": [
+        74
+      ],
+      "category": "troubleshooting",
+      "scope_status": "awaiting_equipment_assignment",
+      "note": "Frozen electrical troubleshooting holdout v1; do not tune against this set."
+    },
+    {
+      "id": "EH-004",
+      "query": "Pump sensor alarm says the analog signal is outside range. What current should I see and what wiring checks should I make?",
+      "expected_postprocess_job_id": 2,
+      "expected_equipment_id": null,
+      "expected_source_filename": "marine-electrical-maintenance-and-troubleshooting-engine-room-equipment-pdf.pdf",
+      "expected_chunk_id": "CHK-000736",
+      "expected_pages": [
+        175
+      ],
+      "category": "troubleshooting",
+      "scope_status": "awaiting_equipment_assignment",
+      "note": "Frozen electrical troubleshooting holdout v1; do not tune against this set."
+    },
+    {
+      "id": "EH-005",
+      "query": "MPC fuse F9 is blown. What does it affect and what should I check before replacing the fuse?",
+      "expected_postprocess_job_id": 2,
+      "expected_equipment_id": null,
+      "expected_source_filename": "marine-electrical-maintenance-and-troubleshooting-engine-room-equipment-pdf.pdf",
+      "expected_chunk_id": "CHK-000747",
+      "expected_pages": [
+        179,
+        180
+      ],
+      "category": "troubleshooting",
+      "scope_status": "awaiting_equipment_assignment",
+      "note": "Frozen electrical troubleshooting holdout v1; do not tune against this set."
+    },
+    {
+      "id": "EH-006",
+      "query": "ELVA valve internal fault: exhaust valve does not activate. What should I check and replace?",
+      "expected_postprocess_job_id": 2,
+      "expected_equipment_id": null,
+      "expected_source_filename": "marine-electrical-maintenance-and-troubleshooting-engine-room-equipment-pdf.pdf",
+      "expected_chunk_id": "CHK-000777",
+      "expected_pages": [
+        190
+      ],
+      "category": "troubleshooting",
+      "scope_status": "awaiting_equipment_assignment",
+      "note": "Frozen electrical troubleshooting holdout v1; do not tune against this set."
+    },
+    {
+      "id": "EH-007",
+      "query": "Steering rudder turning is very slow. What pump, bypass-valve, pilot-valve and relief-valve checks are listed?",
+      "expected_postprocess_job_id": 4,
+      "expected_equipment_id": null,
+      "expected_source_filename": "marine-electrical-maintenance-and-troubleshooting-deck-and-hull-machinery-pdf.pdf",
+      "expected_chunk_id": "CHK-000327",
+      "expected_pages": [
+        73
+      ],
+      "category": "troubleshooting",
+      "scope_status": "awaiting_equipment_assignment",
+      "note": "Frozen electrical troubleshooting holdout v1; do not tune against this set."
+    },
+    {
+      "id": "EH-008",
+      "query": "Rudder only moves one direction. Which hydraulic faults and checks should I look at?",
+      "expected_postprocess_job_id": 4,
+      "expected_equipment_id": null,
+      "expected_source_filename": "marine-electrical-maintenance-and-troubleshooting-deck-and-hull-machinery-pdf.pdf",
+      "expected_chunk_id": "CHK-000329",
+      "expected_pages": [
+        73
+      ],
+      "category": "troubleshooting",
+      "scope_status": "awaiting_equipment_assignment",
+      "note": "Frozen electrical troubleshooting holdout v1; do not tune against this set."
+    },
+    {
+      "id": "EH-009",
+      "query": "Package compressor will not start. What electrical, motor and solenoid-valve causes should I check?",
+      "expected_postprocess_job_id": 4,
+      "expected_equipment_id": null,
+      "expected_source_filename": "marine-electrical-maintenance-and-troubleshooting-deck-and-hull-machinery-pdf.pdf",
+      "expected_chunk_id": "CHK-001463",
+      "expected_pages": [
+        199
+      ],
+      "category": "troubleshooting",
+      "scope_status": "awaiting_equipment_assignment",
+      "note": "Frozen electrical troubleshooting holdout v1; do not tune against this set."
+    },
+    {
+      "id": "EH-010",
+      "query": "Refrigeration compressor has low or no oil pressure. What causes and remedies are listed?",
+      "expected_postprocess_job_id": 4,
+      "expected_equipment_id": null,
+      "expected_source_filename": "marine-electrical-maintenance-and-troubleshooting-deck-and-hull-machinery-pdf.pdf",
+      "expected_chunk_id": "CHK-001498",
+      "expected_pages": [
+        205
+      ],
+      "category": "troubleshooting",
+      "scope_status": "awaiting_equipment_assignment",
+      "note": "Frozen electrical troubleshooting holdout v1; do not tune against this set."
+    },
+    {
+      "id": "EH-011",
+      "query": "Gas alarm unit error E05 or E06: detector filament current is wrong. What action is required?",
+      "expected_postprocess_job_id": 4,
+      "expected_equipment_id": null,
+      "expected_source_filename": "marine-electrical-maintenance-and-troubleshooting-deck-and-hull-machinery-pdf.pdf",
+      "expected_chunk_id": "CHK-001753",
+      "expected_pages": [
+        273
+      ],
+      "category": "troubleshooting",
+      "scope_status": "awaiting_equipment_assignment",
+      "note": "Frozen electrical troubleshooting holdout v1; do not tune against this set."
+    },
+    {
+      "id": "EH-012",
+      "query": "Loop I/O input 1 cable break fault \u2014 what should I check between the input and end-of-line resistor?",
+      "expected_postprocess_job_id": 4,
+      "expected_equipment_id": null,
+      "expected_source_filename": "marine-electrical-maintenance-and-troubleshooting-deck-and-hull-machinery-pdf.pdf",
+      "expected_chunk_id": "CHK-002012",
+      "expected_pages": [
+        288
+      ],
+      "category": "troubleshooting",
+      "scope_status": "awaiting_equipment_assignment",
+      "note": "Frozen electrical troubleshooting holdout v1; do not tune against this set."
+    }
+  ],
+  "usage_note": "Keep frozen. Production machine benchmark requires explicit equipment assignment; manual-proxy baseline is diagnostic only."
+}

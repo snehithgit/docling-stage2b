@@ -1,0 +1,42 @@
+services:
+  docling-autoconvert:
+    build: .
+    container_name: docling-autoconvert
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      CONFIG_PATH: /app/config.yaml
+      ONEPLUS_SSH_PASSWORD: ${ONEPLUS_SSH_PASSWORD:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+    volumes:
+      - ./config.yaml:/app/config.yaml
+      - ./input:/data/input
+      - ./converted:/data/output
+      - ./processed:/data/processed
+      - ./data:/data/db
+    depends_on:
+      - embeddings
+
+  embeddings:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
+    container_name: docling-embeddings
+    restart: unless-stopped
+    ports:
+      - "8090:80"
+    volumes:
+      - ./embedding-cache:/data
+    environment:
+      OMP_NUM_THREADS: "4"
+      MKL_NUM_THREADS: "4"
+      RAYON_NUM_THREADS: "4"
+    command:
+      - --model-id
+      - BAAI/bge-small-en-v1.5
+      - --max-client-batch-size
+      - "32"
+      - --max-batch-tokens
+      - "8192"
+      - --auto-truncate
+    mem_limit: 1g
+    cpus: "4.0"

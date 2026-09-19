@@ -1,0 +1,161 @@
+{
+  "version": "2026.09.11.22",
+  "manuals": [
+    {
+      "name": "Hydraulics",
+      "pages": 403,
+      "texts": 5209,
+      "tables": 39,
+      "seconds": 2.45,
+      "coverage": "warning",
+      "empty_text": 27,
+      "geometry": 0,
+      "unicode": 0,
+      "table_grid": 0,
+      "graph": 0,
+      "recall_eligible": 53,
+      "recall_strong": 1,
+      "recall_weak": 52,
+      "recall_omitted": 0,
+      "table_recall": 0,
+      "table_structural_ocr": 2,
+      "routes": 116,
+      "pi5_routes": 100,
+      "vision_routes": 14,
+      "heading_status": "consistent",
+      "heading_checked": 489,
+      "heading_total": 547
+    },
+    {
+      "name": "Deck & Hull",
+      "pages": 344,
+      "texts": 4194,
+      "tables": 520,
+      "seconds": 2.72,
+      "coverage": "warning",
+      "empty_text": 0,
+      "geometry": 0,
+      "unicode": 0,
+      "table_grid": 1,
+      "graph": 0,
+      "recall_eligible": 59,
+      "recall_strong": 9,
+      "recall_weak": 50,
+      "recall_omitted": 0,
+      "table_recall": 36,
+      "table_structural_ocr": 15,
+      "routes": 137,
+      "pi5_routes": 128,
+      "vision_routes": 7,
+      "heading_status": "consistent",
+      "heading_checked": 732,
+      "heading_total": 1102
+    },
+    {
+      "name": "Engine Room",
+      "pages": 492,
+      "texts": 7380,
+      "tables": 502,
+      "seconds": 3.85,
+      "coverage": "warning",
+      "empty_text": 0,
+      "geometry": 98,
+      "unicode": 0,
+      "table_grid": 6,
+      "graph": 0,
+      "recall_eligible": 72,
+      "recall_strong": 15,
+      "recall_weak": 57,
+      "recall_omitted": 0,
+      "table_recall": 50,
+      "table_structural_ocr": 24,
+      "routes": 180,
+      "pi5_routes": 169,
+      "vision_routes": 9,
+      "heading_status": "consistent",
+      "heading_checked": 626,
+      "heading_total": 1085
+    },
+    {
+      "name": "MacGregor",
+      "pages": 454,
+      "texts": 17498,
+      "tables": 137,
+      "seconds": 2.82,
+      "coverage": "warning",
+      "empty_text": 0,
+      "geometry": 2,
+      "unicode": 4,
+      "table_grid": 7,
+      "graph": 0,
+      "recall_eligible": 155,
+      "recall_strong": 3,
+      "recall_weak": 152,
+      "recall_omitted": 0,
+      "table_recall": 12,
+      "table_structural_ocr": 5,
+      "routes": 264,
+      "pi5_routes": 214,
+      "vision_routes": 48,
+      "heading_status": "limited",
+      "heading_checked": 48,
+      "heading_total": 978
+    },
+    {
+      "name": "GRAB-SMAG sample",
+      "pages": 95,
+      "texts": 2384,
+      "tables": 46,
+      "seconds": 0.44,
+      "coverage": "ok",
+      "empty_text": 0,
+      "geometry": 0,
+      "unicode": 0,
+      "table_grid": 0,
+      "graph": 0,
+      "recall_eligible": 3,
+      "recall_strong": 0,
+      "recall_weak": 3,
+      "recall_omitted": 0,
+      "table_recall": 4,
+      "table_structural_ocr": 0,
+      "routes": 27,
+      "pi5_routes": 26,
+      "vision_routes": 0,
+      "heading_status": "consistent",
+      "heading_checked": 33,
+      "heading_total": 221
+    }
+  ],
+  "critical_scope_replay": {
+    "R00038": {
+      "accepted": false,
+      "status": "UNRESOLVED",
+      "reasons": [
+        "ONLY_CONTEXT_OR_ADJACENT_BLOCK_RETURNED"
+      ]
+    },
+    "R00031": {
+      "accepted": false,
+      "status": "UNRESOLVED",
+      "reasons": [
+        "NO_TARGET_LEXICAL_OVERLAP",
+        "EXCESSIVE_TARGET_CONTRACTION"
+      ]
+    }
+  },
+  "pdf_mismatch_guard": {
+    "status": "checked",
+    "findings": [
+      {
+        "kind": "pdf_page_count_mismatch",
+        "pdf_pages": 649,
+        "json_pages": 454,
+        "note": "Page-aligned text/geometry comparison withheld because page alignment is not reliable."
+      }
+    ],
+    "pages_compared": 0,
+    "pdf_pages": 649,
+    "json_pages": 454
+  }
+}
