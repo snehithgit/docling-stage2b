@@ -168,12 +168,12 @@ def test_quality_page_is_diagnostic_and_links_back_to_book_workflow():
     assert "/api/stage3/books/${id}/build" not in js
 
 
-def test_book_workflow_uses_automatic_stage2c_and_optional_audit():
+def test_book_workflow_uses_automatic_stage2c_and_explicit_audit_gate():
     html = read("book.html")
     js = read("book.js")
     assert "Hybrid" in html
     assert "Automatic corrections & enrichment" in js
-    assert "Review is optional" in js
+    assert "Verifier Audit remains a human gate" in js
     assert "Keep original if unreadable" in js
     assert "Build Hybrid chunks" in js
     assert "/api/postprocess/jobs/${jobId}/human-review" in js
@@ -247,7 +247,7 @@ def test_review_keeps_optional_manual_override_surface():
     assert "Original text is correct" in html
     assert "/corrections/${encodeURIComponent(entryId)}" in js
 
-def test_cloud_workflow_exposes_quota_pause_without_requiring_human_gate():
+def test_cloud_workflow_exposes_quota_pause_independently_from_audit_gate():
     html = read("book.html")
     js = read("book.js")
     verification_html = read("verification.html")
@@ -255,7 +255,7 @@ def test_cloud_workflow_exposes_quota_pause_without_requiring_human_gate():
     assert 'id="book-quota-alert"' in html
     assert 'id="cloud-quota-alert"' in verification_html
     assert "Cloud quota paused" in js
-    assert "Review is optional" in js
+    assert "Verifier Audit remains a human gate" in js
     assert "Groq requests are paused before the configured safety reserve" in verification_js
     assert "queued Groq routes remain pending" in verification_js
 
@@ -573,3 +573,17 @@ def test_dashboard_recent_documents_renderer_is_defensive():
     assert 'const body = $("#jobs-body");' in js
     assert 'if (!body) return;' in js
     assert 'renderJobs(data.jobs);' in js
+
+
+def test_book_workflow_always_exposes_audit_testing_bypass_control():
+    js = read("book.js")
+    assert "Bypass audit for testing" in js
+    assert "Remove audit bypass" in js
+    assert "/api/postprocess/jobs/${jobId}/verifier-audit/bypass" in js
+    assert "window.confirm" in js
+    assert "They are NOT accepted" in js
+    assert "always visible at the top of this Book workflow page" in js
+    html = read("book.html")
+    assert 'id="book-audit-bypass-panel"' in html
+    assert 'id="book-audit-bypass-button"' in html
+    assert "Bypass audit for testing" in html

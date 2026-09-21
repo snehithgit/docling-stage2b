@@ -1,3 +1,25 @@
+## .40.8B completed — Safety/concurrency closure
+
+- [x] Safe Git publishing with `.gitignore`, no `.git` deletion and no force-push.
+- [x] Local verifier transport outages reach the circuit breaker instead of becoming fake completed evidence.
+- [x] Rerun correction generations reconcile to one active source entry; human decisions remain authoritative.
+- [x] Duplicate watcher submissions are blocked atomically by source identity.
+- [x] Manual cross-check uses the shared correction-ledger lock.
+- [x] Groq calls reserve in-flight requests/tokens before HTTP.
+- [x] Book workflow shows the Verifier Audit testing bypass for every book with Yes/No confirmation.
+- [x] SQLite/SMB audit item intentionally omitted as non-applicable to the real container deployment.
+
+## .40.8A.2 completed — Complete verification-candidate coverage
+
+- [x] Stage 2A collects/deduplicates every detected verification candidate before applying a ceiling.
+- [x] Global priority/score ordering runs before the safety ceiling, so late visual routes cannot be starved by earlier OCR noise.
+- [x] Default route safety ceiling raised from 500 to 5000.
+- [x] Candidates beyond the ceiling are retained in `deferred_routes` with explicit total/deferred/per-code/per-target counts; silent discard is eliminated.
+- [x] Stage 2B durable pending-queue behavior is unchanged.
+- [x] Quality/Book UI and Telegram monitoring expose queued/total/deferred coverage.
+- [x] Duplicate route lookup no longer linearly rescans the growing candidate list.
+- [x] Regression suite: 452/452 tests pass.
+
 ## .40.8A completed — Trusted-decision and correction integrity
 
 - [x] Preserve human-verified ledger entries across Stage 2A regeneration.
@@ -8,7 +30,7 @@
 - [x] Replace verb-set remedy preservation with counted `(verb, object-span)` obligations.
 - [x] Preserve compatibility field `missing_action_verbs` and add `missing_action_obligations`.
 - [x] Carry table-cell row/column start/end spans through Stage 2A/2B metadata, including merged cells.
-- [x] Reject table-wide repeated-value inference as unsafe; defer structural binding enforcement to `.40.8B`.
+- [x] Reject table-wide repeated-value inference as unsafe; defer structural binding enforcement to a later correctness pass.
 - [x] Regression suite: 450/450 tests pass.
 
 ## .40.7.1 completed — Verifier Audit + Telegram monitoring
@@ -71,7 +93,7 @@
 # Project completed implementation
 
 Last updated: 2026-09-21  
-Current release: `2026.09.21.40.8A.1`
+Current release: `2026.09.21.40.8B`
 
 Do not redesign/reacquire these items without a specific regression or requirement.
 

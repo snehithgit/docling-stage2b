@@ -3,67 +3,80 @@ set -euo pipefail
 
 REPO="snehithgit/docling-stage2b"
 BRANCH="main"
+COMMIT_MESSAGE="Update Marine Pipeline Studio source"
 
-echo "======================================"
-echo " Docling Stage2B GitHub Publisher"
-echo "======================================"
-echo
-echo "Repository: $REPO"
-echo "Directory : $(pwd)"
-echo
+fail() { echo "ERROR: $*" >&2; exit 1; }
 
-if [ ! -f "Dockerfile" ] || [ ! -d "app" ]; then
-    echo "ERROR: Run this script from the docling-stage2b project root."
-    exit 1
-fi
-if ! command -v git >/dev/null 2>&1; then
-    echo "ERROR: git is not installed. Run: pkg install git -y"
-    exit 1
-fi
-if ! command -v gh >/dev/null 2>&1; then
-    echo "ERROR: GitHub CLI is not installed. Run: pkg install gh -y"
-    exit 1
-fi
-if ! gh auth status >/dev/null 2>&1; then
-    echo "ERROR: GitHub CLI is not authenticated. Run: gh auth login"
-    exit 1
-fi
+[ -f Dockerfile ] && [ -d app ] || fail "Run this script from the project root."
+[ -f .gitignore ] || fail ".gitignore is missing; refusing to publish."
+command -v git >/dev/null 2>&1 || fail "git is not installed."
+command -v gh >/dev/null 2>&1 || fail "GitHub CLI is not installed."
+gh auth status >/dev/null 2>&1 || fail "GitHub CLI is not authenticated. Run: gh auth login"
 
-# Remove only obsolete bootstrap artifacts from the earlier failed upload method.
+PROJECT_DIR="$(pwd -P)"
+git config --global --add safe.directory "$PROJECT_DIR" 2>/dev/null || true
+
+# Remove only obsolete build-bootstrap artifacts. Never delete .git.
 rm -rf buildsrc source
 rm -f runtime.tar.xz
 
-# Recreate local Git metadata so the project can safely replace the old repo tree.
-# Android shared storage (/storage/emulated/0/...) is reported with different
-# ownership to Termux. Mark this exact project directory safe before Git reads
-# the freshly initialized repository, avoiding "detected dubious ownership".
-PROJECT_DIR="$(pwd -P)"
-git config --global --add safe.directory "$PROJECT_DIR" 2>/dev/null || true
-rm -rf .git
-git init
-git config --global --add safe.directory "$PROJECT_DIR" 2>/dev/null || true
-git branch -M "$BRANCH"
+new_repo=0
+if [ ! -d .git ]; then
+  new_repo=1
+  git init
+  git remote add origin "https://github.com/${REPO}.git"
+  # If the remote already has history, attach this working tree to that history
+  # without overwriting local files. This avoids force-push/history destruction.
+  if git fetch origin "$BRANCH" >/dev/null 2>&1; then
+    git update-ref "refs/heads/$BRANCH" FETCH_HEAD
+    git symbolic-ref HEAD "refs/heads/$BRANCH"
+    git reset --mixed "refs/heads/$BRANCH" >/dev/null
+  else
+    git branch -M "$BRANCH"
+  fi
+else
+  current_branch="$(git branch --show-current)"
+  [ "$current_branch" = "$BRANCH" ] || fail "Current branch is '$current_branch'. Checkout '$BRANCH' before publishing."
+  if git remote get-url origin >/dev/null 2>&1; then
+    git remote set-url origin "https://github.com/${REPO}.git"
+  else
+    git remote add origin "https://github.com/${REPO}.git"
+  fi
+fi
+
 git config user.name "$(gh api user --jq .login)"
 git config user.email "$(gh api user --jq '.id')+$(gh api user --jq .login)@users.noreply.github.com"
 
-git add .
-echo
+git add -A
+
+# Defense in depth: .gitignore is the primary protection, but refuse a publish
+# if a sensitive/runtime path is somehow already tracked or force-added.
+# .env.example is an intentionally committed template (no real credentials) and
+# is explicitly un-ignored in .gitignore, so it is exempt from this guard too.
+forbidden_re='(^|/)(\.env($|\.)|data/|input/|converted/|processed/|embedding-cache/|[^/]+\.(db|sqlite|sqlite3)($|-))'
+allowed_re='(^|/)\.env\.example$'
+if git ls-files | grep -E "$forbidden_re" | grep -vE "$allowed_re" >/dev/null 2>&1; then
+  echo "Refusing to publish because sensitive/runtime files are already tracked:" >&2
+  git ls-files | grep -E "$forbidden_re" | grep -vE "$allowed_re" >&2 || true
+  exit 2
+fi
+if git diff --cached --name-only | grep -E "$forbidden_re" | grep -vE "$allowed_re" >/dev/null 2>&1; then
+  echo "Refusing to publish because sensitive/runtime files are staged:" >&2
+  git diff --cached --name-only | grep -E "$forbidden_re" | grep -vE "$allowed_re" >&2 || true
+  exit 2
+fi
+
 echo "Files/changes to publish:"
 git status --short
+if git diff --cached --quiet; then
+  echo "No source changes to publish."
+  exit 0
+fi
 
-git commit -m "Stage-wise workflow UI and manual crossover review"
-git remote add origin "https://github.com/${REPO}.git"
+git commit -m "$COMMIT_MESSAGE"
+# Normal push only. If GitHub is ahead, stop and let the user reconcile history.
+git push origin "$BRANCH"
 
-echo
-echo "Replacing GitHub main branch with this project tree..."
-git push --force origin "$BRANCH"
-
-echo
-echo "Source uploaded. GitHub Actions will build:"
-echo "ghcr.io/$REPO:latest"
-echo
+echo "Source uploaded without rewriting Git history."
 sleep 3
 gh run list --repo "$REPO" --workflow docker-publish.yml --limit 3 || true
-echo
-echo "Watch the newest build with:"
-echo "gh run watch --repo $REPO"

@@ -3,7 +3,7 @@
 - Human-verified ledger entries remain authoritative across Stage 2A regeneration.
 - Manual cross-check evidence is non-destructive unless a new READABLE candidate passes the deterministic source-transcription safety gate.
 - Troubleshooting/remedy preservation compares counted obligations, not verb types.
-- Table-cell metadata preserves table/cell plus complete row/column spans; structural binding enforcement at overlay application is the `.40.8B` follow-up.
+- Table-cell metadata preserves table/cell plus complete row/column spans; structural binding enforcement at overlay application remains a later correctness follow-up.
 
 ## .40.5 rule/freshness behavior
 
@@ -15,7 +15,7 @@
 
 # Stage-wise book and Machine RAG workflow
 
-Version: `2026.09.21.40.8A.1`
+Version: `2026.09.21.40.8B`
 
 ## Hard sequence
 
@@ -67,3 +67,7 @@ Cross-page stitching is allowed only when chunks remain consecutive, share the e
 ## Full technical-artifact worker pool
 
 This is intentionally separate from normal Vision verification. Normal Vision routes use exactly the selected Pi5, OnePlus, or Groq provider. `FULL_TECHNICAL_VISUAL` sweeps are large local batch work and use one shared Pi5 + OnePlus pool. An idle worker atomically claims one pending artifact, finishes it, then asks for another. Faster/healthier devices therefore complete more work naturally. A paused worker claims nothing. Transport/server failures trigger a short per-device cooldown while the other worker continues; the failed row returns to the shared pool and can be completed by either device after its retry delay. A request already in flight is never duplicated; if a device hangs mid-request, the other device continues with the rest of the pool and the stuck row becomes stealable only after the existing request liveness timeout returns it to pending.
+
+## `.40.8B` gate visibility
+
+Book workflow exposes the testing audit bypass on every book. It becomes actionable only after current Stage 2B normal + required artifact work completes. The bypass changes gate readiness only; it never marks unresolved evidence accepted.

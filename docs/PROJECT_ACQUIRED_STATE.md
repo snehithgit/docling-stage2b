@@ -1,10 +1,25 @@
+## .40.8B acquired state
+
+- No new model, cloud service, NLP dependency or database engine was added.
+- Existing Stage 2B pending queue, endpoint circuit breakers, correction ledger, Groq guard and Book workflow are reused.
+- New persistent source artifact: root `.gitignore`.
+- Groq in-flight reservations are intentionally process-local because a process restart cancels those HTTP requests.
+- Audit bypass continues to persist in `verifier_audit_gate.json`; unresolved evidence is not modified.
+
+## .40.8A.2 acquired state
+
+- Stage 2A route coverage now means complete candidate collection followed by global ranking; `max_routes_per_document` is only a 5000-route safety ceiling.
+- Safety-ceiling overflow is retained/audited as `deferred_routes`; normal expected state is `deferred: 0`.
+- Existing Stage 2B `verification_jobs(status="pending")` remains the backlog mechanism; no new batch tier or schema was added.
+- No new dependency/model/runtime was acquired.
+
 ## .40.8A acquired state
 
 - Trusted human decisions now survive Stage 2A ledger regeneration.
 - Stage 2C fidelity rule is `stage2c-source-fidelity-v8` with counted action obligations.
 - Table-cell verification metadata now includes full row/column structural spans.
 - Existing Verifier Audit and Telegram monitoring baseline from `.40.7.1` is retained.
-- No new model/runtime/dependency was acquired for `.40.8A.1`.
+- No new model/runtime/dependency was acquired for `.40.8A.2`.
 
 ## .40.5 acquired state
 
@@ -17,7 +32,7 @@
 # Project acquired state
 
 Last updated: 2026-09-21
-Current code release: `2026.09.21.40.8A.1`
+Current code release: `2026.09.21.40.8B`
 
 ## Already acquired — do not rebuild unnecessarily
 

@@ -80,7 +80,7 @@ class AppConfig:
     postprocess_enabled: bool = True
     processed_dir: str = "/data/processed"
     postprocess_poll_interval_seconds: int = 5
-    max_routes_per_document: int = 500
+    max_routes_per_document: int = 5000
     # Generic document-internal OCR recall layer. These settings only create
     # extra Pi5 review candidates; they never auto-correct source text.
     stage2a_ocr_recall_enabled: bool = True

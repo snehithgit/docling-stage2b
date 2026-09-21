@@ -1,15 +1,15 @@
 # Required before the next retrieval phase
 
-1. Deploy `.40.8A.1` without deleting `processed/`, `converted/`, `input/`, `data/`, equipment registry state, or human audit decisions.
-2. Implement/verify `.40.8B` transactional index generations, explicit freshness versions, table structural-binding enforcement, Docling dead-task recovery and Groq in-flight reservation accounting.
-3. Implement only the measured `.40.8C` robustness items that improve real project behavior; do not add heavyweight NLP dependencies.
-4. Run **Revalidate all + rebuild** after the new Stage 2C/transactional freshness rules are deployed.
-5. Confirm Stage 3/retrieval/machine embeddings become current against the new fingerprints.
+1. Deploy `.40.8B` without deleting `processed/`, `converted/`, `input/`, `data/`, equipment registry state, or human audit decisions.
+2. Verify Book workflow audit bypass state on one test book; bypass must not accept unresolved evidence.
+3. Complete the still-open transactional retrieval/index freshness + Docling dead-task recovery work before final benchmark publication.
+4. Implement only measured robustness items that improve real project behavior; do not add heavyweight NLP dependencies.
+5. Run **Revalidate all + rebuild** after the remaining correctness/freshness rules are deployed.
 6. Only then run the fresh N150 machine-hybrid benchmark and electrical holdout.
 
 # Required for next phase
 
-Current baseline: `2026.09.21.40.8A.1`
+Current baseline: `2026.09.21.40.8B`
 
 ## No new model acquisition required
 
@@ -17,7 +17,7 @@ Use the existing N150 TEI CPU 1.9 + `BAAI/bge-small-en-v1.5` unless a later cont
 
 ## Deployment acceptance required before stronger ranking tuning
 
-After completing and deploying `.40.8B`/`.40.8C`:
+After completing and deploying the remaining correctness/robustness work:
 
 1. confirm TEI health and 384-dimensional BGE output;
 2. allow the strict pipeline to refresh any stale downstream artifacts;

@@ -891,3 +891,73 @@ def test_vision_review_priority_prefers_technical_diagram_over_decorative():
     routes = [r for r in build_routes({}, diagnostics, cfg)["routes"] if r["target"] == "oneplus"]
     by_class = {r["source"].get("class"): r for r in routes}
     assert by_class["engineering_drawing"]["review_priority_score"] > by_class["decorative_photo"]["review_priority_score"]
+
+
+def test_route_safety_ceiling_is_applied_after_global_priority_sort(tmp_path):
+    """Late vision candidates must not be starved by earlier low-priority OCR noise."""
+    cfg = AppConfig(database_path=str(tmp_path / "jobs.db"), max_routes_per_document=2)
+    diagnostics = {
+        "signals": [
+            {
+                "classification": "TEXT_REVIEW",
+                "code": "DOCUMENT_INTERNAL_OCR_RECALL",
+                "items": [
+                    {"text_index": 0, "page": 1, "routing_eligible": False, "reasons": ["low-0"]},
+                    {"text_index": 1, "page": 1, "routing_eligible": False, "reasons": ["low-1"]},
+                    {"text_index": 2, "page": 1, "routing_eligible": False, "reasons": ["low-2"]},
+                ],
+            },
+            {
+                "classification": "VISION_REVIEW",
+                "code": "LOW_CONFIDENCE_VISUAL",
+                "items": [
+                    {
+                        "picture_index": 9,
+                        "page": 2,
+                        "class": "engineering_drawing",
+                        "confidence": 0.2,
+                        "reason": "technical drawing needs review",
+                    }
+                ],
+            },
+        ]
+    }
+    result = build_routes({}, diagnostics, cfg)
+    queued = result["routes"]
+    assert len(queued) == 2
+    assert any(route["target"] == "oneplus" and route["source"].get("index") == 9 for route in queued)
+    assert result["summary"]["total_candidates_detected"] == 4
+    assert result["summary"]["routes_created"] == 2
+    assert result["summary"]["deferred"] == 2
+    assert result["summary"]["dropped"] == 0
+    assert result["summary"]["safety_valve_triggered"] is True
+    assert len(result["deferred_routes"]) == 2
+
+
+def test_route_safety_ceiling_reports_deferred_breakdown(tmp_path):
+    cfg = AppConfig(database_path=str(tmp_path / "jobs.db"), max_routes_per_document=1)
+    diagnostics = {
+        "signals": [
+            {
+                "classification": "TEXT_REVIEW",
+                "code": "DOCUMENT_INTERNAL_OCR_RECALL",
+                "items": [
+                    {"text_index": 0, "page": 1, "routing_eligible": False, "reasons": ["a"]},
+                    {"text_index": 1, "page": 1, "routing_eligible": False, "reasons": ["b"]},
+                ],
+            },
+            {
+                "classification": "VISION_REVIEW",
+                "code": "LOW_CONFIDENCE_VISUAL",
+                "items": [{"picture_index": 2, "page": 1, "class": "engineering_drawing", "confidence": 0.2}],
+            },
+        ]
+    }
+    result = build_routes({}, diagnostics, cfg)
+    summary = result["summary"]
+    assert summary["total_candidates_detected"] == 3
+    assert summary["routes_created"] == 1
+    assert summary["deferred"] == 2
+    assert sum(summary["deferred_by_code"].values()) == 2
+    assert sum(summary["deferred_by_target"].values()) == 2
+    assert result["policy"]["deferred_candidates_retained"] is True

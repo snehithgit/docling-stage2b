@@ -63,7 +63,7 @@ Every analysis package starts with an empty `correction_ledger.json`. Later stag
 postprocess_enabled: true
 processed_dir: /data/processed
 postprocess_poll_interval_seconds: 5
-max_routes_per_document: 500
+max_routes_per_document: 5000
 picture_review_confidence: 0.55
 heading_consistency_min_group: 4
 reading_order_inversion_threshold: 0.18
@@ -73,6 +73,8 @@ oneplus_url: http://192.168.68.60:8080
 external_verifiers_enabled: false
 verifier_health_interval_seconds: 30
 ```
+
+`max_routes_per_document` is a **runaway/corruption safety ceiling**, not a routine knowledge-coverage limit. Stage 2A first collects and deduplicates the complete candidate set from every diagnostic signal, computes review priority for all candidates, and only then applies the ceiling. The default is `5000`; normal manuals should report `deferred: 0`. If the safety ceiling is ever reached, `routes.json` records `total_candidates_detected`, `routes_created`, `deferred`, per-target/per-code deferred counts, and retains the full `deferred_routes` list. Nothing is silently discarded; raise the ceiling and rerun Stage 2A to queue the retained candidates. Stage 2B's durable `verification_jobs(status='pending')` table remains the only normal backlog mechanism.
 
 `external_verifiers_enabled` is deliberately false for Stage 2A. The UI still checks endpoint health/model information, but analysis does not yet spend model inference time or trust model-proposed corrections.
 

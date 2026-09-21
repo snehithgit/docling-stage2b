@@ -1,55 +1,39 @@
-# Current handoff — .40.8A
+# `.40.8B` handoff
 
-`.40.8A.1` is the current correctness baseline. Stage 2A regeneration now preserves `human_verified` ledger entries, manual text→vision cross-checks cannot reactivate superseded state or bypass the deterministic source-fidelity gate, and action/remedy preservation uses counted `(verb, object-span)` obligations under `stage2c-source-fidelity-v8`. Table-cell routes/crops/ledger entries now retain full Docling row/column spans, including merged cells.
+`.40.8B` is the current implementation baseline. It closes the user-selected safety/concurrency backlog while retaining `.40.8A.2` route coverage and `.40.8A` trusted-decision guarantees.
 
-Do **not** implement a table-wide repeated-value search to infer that a value moved rows; repeated technical values are normal and would cause false positives. `.40.8B` should enforce structural binding at overlay/application time using the persisted table/cell/span identity.
+## Closed in this release
 
-Next work is `.40.8B`: immutable retrieval/index generations with one atomic current pointer, explicit Stage 3/retrieval/embedding freshness versions, Docling forgotten-task resubmission, Groq in-flight quota reservations, and table structural-binding enforcement. `.40.8C` follows for measured robustness issues. Fresh production benchmarking comes only after those correctness/freshness changes.
+- Git publishing: root `.gitignore`, no `.git` deletion, no force-push, and refusal if secret/runtime/manual/database paths are tracked or staged.
+- Local verifier outages: transport/timeouts propagate to the existing Pi5/OnePlus endpoint circuit breaker instead of becoming fake completed `UNREADABLE` evidence.
+- Rerun reconciliation: one active automatic correction/enrichment per logical Docling source item; older generations remain superseded audit history; human-verified decisions stay authoritative.
+- Watcher race: same `(filename, source_sha256)` discovery is atomically get-or-created under a SQLite write transaction.
+- Manual cross-check: read/modify/upsert now uses the shared Stage 2C ledger lock.
+- Groq free-tier guard: request/token estimates are reserved in-flight before HTTP so concurrent calls cannot all pass the same reserve snapshot.
+- Book workflow: **Bypass audit for testing** is visible for every book, requires explicit confirmation, is disabled until required verification work completes, and never accepts unresolved evidence.
 
-Verifier Audit remains the human decision gate. Telegram remains monitoring-first. Raw Docling output is immutable and human decisions are highest authority.
+## Explicitly omitted
 
-Current release target: `2026.09.21.40.8A.1`
+The SQLite-on-SMB finding from the external review is not treated as a runtime defect because the inspected share was only a review/export path; the actual application runs in the container deployment.
 
-## Architecture
+## Already closed before this release
 
-`Docling -> Stage 2A -> normal Stage 2B -> Artifact Sweep -> Stage 2C ledger -> Verifier Audit gate -> Stage 3 canonical chunks -> table/context reconstruction -> retrieval index -> physical-machine embedding corpus -> Machine RAG -> optional explicitly selected generator`
+- `.40.8A.2`: Stage 2A collects/sorts the complete candidate set before its 5000-route runaway safety ceiling; deferred overflow is retained/reported instead of silently lost.
+- `.40.8A`: human-authority preservation, cross-check safety, counted troubleshooting-action obligations, and table row/column provenance.
+- `.40.7.1`: monitoring-first Telegram dashboard.
 
-Every downstream stage must consume a completed/current immediately-upstream stage. Upstream changes invalidate affected downstream artifacts.
+## Still open
 
-## Machine RAG
+- Atomic immutable retrieval/index generations with a single current pointer.
+- Explicit Stage 3 / retrieval / embedding freshness versions/fingerprints.
+- Persisted table structural-binding enforcement when overlays are consumed.
+- Docling forgotten-task (404) resubmission.
+- Config list-type validation.
+- Stage 3 table-cell correction provenance.
+- Equipment-scope allow-list enforcement on anchor/neighbors.
+- Blocking async endpoint cleanup, more exact token budgeting, HTTP-client lifetime, recursion guard, verifier schema robustness, Telegram tests.
+- Stronger claim ↔ cited-evidence support checking.
 
-- Production embeddings are one complete corpus per physical machine across all **Current/authoritative** manuals.
-- Historical/Draft revisions stay auditable but are excluded from normal Machine RAG.
-- `.40.4` may reuse unchanged vectors internally during rebuild, but it still atomically publishes one complete machine index.
-- Single-book scope is lexical/audit only. No normal all-books RAG exists.
-- Generation may combine multiple manuals only inside the explicitly selected machine.
+Do not publish the final production benchmark until the remaining correctness/freshness work is closed, then run **Revalidate all + rebuild** and the fresh N150 machine-scoped BGE benchmark/holdout.
 
-## `.40.4` additions
-
-- adjacent-page same-Docling-table reconstruction;
-- bounded table-header/continuation anchors;
-- technical conditional/imperative/fault-remedy prose signal;
-- page OCR-risk + 0–100 verifier review-priority ordering inside existing bands;
-- structured-ID subject/position weighting;
-- BGE semantic-intent near-tie signal using cached prototypes and the existing query embedding;
-- incremental vector reuse for machine rebuilds;
-- manual revision/authority metadata;
-- equipment-aware benchmark cases;
-- explicit fresh machine-hybrid benchmark action for deployed N150/TEI.
-
-## Benchmark references
-
-- `.40.3` frozen 133 lexical source result: Top-1 72.18%, Top-3 88.72%, Top-5 92.48%, Top-10 94.74%, MRR 0.80944.
-- historical structured-ID guarded candidate replay: Top-1 83.46%, Top-3 93.23%, Top-5 96.99%, Top-10 98.50%, MRR 0.89105.
-- Do **not** call 83.46% a fresh `.40.4` N150 result.
-- Do not run the final production benchmark yet; complete `.40.8B` transactional/freshness correctness first, then `.40.8C` robustness and Revalidate all + rebuild.
-
-## Read first
-
-- `docs/PROJECT_TRACKER.md`
-- `docs/PROJECT_COMPLETED.md`
-- `docs/PROJECT_IMPLEMENTATION_TODO.md`
-- `docs/PROJECT_ACQUIRED_STATE.md`
-- `docs/REQUIRED_FOR_NEXT_PHASE.md`
-- `docs/STAGEWISE_WORKFLOW.md`
-- `docs/retrieval-structural-hardening-2026.09.18.40.4.md`
+Current release target: `2026.09.21.40.8B`

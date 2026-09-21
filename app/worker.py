@@ -275,14 +275,15 @@ class ConversionWorker:
             ):
                 continue
 
-            await self._store.create_pending(
+            _job_id, created = await self._store.create_pending_once(
                 path.name,
                 list(config.to_formats),
                 source_size=size,
                 source_mtime_ns=mtime_ns,
                 source_sha256=sha256,
             )
-            self._events.notify("file_discovered")
+            if created:
+                self._events.notify("file_discovered")
 
     def _is_stable(self, path: Path) -> bool:
         try:

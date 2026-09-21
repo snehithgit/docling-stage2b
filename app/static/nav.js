@@ -55,7 +55,7 @@
 })();
 
 (() => {
-  const version = "2026.09.21.40.8A.1";
+  const version = "2026.09.21.40.8B";
   const sidebar = document.querySelector('.sidebar');
   if (!sidebar) return;
   const badge = document.createElement('div');

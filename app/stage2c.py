@@ -1067,6 +1067,139 @@ def revalidate_unreviewed_text_entries(result_dir: Path, updates: dict[str, dict
     return changed
 
 
+def _logical_entry_source_key(entry: dict[str, Any]) -> tuple[Any, ...] | None:
+    """Stable source identity used to reconcile rerun generations.
+
+    Route IDs and generation hashes are execution identities, not source
+    identities. One canonical correction/enrichment is allowed per Docling
+    source item; historical entries remain in the ledger as superseded audit
+    evidence.
+    """
+    entry_type = str(entry.get("entry_type") or "")
+    if entry_type == "text_correction":
+        source_type = str(entry.get("source_type") or "text")
+        if source_type == "table_cell":
+            table_index = entry.get("table_index")
+            cell_index = entry.get("cell_index")
+            if table_index is None or cell_index is None:
+                return None
+            return ("text", "table_cell", int(table_index), int(cell_index))
+        source_index = entry.get("source_index")
+        if source_index is None:
+            return None
+        return ("text", "text", int(source_index))
+    if entry_type == "vision_enrichment":
+        source_index = entry.get("source_index")
+        if source_index is None:
+            return None
+        return ("vision", int(source_index))
+    return None
+
+
+def _human_decision_epoch(entry: dict[str, Any]) -> float:
+    review = entry.get("human_review") if isinstance(entry.get("human_review"), dict) else {}
+    for value in (
+        entry.get("human_visual_decided_at_epoch"),
+        review.get("saved_at_epoch"),
+        entry.get("created_at_epoch"),
+    ):
+        try:
+            return float(value or 0.0)
+        except (TypeError, ValueError):
+            continue
+    return 0.0
+
+
+def _supersede_for_reconciliation(entry: dict[str, Any], winner: dict[str, Any], reason: str) -> bool:
+    if entry is winner:
+        return False
+    changed = False
+    if str(entry.get("status") or "") != "superseded":
+        entry["previous_status"] = entry.get("status")
+        entry["previous_status_reason"] = entry.get("status_reason")
+        entry["status"] = "superseded"
+        entry["status_reason"] = reason
+        entry["superseded_at_epoch"] = time.time()
+        changed = True
+    if str(entry.get("superseded_by_entry_id") or "") != str(winner.get("entry_id") or ""):
+        entry["superseded_by_entry_id"] = winner.get("entry_id")
+        changed = True
+    return changed
+
+
+def reconcile_correction_generations(entries: list[dict[str, Any]], preferred_entry_id: str | None = None) -> int:
+    """Reconcile rerun generations to one active entry per source item.
+
+    Human-reviewed decisions outrank every automatic rerun. Otherwise the
+    generation containing ``preferred_entry_id`` (the entry currently being
+    upserted) is authoritative over older generations. Vision candidates inside
+    the same generation retain the existing evidence rule: applied evidence
+    wins and the normal picture route wins ties over artifact-sweep evidence.
+    """
+    groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    for entry in entries:
+        key = _logical_entry_source_key(entry)
+        if key is not None:
+            groups.setdefault(key, []).append(entry)
+
+    changed = 0
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        humans = [entry for entry in group if bool(entry.get("human_verified"))]
+        if humans:
+            winner = max(humans, key=lambda e: (_human_decision_epoch(e), float(e.get("created_at_epoch") or 0.0)))
+            # Older releases could supersede a human decision during a rerun.
+            # Restore the latest human decision before suppressing automation.
+            if str(winner.get("status") or "") == "superseded" and winner.get("previous_status"):
+                winner["status"] = winner.get("previous_status")
+                winner["status_reason"] = winner.get("previous_status_reason") or "HUMAN_VERIFIED"
+                winner.pop("superseded_at_epoch", None)
+                winner.pop("superseded_by_entry_id", None)
+                changed += 1
+            for entry in group:
+                if _supersede_for_reconciliation(entry, winner, "SUPERSEDED_BY_HUMAN_DECISION"):
+                    changed += 1
+            continue
+
+        preferred = next((e for e in group if str(e.get("entry_id") or "") == str(preferred_entry_id or "")), None)
+        if preferred is not None:
+            current_generation = str(preferred.get("generation") or "")
+        else:
+            latest = max(group, key=lambda e: float(e.get("created_at_epoch") or 0.0))
+            current_generation = str(latest.get("generation") or "")
+        current = [e for e in group if str(e.get("generation") or "") == current_generation]
+        if not current:
+            continue
+
+        entry_type = str(current[0].get("entry_type") or "")
+        if entry_type == "vision_enrichment":
+            restored = {id(e): _restore_legacy_overlap_status(e) for e in current}
+            winner = max(
+                current,
+                key=lambda e: (
+                    1 if restored[id(e)][0] == "applied" else 0,
+                    1 if not _vision_entry_is_sweep(e) else 0,
+                    1 if preferred is e else 0,
+                    float(e.get("created_at_epoch") or 0.0),
+                ),
+            )
+            winner_status, winner_reason = restored[id(winner)]
+            if str(winner.get("status") or "") != winner_status or str(winner.get("status_reason") or "") != winner_reason:
+                winner["status"] = winner_status
+                winner["status_reason"] = winner_reason
+                winner.pop("superseded_at_epoch", None)
+                winner.pop("superseded_by_entry_id", None)
+                changed += 1
+        else:
+            winner = preferred if preferred in current else max(current, key=lambda e: float(e.get("created_at_epoch") or 0.0))
+
+        for entry in group:
+            if _supersede_for_reconciliation(entry, winner, "SUPERSEDED_BY_CURRENT_GENERATION"):
+                changed += 1
+    return changed
+
+
 def upsert_ledger_entry(result_dir: Path, source_zip_sha256: str, entry: dict[str, Any]) -> None:
     """Upsert by stable entry_id and rebuild chunk overlays atomically."""
     path = result_dir / "correction_ledger.json"
@@ -1100,6 +1233,7 @@ def upsert_ledger_entry(result_dir: Path, source_zip_sha256: str, entry: dict[st
             entry["manual_crosschecks"] = list(existing_entry.get("manual_crosschecks") or [])
     entries = [item for item in entries if str(item.get("entry_id")) != entry_id]
     entries.append(entry)
+    reconcile_correction_generations(entries, preferred_entry_id=entry_id)
     resolve_vision_overlap_entries(entries)
     entries.sort(key=lambda item: (str(item.get("entry_type")), str(item.get("route_id")), str(item.get("entry_id"))))
     ledger = {

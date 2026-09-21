@@ -668,3 +668,17 @@ See `docs/RELEASE_VALIDATION_2026.09.21.40.8A.1.md`.
 ## v2026.09.21.40.8A — Trusted-decision and correction integrity
 
 `.40.8A` hardens Stage 2A/2B/2C authority and source-fidelity invariants: human-verified ledger entries survive regeneration, manual source-image cross-checks cannot reactivate superseded state or bypass deterministic safety, troubleshooting remedies are compared as counted `(verb, object)` obligations rather than verb types, and table-cell row/column spans are preserved through the verification metadata path. No new dependency is added and raw Docling output remains immutable. See `docs/RELEASE_VALIDATION_2026.09.21.40.8A.md`.
+
+## v2026.09.21.40.8A.2 — Complete Stage 2A route coverage before safety ceiling
+
+Stage 2A no longer stops collecting verification candidates when the route ceiling is reached. It now collects/deduplicates all candidates across all diagnostics, globally sorts them by existing priority/score rules, and only then applies `max_routes_per_document`. The default ceiling is raised from 500 to 5000 and is explicitly a runaway/corruption safety valve, not a normal processing limit. Any candidates beyond the ceiling are retained in `routes.json` as `deferred_routes` with loud summary counts; the normal Stage 2B `pending` queue remains unchanged. Quality/Book UI and Telegram monitoring show queued/total route coverage and deferred counts. The route dedup lookup is also O(1) by key instead of rescanning the growing route list.
+
+See `docs/RELEASE_VALIDATION_2026.09.21.40.8A.2.md`.
+
+## v2026.09.21.40.8B — Safety/concurrency closure + Book Flow audit bypass
+
+`.40.8B` closes the selected September 21 safety/concurrency findings without changing the trusted-decision and route-coverage architecture from `.40.8A.2`: Git publishing no longer deletes history or force-pushes and now refuses staged/tracked secret/runtime paths; verifier transport outages propagate to the existing circuit breaker instead of becoming fake completed evidence; correction rerun generations reconcile to one current automatic entry while human decisions remain authoritative; duplicate document discovery is serialized transactionally; manual cross-check ledger writes use the shared Stage 2C lock; and Groq uses in-flight quota reservations. The reported SQLite-over-SMB finding is intentionally omitted because it came from the review/share environment, not the real container deployment.
+
+The Book Flow page now shows **Bypass audit for testing** for every book. The control remains visible but disabled until required verification is complete, requires confirmation, never accepts unresolved evidence, and can be removed to re-enforce the audit gate.
+
+Validation: **463/463 tests pass** before packaging; the release ZIP is separately revalidated. See `docs/RELEASE_VALIDATION_2026.09.21.40.8B.md`.

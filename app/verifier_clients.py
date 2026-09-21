@@ -59,15 +59,27 @@ class GroqStructuredVerifier:
         if not self.api_key:
             return EndpointHealth(False, model=self.default_model, detail="GROQ_API_KEY not configured")
         try:
+            reservation_id = None
             if self.quota_guard is not None:
-                await self.quota_guard.before_request(0)
+                if hasattr(self.quota_guard, "reserve_request"):
+                    reservation = await self.quota_guard.reserve_request(0)
+                    reservation_id = reservation.get("reservation_id")
+                else:
+                    await self.quota_guard.before_request(0)
             async with httpx.AsyncClient(timeout=self.timeout, headers=self._headers()) as client:
                 started = time.monotonic()
-                response = await client.get(f"{self.base_url}/models/{self.default_model}")
+                try:
+                    response = await client.get(f"{self.base_url}/models/{self.default_model}")
+                except BaseException:
+                    if self.quota_guard is not None:
+                        if hasattr(self.quota_guard, "release_reservation"):
+                            await self.quota_guard.release_reservation(reservation_id)
+                    raise
                 if self.quota_guard is not None:
                     await self.quota_guard.record_response(
                         response, model=self.default_model, usage_tokens=0, call_kind="health",
                         latency_seconds=time.monotonic() - started, context={**self.usage_context, "purpose": "health"},
+                        reservation_id=reservation_id,
                     )
                 if response.status_code == 429:
                     snap = await self.quota_guard.snapshot() if self.quota_guard is not None else {}
@@ -118,11 +130,22 @@ class GroqStructuredVerifier:
         # the full configured completion ceiling. It is intentionally biased
         # toward stopping early on the free tier.
         estimated_tokens = max(1, (len(system) + len(user) + 2) // 3) + int(max_tokens)
+        reservation_id = None
         if self.quota_guard is not None:
-            await self.quota_guard.before_request(estimated_tokens)
+            if hasattr(self.quota_guard, "reserve_request"):
+                reservation = await self.quota_guard.reserve_request(estimated_tokens)
+                reservation_id = reservation.get("reservation_id")
+            else:
+                await self.quota_guard.before_request(estimated_tokens)
         async with httpx.AsyncClient(timeout=self.timeout, headers=self._headers()) as client:
             started = time.monotonic()
-            response = await client.post(f"{self.base_url}/chat/completions", json=payload)
+            try:
+                response = await client.post(f"{self.base_url}/chat/completions", json=payload)
+            except BaseException:
+                if self.quota_guard is not None:
+                    if hasattr(self.quota_guard, "release_reservation"):
+                            await self.quota_guard.release_reservation(reservation_id)
+                raise
             latency = time.monotonic() - started
             body: dict[str, Any] = {}
             if response.content:
@@ -149,6 +172,7 @@ class GroqStructuredVerifier:
                     input_tokens=input_tokens, output_tokens=output_tokens, call_kind="text",
                     latency_seconds=latency, request_id=str(body.get("id") or "") or None,
                     error_code=str(error_code or "")[:200] or None, context=self.usage_context,
+                    reservation_id=reservation_id,
                 )
             if response.status_code == 429:
                 snap = await self.quota_guard.snapshot() if self.quota_guard is not None else {}
@@ -266,15 +290,26 @@ class GroqVisionVerifier:
         # prompt/completion allowance. This is intentionally an overestimate for
         # the free-tier pre-limit guard.
         estimated_tokens = 2300 + max(1, (len(prompt) + 2) // 3) + int(max_tokens)
-        if self.quota_guard is not None:
-            await self.quota_guard.before_request(estimated_tokens)
         if on_progress is not None:
             result = on_progress({"phase": "waiting_first_output", "chunk_count": 0, "content_chunk_count": 0})
             if inspect.isawaitable(result):
                 await result
+        reservation_id = None
+        if self.quota_guard is not None:
+            if hasattr(self.quota_guard, "reserve_request"):
+                reservation = await self.quota_guard.reserve_request(estimated_tokens)
+                reservation_id = reservation.get("reservation_id")
+            else:
+                await self.quota_guard.before_request(estimated_tokens)
         async with httpx.AsyncClient(timeout=self.timeout, headers=self._headers()) as client:
             started = time.monotonic()
-            response = await client.post(f"{self.base_url}/chat/completions", json=payload)
+            try:
+                response = await client.post(f"{self.base_url}/chat/completions", json=payload)
+            except BaseException:
+                if self.quota_guard is not None:
+                    if hasattr(self.quota_guard, "release_reservation"):
+                            await self.quota_guard.release_reservation(reservation_id)
+                raise
             latency = time.monotonic() - started
             body: dict[str, Any] = {}
             if response.content:
@@ -307,7 +342,7 @@ class GroqVisionVerifier:
                     response, model=selected_model, usage_tokens=usage_tokens, input_tokens=input_tokens,
                     output_tokens=output_tokens, call_kind=call_kind, latency_seconds=latency,
                     request_id=str(body.get("id") or "") or None, error_code=str(error_code or "")[:200] or None,
-                    context=self.usage_context,
+                    context=self.usage_context, reservation_id=reservation_id,
                 )
             if response.status_code == 429:
                 snap = await self.quota_guard.snapshot() if self.quota_guard is not None else {}

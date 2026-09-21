@@ -36,7 +36,7 @@ from .maintenance_cleanup import clear_stale_files, scan_stale_files
 from .oneplus_control import OnePlusControlError, OnePlusController
 from .postprocess import PostprocessWorker
 from .postprocess_store import PostprocessStore
-from .pipeline_state import identity_metadata_status, repair_identity_metadata, stage2c_freshness, stage3_freshness
+from .pipeline_state import identity_metadata_status, repair_identity_metadata, stage2c_freshness, stage3_freshness, verification_rows_for_stage2c
 from .retrieval import (
     add_benchmark_item,
     delete_benchmark_item,
@@ -908,7 +908,7 @@ class Runtime:
             ])
 
         books = await self.stage2b_store.list_books()
-        jobs = await self.postprocess_store.list_jobs(limit=-1)
+        jobs = enrich_postprocess_jobs(await self.postprocess_store.list_jobs(limit=-1))
         audits: dict[int, dict] = {}
         for job in jobs:
             if job.get("status") != "completed" or not job.get("result_dir"):
@@ -946,8 +946,13 @@ class Runtime:
                     ready_audit += 1
             artifact_total = totals["artifact_completed"] + totals["artifact_pending"] + totals["artifact_processing"] + totals["artifact_failed"]
             failed = totals["text_failed"] + totals["vision_failed"] + totals["artifact_failed"]
+            route_created = sum(int(job.get("route_count") or 0) for job in jobs if job.get("status") == "completed")
+            route_candidates = sum(int(job.get("route_candidates_detected") or job.get("route_count") or 0) for job in jobs if job.get("status") == "completed")
+            route_deferred = sum(int(job.get("route_deferred") or 0) for job in jobs if job.get("status") == "completed")
             lines = header() + section("PIPELINE") + [
                 row("Books", len(books)),
+                row("2A Routes", f"{route_created} / {route_candidates}  " + ("✅" if route_deferred == 0 else "⚠️")),
+                row("Deferred", route_deferred),
                 row("Text", f"{totals['text_completed']} / {totals['text_completed'] + totals['text_pending'] + totals['text_processing'] + totals['text_failed']}  " + ("✅" if not totals['text_pending'] and not totals['text_processing'] and not totals['text_failed'] else "🔄")),
                 row("Vision", f"{totals['vision_completed']} / {totals['vision_completed'] + totals['vision_pending'] + totals['vision_processing'] + totals['vision_failed']}  " + ("✅" if not totals['vision_pending'] and not totals['vision_processing'] and not totals['vision_failed'] else "🔄")),
                 row("Artifact", f"{totals['artifact_completed']} / {artifact_total}  " + ("✅" if artifact_total and totals['artifact_completed'] == artifact_total else "🔄")),
@@ -992,7 +997,18 @@ class Runtime:
                     state = "Ready for audit"
                 else:
                     state = "Verification complete"
-                lines += [divider, name, divider, "", row("Sweep", "Complete" if art_total and artifact_open == 0 else f"{art_done} / {art_total}"), row("Audit", "Complete" if unresolved == 0 else unresolved), row("State", state), ""]
+                post_job = next((job for job in jobs if int(job.get("id") or 0) == jid), {})
+                route_created = int(post_job.get("route_count") or 0)
+                route_candidates = int(post_job.get("route_candidates_detected") or route_created)
+                route_deferred = int(post_job.get("route_deferred") or 0)
+                lines += [
+                    divider, name, divider, "",
+                    row("2A Routes", f"{route_created} / {route_candidates}"),
+                    row("Deferred", route_deferred),
+                    row("Sweep", "Complete" if art_total and artifact_open == 0 else f"{art_done} / {art_total}"),
+                    row("Audit", "Complete" if unresolved == 0 else unresolved),
+                    row("State", state), "",
+                ]
             return "\n".join(lines).rstrip()
 
         if command == "/workers":
@@ -1177,10 +1193,14 @@ def enrich_postprocess_jobs(rows: list[dict]) -> list[dict]:
             continue
         coverage = summary.get("coverage") or {}
         integrity = summary.get("integrity") or {}
+        route_summary = summary.get("routes") or {}
         row["quality_status"] = coverage.get("status")
         row["quality_display_label"] = coverage.get("display_label")
         row["integrity_status"] = integrity.get("status")
         row["integrity_display_label"] = integrity.get("display_label")
+        row["route_candidates_detected"] = int(route_summary.get("total_candidates_detected") or row.get("route_count") or 0)
+        row["route_deferred"] = int(route_summary.get("deferred") or 0)
+        row["route_safety_valve_triggered"] = bool(route_summary.get("safety_valve_triggered") or row["route_deferred"])
     return rows
 
 
@@ -1930,6 +1950,20 @@ async def verifier_audit_bypass(job_id: int, request: AuditBypassRequest) -> dic
     job = await runtime.postprocess_store.get_job(job_id)
     if not job or not job.get("result_dir"):
         raise HTTPException(status_code=404, detail="Post-process job not found.")
+    if request.enabled:
+        # This is an audit-only testing bypass, never a verification bypass.
+        # Keep the audit set stable by requiring every current Stage 2B row
+        # (including the required artifact sweep) to finish first.
+        rows = await runtime.stage2b_store.list_book_jobs_raw(job_id)
+        gate_rows = verification_rows_for_stage2c(
+            rows, artifact_sweep_required=bool(getattr(runtime.config, "stage2b_artifact_sweep_required_for_finalize", True))
+        )
+        unfinished = [row for row in gate_rows if str(row.get("status") or "") != "completed"]
+        if unfinished:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Verifier Audit bypass becomes available after verification finishes; {len(unfinished)} current route(s) are still pending/running/failed.",
+            )
     result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
     await asyncio.to_thread(set_audit_gate_bypass, result_dir, request.enabled, request.reason)
     runtime.events.notify("verifier_audit_bypass_updated")

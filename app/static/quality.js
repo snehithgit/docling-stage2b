@@ -90,7 +90,13 @@ async function load() {
     const quality = job.status === "completed"
       ? `<div class="quality-stack">${qualityBadge(job.quality_status, job.quality_display_label)}${qualityBadge(job.integrity_status, job.integrity_display_label, "integrity")}</div>`
       : `<span class="quality-muted">Waiting for completed analysis</span>`;
-    return `<tr><td data-label="Document"><span class="file-name">${esc(job.source_filename)}</span><span class="file-subtitle">${esc(job.output_filename)}</span>${source}</td><td data-label="Pipeline">${statusPill(job.status)}</td><td data-label="Quality">${quality}</td><td data-label="Profile">${esc(job.profile_kind || "—")}</td><td data-label="Routes">${esc(job.route_count || 0)}</td><td data-label="Actions" class="align-right">${links}</td></tr>`;
+    const routeCreated = Number(job.route_count || 0);
+    const routeCandidates = Number(job.route_candidates_detected ?? routeCreated);
+    const routeDeferred = Number(job.route_deferred || 0);
+    const routeDisplay = routeDeferred > 0
+      ? `<span title="Safety ceiling triggered; deferred candidates are retained in routes.json">${esc(routeCreated)} / ${esc(routeCandidates)} ⚠️</span><span class="file-subtitle">${esc(routeDeferred)} deferred</span>`
+      : `${esc(routeCreated)} / ${esc(routeCandidates)}`;
+    return `<tr><td data-label="Document"><span class="file-name">${esc(job.source_filename)}</span><span class="file-subtitle">${esc(job.output_filename)}</span>${source}</td><td data-label="Pipeline">${statusPill(job.status)}</td><td data-label="Quality">${quality}</td><td data-label="Profile">${esc(job.profile_kind || "—")}</td><td data-label="Routes">${routeDisplay}</td><td data-label="Actions" class="align-right">${links}</td></tr>`;
   }).join("");
 }
 

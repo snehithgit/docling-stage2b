@@ -1,4 +1,14 @@
-# Current release — 2026.09.21.40.8A.1
+# Current release — 2026.09.21.40.8A.2
+
+## .40.8A.2 complete Stage 2A verification-candidate coverage
+- Stage 2A collects and deduplicates the complete candidate set before any route ceiling is applied.
+- Existing review priority/score sorting runs globally, so late signals such as `LOW_CONFIDENCE_VISUAL` cannot be starved by earlier OCR/unicode/table noise.
+- `max_routes_per_document` is now a 5000-route runaway/corruption safety ceiling, not a routine limit.
+- A triggered ceiling is loud: `routes.json` records total/queued/deferred counts plus deferred breakdowns and retains every deferred candidate for audit/revalidation.
+- Stage 2B queue semantics are unchanged: all queued routes enter the durable `verification_jobs` pending backlog and workers drain one job at a time.
+- Quality/Book UI and Telegram monitoring expose queued/total/deferred route coverage.
+- Stale/duplicate correction reconciliation across generation reruns remains a separate open correctness task; this hotfix does not claim to solve it.
+
 
 ## .40.8A trusted-decision and correction integrity
 - Stage 2A regeneration preserves every `human_verified: true` correction-ledger entry exactly; only unreviewed automatic entries are superseded.
@@ -6,7 +16,7 @@
 - Manual text→vision cross-checks are non-destructive unless a new READABLE source transcription independently passes the deterministic Stage 2C safety gate. Human and superseded state cannot be overwritten; UNREADABLE does not erase prior decisions.
 - Troubleshooting action preservation is obligation-level `(verb, object-span)` with occurrence counts, not a set of verb names. Compound objects stay intact and small OCR spelling cleanup is tolerated deterministically.
 - Table-cell routes now persist full Docling structural identity: table/cell plus row/column start/end spans, including merged cells.
-- Deliberately deferred: table-wide repeated-value inference. Structural binding must be enforced at the overlay/application boundary in `.40.8B` rather than guessed from duplicate values.
+- Deliberately deferred: table-wide repeated-value inference. Structural binding must be enforced at the overlay/application boundary in a later correctness pass rather than guessed from duplicate values.
 - Full validation: 450/450 tests pass.
 
 ## .40.7.1 audit/Telegram baseline retained
@@ -48,14 +58,14 @@
 
 Completed: Stage 2C critical-token/action preservation, deterministic legacy correction revalidation, Stage 2C/retrieval rule-version freshness, persisted job-identity integrity repair, no all-books benchmark fallback, synthetic-table Top-K diversity, targeted interval/parts-item/run-in ranking, and a separate electrical troubleshooting holdout.
 
-Deployment acceptance pending: complete `.40.8B` transactional/freshness correctness and `.40.8C` measured robustness work, then run Revalidate all + rebuild before the fresh N150 machine-scoped BGE benchmark and electrical holdout.
+Deployment acceptance pending: complete the still-open transactional retrieval/freshness correctness and measured robustness work, then run Revalidate all + rebuild before the fresh N150 machine-scoped BGE benchmark and electrical holdout.
 
 # Docling Visual RAG — Project tracker
 
 Last updated: 2026-09-21
-Current release: `2026.09.21.40.8A.1`
-Current phase: **`.40.8A.1` trusted-decision/correction integrity implemented and release-validated**
-Next phase: **`.40.8B` transactional retrieval/freshness + dead-task/quota hardening, then `.40.8C` robustness before fresh N150 benchmarking**
+Current release: `2026.09.21.40.8B`
+Current phase: **`.40.8B` safety/concurrency closure implemented and release-validated**
+Next phase: **remaining transactional retrieval/freshness correctness, then measured robustness and fresh N150 benchmarking**
 
 ## Non-negotiable architecture
 

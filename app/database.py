@@ -211,8 +211,27 @@ class JobStore:
         source_mtime_ns: int | None = None,
         source_sha256: str | None = None,
     ) -> int:
+        job_id, _created = await self.create_pending_once(
+            filename, output_formats, source_size, source_mtime_ns, source_sha256
+        )
+        return job_id
+
+    async def create_pending_once(
+        self,
+        filename: str,
+        output_formats: str | list[str],
+        source_size: int | None = None,
+        source_mtime_ns: int | None = None,
+        source_sha256: str | None = None,
+    ) -> tuple[int, bool]:
+        """Atomically get-or-create one watcher job for a stable source identity.
+
+        The check and insert run under one SQLite write transaction so two
+        discovery callers (or even two JobStore instances) cannot submit the
+        same ``filename + sha256`` document twice.
+        """
         return await self._run(
-            self._create_pending_sync,
+            self._create_pending_once_sync,
             filename,
             output_formats,
             source_size,
@@ -220,18 +239,29 @@ class JobStore:
             source_sha256,
         )
 
-    def _create_pending_sync(
+    def _create_pending_once_sync(
         self,
         filename: str,
         output_formats: str | list[str],
         source_size: int | None,
         source_mtime_ns: int | None,
         source_sha256: str | None,
-    ) -> int:
+    ) -> tuple[int, bool]:
         formats = [output_formats] if isinstance(output_formats, str) else list(output_formats)
         formats = list(dict.fromkeys(formats)) or ["md"]
         primary_format = formats[0]
         with self._connection() as connection:
+            # BEGIN IMMEDIATE serializes the identity check with the insert
+            # across independent SQLite connections, not merely this object's
+            # asyncio lock.
+            connection.execute("BEGIN IMMEDIATE")
+            if source_sha256:
+                existing = connection.execute(
+                    "SELECT id FROM jobs WHERE filename=? AND source_sha256=? ORDER BY id ASC LIMIT 1",
+                    (filename, source_sha256),
+                ).fetchone()
+                if existing is not None:
+                    return int(existing["id"]), False
             cursor = connection.execute(
                 """INSERT INTO jobs (
                        filename, status, submitted_at, output_format, output_formats,
@@ -247,7 +277,7 @@ class JobStore:
                     source_sha256,
                 ),
             )
-            return int(cursor.lastrowid)
+            return int(cursor.lastrowid), True
 
     async def list_pending(self) -> list[dict[str, Any]]:
         return await self._run(self._list_sync, "WHERE status = 'pending'", (), False)

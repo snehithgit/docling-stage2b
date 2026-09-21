@@ -120,3 +120,26 @@ class Stage2MigrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(prows[0]["result_dir"], "old__job1")
             self.assertEqual(prows[0]["rerun_count"], 0)
             self.assertIsNone(prows[0]["last_rerun_at"])
+
+class DuplicateSubmissionRaceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_same_filename_and_sha_is_created_once_across_store_instances(self):
+        import asyncio
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as directory:
+            db = str(Path(directory) / "jobs.db")
+            first = JobStore(db)
+            second = JobStore(db)
+            await first.initialize()
+            await second.initialize()
+
+            a, b = await asyncio.gather(
+                first.create_pending_once("manual.pdf", ["md"], 123, 456, "same-sha"),
+                second.create_pending_once("manual.pdf", ["md"], 123, 456, "same-sha"),
+            )
+            self.assertEqual(a[0], b[0])
+            self.assertEqual(sorted([a[1], b[1]]), [False, True])
+            rows = await first.list_jobs(limit=20)
+            matching = [r for r in rows if r["filename"] == "manual.pdf" and r.get("source_sha256") == "same-sha"]
+            self.assertEqual(len(matching), 1)

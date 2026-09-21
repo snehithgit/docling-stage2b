@@ -1,0 +1,44 @@
+# Secrets / local environment
+.env
+.env.*
+!.env.example
+
+# Runtime data and proprietary documents
+/input/
+/converted/
+/processed/
+/data/
+/embedding-cache/
+
+# Local databases / state
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+
+# Python / test caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local logs / temporary files
+*.log
+*.tmp
+*.bak
+
+# Local archives are release/runtime artifacts, not source
+*.zip

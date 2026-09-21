@@ -2,6 +2,7 @@ import io
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from types import SimpleNamespace
 
 import httpx
@@ -403,17 +404,15 @@ class OnePlusCrosscheckRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["direct_transcription"])
         self.assertEqual(result["verdict"], "UNREADABLE")
         self.assertEqual(result["corrected_text"], "")
-    async def test_crosscheck_transport_failure_is_nonfatal(self):
+    async def test_crosscheck_transport_failure_propagates_to_circuit_breaker(self):
         class FakeClient:
             async def inspect_image_stream(self, *args, **kwargs):
                 raise httpx.ConnectError("phone offline")
 
-        result = await _oneplus_text_crosscheck(
-            FakeClient(), b"img", "image/png", "garbled", "proposal", "model"
-        )
-        self.assertFalse(result["usable"])
-        self.assertTrue(result["transport_failed"])
-        self.assertEqual(result["verdict"], "UNREADABLE")
+        with self.assertRaises(httpx.ConnectError):
+            await _oneplus_text_crosscheck(
+                FakeClient(), b"img", "image/png", "garbled", "proposal", "model"
+            )
 
 class VisionParseRecoveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_double_malformed_vision_response_becomes_uncertain(self):
@@ -891,6 +890,50 @@ class ManualCrosscheckPersistenceTests(unittest.IsolatedAsyncioTestCase):
         saved = await self._run_crosscheck(entry, payload)
         self.assertEqual(saved["status"], "superseded")
         self.assertEqual(saved["proposed_text"], "old")
+
+    async def test_manual_crosscheck_uses_shared_stage2c_ledger_lock(self):
+        from app.stage2b import Stage2BWorker
+
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        processed = Path(temp.name) / "processed"
+        result_dir = processed / "book__job1"
+        result_dir.mkdir(parents=True)
+        entry = {
+            "entry_id":"g:text:R1", "entry_type":"text_correction", "route_id":"R1",
+            "status":"rejected", "original_text":"Replace teh MC card.",
+            "proposed_text":"wrong", "human_verified":False, "source_type":"text",
+        }
+        (result_dir / "correction_ledger.json").write_text(json.dumps({
+            "schema":"docling-correction-ledger/v2", "source_zip_sha256":"sha", "entries":[entry],
+        }), encoding="utf-8")
+        worker = Stage2BWorker(
+            lambda: SimpleNamespace(processed_dir=str(processed)),
+            SimpleNamespace(), SimpleNamespace(), SimpleNamespace(notify=lambda *_: None),
+        )
+
+        class TrackingLock:
+            def __init__(self): self.entered = False
+            async def __aenter__(self): self.entered = True; return self
+            async def __aexit__(self, exc_type, exc, tb): self.entered = False
+
+        tracker = TrackingLock()
+        worker._stage2c_ledger_lock = tracker
+        real_upsert = __import__("app.stage2b", fromlist=["upsert_ledger_entry"]).upsert_ledger_entry
+
+        def guarded_upsert(*args, **kwargs):
+            assert tracker.entered, "manual cross-check wrote the ledger without the shared lock"
+            return real_upsert(*args, **kwargs)
+
+        job = {"result_dir":"book__job1", "source_json":json.dumps({"type":"text"}), "generation":"g", "route_id":"R1"}
+        payload = {
+            "direction":"text_to_vision", "direct_transcription":True, "verdict":"READABLE",
+            "corrected_text":"Replace the MC card.", "provider":"oneplus",
+            "scope_guard":{"accepted":True, "reasons":["TARGET_SCOPE_CONFIRMED"]},
+        }
+        with patch("app.stage2b.upsert_ledger_entry", side_effect=guarded_upsert):
+            await worker._persist_manual_crosscheck(job, payload)
+
 
 
 class Stage2CBackfillTests(unittest.IsolatedAsyncioTestCase):

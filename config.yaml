@@ -63,7 +63,9 @@ supported_extensions:
 postprocess_enabled: true
 processed_dir: "/data/processed"
 postprocess_poll_interval_seconds: 5
-max_routes_per_document: 500
+# Runaway/corruption safety ceiling only. Stage 2A collects and globally ranks
+# every detected candidate first; normal manuals should have 0 deferred routes.
+max_routes_per_document: 5000
 # Generic OCR recall based only on evidence inside each document. Candidates
 # are routed to the selected source-image reconstruction processor; Stage 2A never edits Docling text.
 stage2a_ocr_recall_enabled: true

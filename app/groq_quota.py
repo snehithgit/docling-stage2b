@@ -5,6 +5,7 @@ import json
 import math
 import re
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -78,6 +79,10 @@ class GroqQuotaGuard:
         self._lock = asyncio.Lock()
         self._loaded_path: Path | None = None
         self._state: dict[str, Any] = {}
+        # In-flight reservations close the check-then-act race between concurrent
+        # Groq calls. They are process-local by design: a restart cancels every
+        # in-flight HTTP request, so no stale reservation must survive restart.
+        self._reservations: dict[str, int] = {}
 
     def _config(self):
         return self._config_getter()
@@ -182,6 +187,9 @@ class GroqQuotaGuard:
             changed = True
         return changed
 
+    def _reserved_usage_sync(self) -> tuple[int, int]:
+        return len(self._reservations), sum(max(0, int(value or 0)) for value in self._reservations.values())
+
     def _usage_sync(self) -> tuple[int, int]:
         requests = 0
         tokens = 0
@@ -262,6 +270,9 @@ class GroqQuotaGuard:
         changed = self._prune_sync(now)
         limits = self._limits()
         requests_used, tokens_used = self._usage_sync()
+        reserved_requests, reserved_tokens = self._reserved_usage_sync()
+        effective_requests = requests_used + reserved_requests
+        effective_tokens = tokens_used + reserved_tokens
         enabled = bool(getattr(self._config(), "text_cloud_quota_guard_enabled", True))
 
         reasons: list[str] = []
@@ -274,14 +285,14 @@ class GroqQuotaGuard:
             pass
 
         if enabled:
-            if requests_used + 1 > limits["request_stop_at"]:
+            if effective_requests + 1 > limits["request_stop_at"]:
                 reasons.append("LOCAL_DAILY_REQUEST_RESERVE")
-            elif requests_used >= limits["request_warn_at"]:
+            elif effective_requests >= limits["request_warn_at"]:
                 warnings.append("LOCAL_DAILY_REQUEST_WARNING")
 
-            if tokens_used + max(0, int(estimated_next_tokens)) > limits["token_stop_at"]:
+            if effective_tokens + max(0, int(estimated_next_tokens)) > limits["token_stop_at"]:
                 reasons.append("LOCAL_DAILY_TOKEN_RESERVE")
-            elif tokens_used >= limits["token_warn_at"]:
+            elif effective_tokens >= limits["token_warn_at"]:
                 warnings.append("LOCAL_DAILY_TOKEN_WARNING")
 
             remaining = self._state.get("last_server_remaining_requests")
@@ -291,9 +302,10 @@ class GroqQuotaGuard:
                     effective_limit = int(server_limit or limits["request_limit"])
                     stop_remaining = max(1, effective_limit - math.floor(effective_limit * limits["stop_fraction"]))
                     warn_remaining = max(stop_remaining, effective_limit - math.floor(effective_limit * limits["warn_fraction"]))
-                    if int(remaining) <= stop_remaining:
+                    effective_remaining = int(remaining) - reserved_requests
+                    if effective_remaining <= stop_remaining:
                         reasons.append("GROQ_RPD_RESERVE")
-                    elif int(remaining) <= warn_remaining:
+                    elif effective_remaining <= warn_remaining:
                         warnings.append("GROQ_RPD_WARNING")
             except (TypeError, ValueError):
                 pass
@@ -306,7 +318,7 @@ class GroqQuotaGuard:
                 if remaining_tpm is not None and limit_tpm is not None and estimated_next_tokens > 0:
                     tpm_reserve = max(1, math.floor(int(limit_tpm) * (1.0 - limits["stop_fraction"])))
                     tpm_warn_reserve = max(tpm_reserve, math.floor(int(limit_tpm) * (1.0 - limits["warn_fraction"])))
-                    after_estimate = int(remaining_tpm) - int(estimated_next_tokens)
+                    after_estimate = int(remaining_tpm) - reserved_tokens - int(estimated_next_tokens)
                     if after_estimate < tpm_reserve:
                         reasons.append("GROQ_TPM_RESERVE")
                     elif after_estimate < tpm_warn_reserve:
@@ -345,6 +357,10 @@ class GroqQuotaGuard:
             "window_hours": 24,
             "requests_used_24h": requests_used,
             "tokens_used_24h": tokens_used,
+            "requests_reserved_in_flight": reserved_requests,
+            "tokens_reserved_in_flight": reserved_tokens,
+            "requests_effective_24h": effective_requests,
+            "tokens_effective_24h": effective_tokens,
             "request_limit": limits["request_limit"],
             "token_limit": limits["token_limit"],
             "request_warn_at": limits["request_warn_at"],
@@ -375,11 +391,34 @@ class GroqQuotaGuard:
             return self._snapshot_sync(time.time(), estimated_next_tokens)
 
     async def before_request(self, estimated_tokens: int = 0) -> dict[str, Any]:
+        """Read-only preflight check kept for status/compatibility callers.
+
+        Actual HTTP callers should use :meth:`reserve_request` so concurrent
+        calls cannot all pass the same quota snapshot before any usage lands.
+        """
         async with self._lock:
             snap = self._snapshot_sync(time.time(), max(0, int(estimated_tokens)))
             if snap["paused"]:
                 raise CloudQuotaPausedError(str(snap["message"]), snap)
             return snap
+
+    async def reserve_request(self, estimated_tokens: int = 0) -> dict[str, Any]:
+        """Atomically check quota and reserve one in-flight Groq request."""
+        estimate = max(0, int(estimated_tokens))
+        async with self._lock:
+            snap = self._snapshot_sync(time.time(), estimate)
+            if snap["paused"]:
+                raise CloudQuotaPausedError(str(snap["message"]), snap)
+            reservation_id = uuid.uuid4().hex
+            self._reservations[reservation_id] = estimate
+            return {**snap, "reservation_id": reservation_id, "reserved_tokens": estimate}
+
+    async def release_reservation(self, reservation_id: str | None) -> None:
+        """Release an in-flight reservation when no HTTP response is recorded."""
+        if not reservation_id:
+            return
+        async with self._lock:
+            self._reservations.pop(str(reservation_id), None)
 
     def _price_for_model(self, model: str | None) -> tuple[float, float] | None:
         config = self._config()
@@ -414,8 +453,11 @@ class GroqQuotaGuard:
         request_id: str | None = None,
         error_code: str | None = None,
         context: dict[str, Any] | None = None,
+        reservation_id: str | None = None,
     ) -> dict[str, Any]:
         async with self._lock:
+            if reservation_id:
+                self._reservations.pop(str(reservation_id), None)
             now = time.time()
             self._load_sync()
             self._prune_sync(now)
@@ -541,6 +583,7 @@ class GroqQuotaGuard:
             self._load_sync()
             defaults = self._defaults()
             self._state = defaults
+            self._reservations.clear()
             self._save_sync()
 
 

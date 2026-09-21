@@ -209,3 +209,47 @@ async def test_usage_audit_records_metadata_tokens_model_and_cost_without_conten
     assert "req_test" in persisted
     assert "prompt" not in persisted.lower()
     assert "base64" not in persisted.lower()
+
+@pytest.mark.asyncio
+async def test_inflight_reservation_closes_concurrent_quota_race(tmp_path: Path):
+    config = cfg(
+        tmp_path,
+        text_cloud_free_daily_request_limit=1000,
+        text_cloud_free_daily_token_limit=100,
+        text_cloud_quota_warn_fraction=0.80,
+        text_cloud_quota_stop_fraction=0.90,
+    )
+    guard = GroqQuotaGuard(lambda: config)
+    first = await guard.reserve_request(50)
+    assert first["reservation_id"]
+    snap = await guard.snapshot()
+    assert snap["tokens_reserved_in_flight"] == 50
+    assert snap["requests_reserved_in_flight"] == 1
+
+    with pytest.raises(CloudQuotaPausedError) as caught:
+        await guard.reserve_request(50)
+    assert "LOCAL_DAILY_TOKEN_RESERVE" in caught.value.snapshot["reason_codes"]
+
+    await guard.release_reservation(first["reservation_id"])
+    second = await guard.reserve_request(50)
+    await guard.record_response(
+        FakeResponse(status_code=200), usage_tokens=40,
+        reservation_id=second["reservation_id"],
+    )
+    snap = await guard.snapshot()
+    assert snap["tokens_reserved_in_flight"] == 0
+    assert snap["requests_reserved_in_flight"] == 0
+    assert snap["tokens_used_24h"] == 40
+    assert snap["requests_used_24h"] == 1
+
+
+@pytest.mark.asyncio
+async def test_transport_failure_reservation_can_be_released_without_consuming_quota(tmp_path: Path):
+    config = cfg(tmp_path)
+    guard = GroqQuotaGuard(lambda: config)
+    reservation = await guard.reserve_request(1234)
+    await guard.release_reservation(reservation["reservation_id"])
+    snap = await guard.snapshot()
+    assert snap["tokens_reserved_in_flight"] == 0
+    assert snap["tokens_used_24h"] == 0
+    assert snap["requests_used_24h"] == 0

@@ -1,30 +1,36 @@
-## After `.40.8A.1`
+## After `.40.8B`
 
-### `.40.8A.1` closure
-- [x] Human-verified entries survive Stage 2A regeneration.
-- [x] Manual cross-check respects human/superseded state and revalidates every new READABLE candidate.
-- [x] Remedy/action preservation operates on counted obligations instead of verb types.
-- [x] Table-cell structural row/column spans are persisted end-to-end through Stage 2A/2B correction metadata.
-- [x] Exact regression cases are included; full suite 450/450.
+### `.40.8B` closure
+- [x] Protect Git publishing from secret/manual leakage and history destruction.
+- [x] Propagate Pi5/OnePlus transport outages to the endpoint circuit breaker instead of manufacturing completed evidence.
+- [x] Reconcile stale/duplicate correction entries across rerun generations while preserving human authority.
+- [x] Make watcher duplicate submission check+insert atomic.
+- [x] Put manual cross-check ledger writes under the shared Stage 2C ledger lock.
+- [x] Add in-flight Groq quota reservations.
+- [x] Keep Verifier Audit testing bypass visible on every Book workflow page with explicit confirmation.
+- [x] Keep SQLite/SMB finding omitted for the real container deployment.
 
-### `.40.8B` — transactional/freshness correctness
-- [ ] Publish retrieval/embedding corpus as immutable generation directories with one atomic `CURRENT` pointer.
-- [ ] Add explicit Stage 3 / retrieval / embedding rule versions and fingerprints with correct downstream invalidation.
-- [ ] Enforce persisted table-cell structural binding when overlays are consumed; do not infer movement from repeated values.
-- [ ] Treat forgotten Docling 404 task IDs as resubmission events instead of retrying the dead ID forever.
-- [ ] Add reserved/in-flight Groq quota accounting so concurrent calls cannot pass the same reserve check.
-- [ ] Add direct regression tests for every `.40.8B` bug before release.
+### Next correctness / robustness work
+- [ ] Config type validation for list-valued fields such as `supported_extensions` and Telegram allow-lists.
+- [ ] Preserve table-cell correction provenance in Stage 3 chunk audit metadata.
+- [ ] Enforce equipment allow-list on every generation-source path, including anchor/neighbors.
+- [ ] Move blocking PDF/ledger work out of async endpoints.
+- [ ] Improve Stage 3 token-budget accounting where measured oversized chunks remain.
+- [ ] Close verifier HTTP-client lifetime, recursion-depth and prompt-schema fragility hardening items.
+- [ ] Add Telegram regression coverage.
 
-### `.40.8C` — robustness/extraction quality
-- [ ] Add short-caption/nameplate/table-header OCR corruption checks without the current eight-word blind spot.
-- [ ] Make normal Stage 2B claiming transactional/atomic rather than relying on one-task scheduling.
-- [ ] Add bounded TEI retries for transient embedding calls.
-- [ ] Warn/block conflicting multiple authoritative manuals for the same equipment/manual type.
-- [ ] Improve heading-depth instability and reading-order/table reconstruction only where measured failures justify it.
+### Still open from the earlier retrieval/freshness audit
+- [ ] Publish machine vector/text/metadata corpus as immutable generations with one atomic `CURRENT` pointer.
+- [ ] Add explicit Stage 3 / retrieval / embedding freshness versions and fingerprints.
+- [ ] Enforce persisted table-cell structural binding when overlays are consumed.
+- [ ] Treat forgotten Docling 404 task IDs as resubmission events.
+
+### Architectural RAG work
+- [ ] Add stronger claim ↔ cited-evidence support validation beyond citation-ID existence checks.
 
 ### Benchmark gate
-- [ ] Do **not** publish a fresh production benchmark until `.40.8B` correctness/freshness work is complete.
-- [ ] After `.40.8B`/`.40.8C`, run Revalidate all + rebuild, then fresh N150 machine-scoped BGE benchmark and electrical holdout.
+- [ ] Do **not** publish a fresh production benchmark until the remaining transactional/freshness correctness work is complete.
+- [ ] After correctness/robustness closure, run Revalidate all + rebuild, then fresh N150 machine-scoped BGE benchmark and electrical holdout.
 
 ## After .40.6.3
 
@@ -43,7 +49,7 @@
 # Project implementation TODO
 
 Last updated: 2026-09-21
-Current implementation target: `2026.09.21.40.8A.1`
+Current implementation target: `2026.09.21.40.8A.2`
 
 ## Complete in `.40.4`
 

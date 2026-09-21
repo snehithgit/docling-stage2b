@@ -13,6 +13,7 @@ from app.stage2c import (
     human_review_summary,
     normalize_human_verified_ledger,
     rebuild_chunk_overlays,
+    reconcile_correction_generations,
     technical_format_profile,
     upsert_ledger_entry,
     source_transcription_safety_profile,
@@ -778,3 +779,40 @@ def test_overlap_arbitration_restores_legacy_applied_sweep_superseded_by_4062(tm
     by_route = {e["route_id"]: e for e in updated["entries"]}
     assert by_route["AV000003"]["status"] == "applied"
     assert by_route["V3"]["status"] == "superseded"
+
+
+def test_generation_reconciliation_supersedes_old_text_correction():
+    entries = [
+        {"entry_id":"g1:text:R1", "entry_type":"text_correction", "generation":"g1", "source_type":"text", "source_index":7, "status":"applied", "created_at_epoch":1.0},
+        {"entry_id":"g2:text:R9", "entry_type":"text_correction", "generation":"g2", "source_type":"text", "source_index":7, "status":"applied", "created_at_epoch":2.0},
+    ]
+    changed = reconcile_correction_generations(entries, preferred_entry_id="g2:text:R9")
+    assert changed >= 1
+    old, new = entries
+    assert old["status"] == "superseded"
+    assert old["superseded_by_entry_id"] == "g2:text:R9"
+    assert new["status"] == "applied"
+
+
+def test_generation_reconciliation_preserves_human_decision_over_new_automatic_rerun():
+    entries = [
+        {"entry_id":"g1:text:R1", "entry_type":"text_correction", "generation":"g1", "source_type":"text", "source_index":7, "status":"applied", "human_verified":True, "human_review":{"saved_at_epoch":10.0}, "created_at_epoch":1.0},
+        {"entry_id":"g2:text:R9", "entry_type":"text_correction", "generation":"g2", "source_type":"text", "source_index":7, "status":"applied", "created_at_epoch":20.0},
+    ]
+    reconcile_correction_generations(entries, preferred_entry_id="g2:text:R9")
+    human, automatic = entries
+    assert human["status"] == "applied"
+    assert automatic["status"] == "superseded"
+    assert automatic["status_reason"] == "SUPERSEDED_BY_HUMAN_DECISION"
+    assert automatic["superseded_by_entry_id"] == human["entry_id"]
+
+
+def test_generation_reconciliation_keeps_one_current_vision_entry_per_picture():
+    entries = [
+        {"entry_id":"g1:vision:V1", "entry_type":"vision_enrichment", "generation":"g1", "source_index":3, "status":"applied", "created_at_epoch":1.0, "route_id":"V1"},
+        {"entry_id":"g2:vision:V2", "entry_type":"vision_enrichment", "generation":"g2", "source_index":3, "status":"applied", "created_at_epoch":2.0, "route_id":"V2"},
+    ]
+    reconcile_correction_generations(entries, preferred_entry_id="g2:vision:V2")
+    active = [e for e in entries if e.get("status") != "superseded"]
+    assert [e["entry_id"] for e in active] == ["g2:vision:V2"]
+    assert entries[0]["superseded_by_entry_id"] == "g2:vision:V2"

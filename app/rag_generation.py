@@ -451,8 +451,13 @@ async def _generate_groq(
     if effort:
         payload["reasoning_effort"] = effort
     estimated_tokens = max(1, (len(_GROUNDED_SYSTEM) + len(user) + 2) // 3) + max_tokens
+    reservation_id = None
     if quota_guard is not None:
-        await quota_guard.before_request(estimated_tokens)
+        if hasattr(quota_guard, "reserve_request"):
+            reservation = await quota_guard.reserve_request(estimated_tokens)
+            reservation_id = reservation.get("reservation_id")
+        else:
+            await quota_guard.before_request(estimated_tokens)
     timeout = httpx.Timeout(
         connect=10.0,
         read=float(max(config.text_cloud_timeout_seconds, 30)),
@@ -462,7 +467,13 @@ async def _generate_groq(
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     started = time.monotonic()
     async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
-        response = await client.post(f"{config.text_cloud_base_url.rstrip('/')}/chat/completions", json=payload)
+        try:
+            response = await client.post(f"{config.text_cloud_base_url.rstrip('/')}/chat/completions", json=payload)
+        except BaseException:
+            if quota_guard is not None:
+                if hasattr(quota_guard, "release_reservation"):
+                    await quota_guard.release_reservation(reservation_id)
+            raise
     latency = time.monotonic() - started
     body: dict[str, Any] = {}
     if response.content:
@@ -488,7 +499,7 @@ async def _generate_groq(
             latency_seconds=latency,
             request_id=str(body.get("id") or "") or None,
             error_code=str(error_code or "")[:200] or None,
-            context={"purpose": "rag_answer_generation"},
+            context={"purpose": "rag_answer_generation"}, reservation_id=reservation_id,
         )
     if response.status_code == 429:
         snapshot = await quota_guard.snapshot() if quota_guard is not None else {}

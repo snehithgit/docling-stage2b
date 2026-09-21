@@ -2227,8 +2227,13 @@ def _review_priority_score(*, target: str, code: str, priority: str, source: dic
 
 
 def build_routes(doc: dict[str, Any], diagnostics: dict[str, Any], config: AppConfig) -> dict[str, Any]:
+    # Collect and score the complete candidate set before applying the configured
+    # safety ceiling. The Stage 2B verification_jobs table is already the durable
+    # backlog/queue, so max_routes_per_document must never bias coverage toward
+    # whichever diagnostic signals happened to be generated first.
     routes: list[dict[str, Any]] = []
     route_keys: set[tuple[Any, ...]] = set()
+    route_by_key: dict[tuple[Any, ...], dict[str, Any]] = {}
     page_ocr_risk = diagnostics.get("page_ocr_risk") or {}
 
     def with_page_risk(source: dict[str, Any]) -> dict[str, Any]:
@@ -2244,32 +2249,30 @@ def build_routes(doc: dict[str, Any], diagnostics: dict[str, Any], config: AppCo
         source = with_page_risk(source)
         key = (target, source.get("type"), source.get("index"), source.get("table_index"), source.get("cell_index"), source.get("page"))
         if key in route_keys:
-            for existing in routes:
-                es = existing.get("source") or {}
-                if (existing.get("target"), es.get("type"), es.get("index"), es.get("table_index"), es.get("cell_index"), es.get("page")) == key:
-                    # Multiple diagnostics may converge on the same table-cell
-                    # route. Preserve any structural identity learned by a later
-                    # signal instead of keeping an earlier metadata-poor source.
-                    for structural_key in ("row_start", "row_end", "col_start", "col_end"):
-                        if es.get(structural_key) is None and source.get(structural_key) is not None:
-                            es[structural_key] = source.get(structural_key)
-                    related = existing.setdefault("related_codes", [])
-                    if code != existing.get("code") and code not in related:
-                        related.append(code)
-                    if reason and reason not in str(existing.get("reason") or ""):
-                        existing["reason"] = (str(existing.get("reason") or "") + "; " + reason).strip("; ")
-                    # Upgrade duplicate priority but never downgrade it.
-                    rank={"high":3,"medium":2,"low":1,"info":0}
-                    if rank.get(priority,0) > rank.get(str(existing.get("priority")),0): existing["priority"] = priority
-                    existing["review_priority_score"] = max(
-                        int(existing.get("review_priority_score") or 0),
-                        _review_priority_score(target=target, code=code, priority=priority, source=source, reason=reason),
-                    )
-                    return
-        if len(routes) >= config.max_routes_per_document:
+            existing = route_by_key[key]
+            es = existing.get("source") or {}
+            # Multiple diagnostics may converge on the same table-cell route.
+            # Preserve any structural identity learned by a later signal instead
+            # of keeping an earlier metadata-poor source.
+            for structural_key in ("row_start", "row_end", "col_start", "col_end"):
+                if es.get(structural_key) is None and source.get(structural_key) is not None:
+                    es[structural_key] = source.get(structural_key)
+            related = existing.setdefault("related_codes", [])
+            if code != existing.get("code") and code not in related:
+                related.append(code)
+            if reason and reason not in str(existing.get("reason") or ""):
+                existing["reason"] = (str(existing.get("reason") or "") + "; " + reason).strip("; ")
+            # Upgrade duplicate priority but never downgrade it.
+            rank = {"high": 3, "medium": 2, "low": 1, "info": 0}
+            if rank.get(priority, 0) > rank.get(str(existing.get("priority")), 0):
+                existing["priority"] = priority
+            existing["review_priority_score"] = max(
+                int(existing.get("review_priority_score") or 0),
+                _review_priority_score(target=target, code=code, priority=priority, source=source, reason=reason),
+            )
             return
         route_keys.add(key)
-        routes.append({
+        route = {
             "route_id": "",
             "target": target,
             "code": code,
@@ -2279,7 +2282,9 @@ def build_routes(doc: dict[str, Any], diagnostics: dict[str, Any], config: AppCo
             "source": source,
             "action": action,
             "reason": reason,
-        })
+        }
+        routes.append(route)
+        route_by_key[key] = route
 
     for signal in diagnostics.get("signals", []):
         cls = signal.get("classification")
@@ -2357,10 +2362,21 @@ def build_routes(doc: dict[str, Any], diagnostics: dict[str, Any], config: AppCo
         -int(r.get("review_priority_score") or 0),
         0 if r.get("target") == "pi5" else 1,
     ))
+    # IDs are assigned against the complete sorted candidate set. Raising the
+    # safety ceiling and rerunning therefore promotes deferred candidates without
+    # changing the priority order of candidates that were already eligible.
     for i, route in enumerate(routes, 1):
         route["route_id"] = f"R{i:05d}"
-    truncated = len(routes) >= config.max_routes_per_document
-    target_counts = Counter(route["target"] for route in routes)
+
+    total_candidates = len(routes)
+    ceiling = int(config.max_routes_per_document)
+    created_routes = routes[:ceiling]
+    deferred_routes = routes[ceiling:]
+    deferred_count = len(deferred_routes)
+    target_counts = Counter(route["target"] for route in created_routes)
+    total_target_counts = Counter(route["target"] for route in routes)
+    deferred_target_counts = Counter(route["target"] for route in deferred_routes)
+    deferred_code_counts = Counter(str(route.get("code") or "UNKNOWN") for route in deferred_routes)
     return {
         "schema": "docling-quality-routes/v1",
         "policy": {
@@ -2370,13 +2386,29 @@ def build_routes(doc: dict[str, Any], diagnostics: dict[str, Any], config: AppCo
             "picture_strategy": "full image -> quality gate -> overlapping crops only when unresolved",
             "text_strategy": "candidate vs trusted evidence; no autonomous engineering-value rewrite",
             "max_routes_per_document": config.max_routes_per_document,
+            "limit_semantics": "runaway-safety-ceiling-after-global-priority-sort",
+            "deferred_candidates_retained": True,
         },
         "summary": {
-            "routes": len(routes),
+            # `routes` is retained for backward compatibility and means the
+            # number actually queued for Stage 2B.
+            "routes": len(created_routes),
+            "routes_created": len(created_routes),
+            "total_candidates_detected": total_candidates,
+            "deferred": deferred_count,
+            "dropped": 0,
             "by_target": dict(target_counts),
-            "truncated": truncated,
+            "total_by_target": dict(total_target_counts),
+            "deferred_by_target": dict(deferred_target_counts),
+            "deferred_by_code": dict(deferred_code_counts),
+            "truncated": deferred_count > 0,
+            "safety_valve_triggered": deferred_count > 0,
         },
-        "routes": routes,
+        "routes": created_routes,
+        # A triggered safety ceiling must be loud and auditable, never a silent
+        # discard. These candidates are intentionally not synced to Stage 2B;
+        # raise the ceiling and rerun Stage 2A to queue them.
+        "deferred_routes": deferred_routes,
     }
 
 

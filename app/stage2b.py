@@ -1196,10 +1196,15 @@ async def _oneplus_text_crosscheck(
             first_token_timeout_seconds=int(first_token_timeout_seconds),
             idle_timeout_seconds=int(idle_timeout_seconds),
         )
+    except (httpx.TransportError, TimeoutError, ConnectionError):
+        # Transport/liveness failures are not evidence about the source image.
+        # Propagate them so _run_job can defer the route, open the endpoint
+        # circuit breaker, and retry without manufacturing an UNREADABLE result.
+        raise
     except Exception as exc:
         return {
             "verdict": "UNREADABLE", "status": "UNREADABLE", "corrected_text": "",
-            "raw_response": None, "usable": False, "transport_failed": True,
+            "raw_response": None, "usable": False, "transport_failed": False,
             "direct_transcription": True, "provider": provider,
             "error_type": type(exc).__name__, "error_message": str(exc)[:500],
         }
@@ -2454,10 +2459,6 @@ class Stage2BWorker:
         result_dir = Path(config.processed_dir) / Path(str(job.get("result_dir") or "")).name
         ledger_path = result_dir / "correction_ledger.json"
         try:
-            ledger = json.loads(ledger_path.read_text(encoding="utf-8")) if ledger_path.is_file() else {}
-        except (OSError, json.JSONDecodeError):
-            ledger = {}
-        try:
             source = json.loads(job.get("source_json") or "{}")
         except json.JSONDecodeError:
             source = {}
@@ -2465,51 +2466,58 @@ class Stage2BWorker:
         entry_type = "vision_enrichment" if is_picture else "text_correction"
         namespace = "vision" if is_picture else "text"
         entry_id = f"{job.get('generation')}:{namespace}:{job.get('route_id')}"
-        entry = next((item for item in ledger.get("entries") or [] if str(item.get("entry_id")) == entry_id), None)
-        if not entry:
-            return
-        history = list(entry.get("manual_crosschecks") or [])
-        history.append(payload)
-        entry["manual_crosschecks"] = history[-10:]
-        # A manual crossover is additional evidence, not authority over a
-        # human decision or a superseded generation.  UNREADABLE is likewise
-        # non-destructive: inability of the second processor to read the crop
-        # does not erase a prior deterministic decision.  A new READABLE source
-        # transcription may replace an old rejected/pending machine candidate
-        # only after the independent Stage 2C source-fidelity gate accepts the
-        # new transcription itself.
-        current_status = str(entry.get("status") or "").lower()
-        if (
-            entry_type == "text_correction"
-            and payload.get("direction") == "text_to_vision"
-            and payload.get("direct_transcription")
-            and not entry.get("human_verified")
-            and current_status != "superseded"
-        ):
-            corrected = str(payload.get("corrected_text") or "").strip()
-            if payload.get("verdict") == "READABLE" and corrected:
-                source_type = str(entry.get("source_type") or "text")
-                safety = source_transcription_safety_profile(
-                    str(entry.get("original_text") or ""), corrected, source_type=source_type
-                )
-                entry["manual_crosscheck_safety"] = safety
-                if safety.get("accepted"):
-                    entry["proposed_text"] = corrected
-                    entry["status"] = "applied"
-                    entry["status_reason"] = "SOURCE_IMAGE_TARGET_RECONSTRUCTION"
-                    entry["scope_guard"] = payload.get("scope_guard")
-                    entry["vision_direct_transcription"] = {
-                        "provider": payload.get("provider"),
-                        "model": payload.get("model"),
-                        "applied_at_epoch": payload.get("checked_at_epoch"),
-                        "manual_crossover": True,
-                    }
-            # Do not change state on UNREADABLE or on a readable-but-unsafe
-            # alternate transcription. The cross-check history still records
-            # that evidence for audit.
-        await asyncio.to_thread(
-            upsert_ledger_entry, result_dir, str(ledger.get("source_zip_sha256") or ""), entry
-        )
+
+        # Read-modify-write must share the same ledger lock as normal worker
+        # completion. Without this, a manual cross-check can race an automatic
+        # Stage 2C write and silently lose one side's update.
+        async with self._stage2c_ledger_lock:
+            try:
+                ledger = json.loads(ledger_path.read_text(encoding="utf-8")) if ledger_path.is_file() else {}
+            except (OSError, json.JSONDecodeError):
+                ledger = {}
+            entry = next((item for item in ledger.get("entries") or [] if str(item.get("entry_id")) == entry_id), None)
+            if not entry:
+                return
+            history = list(entry.get("manual_crosschecks") or [])
+            history.append(payload)
+            entry["manual_crosschecks"] = history[-10:]
+            # A manual crossover is additional evidence, not authority over a
+            # human decision or a superseded generation. UNREADABLE is likewise
+            # non-destructive. A new READABLE source transcription may replace
+            # an old rejected/pending machine candidate only after Stage 2C's
+            # independent source-fidelity gate accepts the new transcription.
+            current_status = str(entry.get("status") or "").lower()
+            if (
+                entry_type == "text_correction"
+                and payload.get("direction") == "text_to_vision"
+                and payload.get("direct_transcription")
+                and not entry.get("human_verified")
+                and current_status != "superseded"
+            ):
+                corrected = str(payload.get("corrected_text") or "").strip()
+                if payload.get("verdict") == "READABLE" and corrected:
+                    source_type = str(entry.get("source_type") or "text")
+                    safety = source_transcription_safety_profile(
+                        str(entry.get("original_text") or ""), corrected, source_type=source_type
+                    )
+                    entry["manual_crosscheck_safety"] = safety
+                    if safety.get("accepted"):
+                        entry["proposed_text"] = corrected
+                        entry["status"] = "applied"
+                        entry["status_reason"] = "SOURCE_IMAGE_TARGET_RECONSTRUCTION"
+                        entry["scope_guard"] = payload.get("scope_guard")
+                        entry["vision_direct_transcription"] = {
+                            "provider": payload.get("provider"),
+                            "model": payload.get("model"),
+                            "applied_at_epoch": payload.get("checked_at_epoch"),
+                            "manual_crossover": True,
+                        }
+                # Do not change state on UNREADABLE or on a readable-but-unsafe
+                # alternate transcription. The cross-check history still records
+                # that evidence for audit.
+            await asyncio.to_thread(
+                upsert_ledger_entry, result_dir, str(ledger.get("source_zip_sha256") or ""), entry
+            )
 
     async def _run_manual_crosscheck(self, job: dict[str, Any]) -> None:
         job_id = int(job["id"])
