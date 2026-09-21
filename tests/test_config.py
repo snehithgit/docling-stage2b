@@ -50,7 +50,7 @@ def test_old_oneplus_timeout_config_migrates_to_streaming_no_total_ceiling():
         assert loaded.stage2b_oneplus_stream_idle_timeout_seconds == 300
 
 
-def test_historical_oneplus_240_token_budget_migrates_to_384():
+def test_historical_oneplus_240_token_budget_migrates_to_512():
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "config.yaml"
         path.write_text(
@@ -61,7 +61,7 @@ def test_historical_oneplus_240_token_budget_migrates_to_384():
             encoding="utf-8",
         )
         loaded = load_config(path)
-        assert loaded.stage2b_oneplus_max_tokens == 384
+        assert loaded.stage2b_oneplus_max_tokens == 512
 
 
 def test_explicit_nonlegacy_oneplus_token_budget_is_preserved():

@@ -69,13 +69,26 @@ def _eligibility(entry: dict[str, Any]) -> tuple[bool, str]:
     status = str(entry.get("status") or "").lower()
     verdict = str(entry.get("verification_verdict") or "").upper()
     unresolved = bool(entry.get("unresolved", True))
+    human_decision = str(entry.get("human_visual_decision") or "").strip().lower()
+    human_verified = bool(entry.get("human_verified"))
+    has_evidence = bool(
+        _clean_list(entry.get("visible_text"))
+        or _clean_list(entry.get("visible_objects"))
+        or str(entry.get("generated_summary") or "").strip()
+    )
     if status != "applied":
         return False, f"stage2c_{status or 'unknown'}"
+    if human_verified and human_decision in {"decorative", "not_useful"}:
+        return False, "human_visual_excluded"
+    if human_verified and human_decision in {"technical", "useful"}:
+        if not has_evidence:
+            return False, "human_accepted_evidence_recovery_required"
+        return True, "human_accepted_technical_visual"
     if verdict and verdict != "TECHNICAL_USEFUL":
         return False, f"verdict_{verdict.lower()}"
     if unresolved:
         return False, "unresolved_visual_details"
-    if not (_clean_list(entry.get("visible_text")) or _clean_list(entry.get("visible_objects")) or str(entry.get("generated_summary") or "").strip()):
+    if not has_evidence:
         return False, "empty_visual_evidence"
     return True, "applied_resolved_technical_visual"
 
@@ -148,6 +161,9 @@ def normalize_visual_entry(
         "verification_status": entry.get("status"),
         "stage2c_status": entry.get("status"),
         "stage2c_status_reason": entry.get("status_reason"),
+        "human_verified": bool(entry.get("human_verified")),
+        "human_visual_decision": entry.get("human_visual_decision"),
+        "human_evidence_recovery_required": bool(entry.get("human_evidence_recovery_required")),
         "source_sha256": entry.get("original_source_sha256"),
         "rule_version": entry.get("rule_version"),
         "rag_eligible": eligible,

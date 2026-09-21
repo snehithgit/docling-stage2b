@@ -157,7 +157,7 @@ stage2b_retry_max_delay_seconds: 300
 stage2b_artifact_worker_cooldown_seconds: 60
 stage2b_max_retries: 2
 stage2b_pi5_max_tokens: 512
-stage2b_oneplus_max_tokens: 384
+stage2b_oneplus_max_tokens: 512
 stage2b_vision_crops_enabled: true
 stage2b_vision_crop_overlap: 0.20
 stage2b_vision_crop_upscale: 1.25

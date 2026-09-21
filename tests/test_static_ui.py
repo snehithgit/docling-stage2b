@@ -325,6 +325,9 @@ def test_vision_verifier_audit_page_is_read_only_and_evidence_first():
     assert "What the pipeline did" in js
     assert "Exact full-image prompt" in js
     assert "Raw crop response" in js
+    assert "Recover evidence" in js
+    assert "Evidence recovery" in html
+    assert "human_evidence_recovery_required" in js
     assert "/rerun" not in js
     assert "retryVerificationJob" not in js
 

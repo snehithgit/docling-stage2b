@@ -1360,21 +1360,115 @@ def verifier_audit_summary(result_dir: Path, *, text_require_human: bool = False
     vision_entries = [e for e in (ledger.get("entries") or []) if e.get("entry_type") == "vision_enrichment" and e.get("status") != "superseded"]
     visual_required = [e for e in vision_entries if _vision_requires_human(e)]
     reviewed = [e for e in vision_entries if e.get("human_visual_decision") in {"technical", "decorative", "useful", "not_useful"}]
+    evidence_recovery_required = [
+        e for e in vision_entries
+        if str(e.get("human_visual_decision") or "") in {"technical", "useful"}
+        and (
+            bool(e.get("human_evidence_recovery_required"))
+            or bool(e.get("verification_parse_failed"))
+            or not _entry_has_visual_evidence(e)
+        )
+    ]
     gate = audit_gate_state(result_dir)
-    blocking = int(text.get("blocking_review_required") or 0) + len(visual_required)
+    blocking = int(text.get("blocking_review_required") or 0) + len(visual_required) + len(evidence_recovery_required)
+    if blocking == 0:
+        gate_status = "ready"
+    elif evidence_recovery_required and not visual_required and not int(text.get("blocking_review_required") or 0):
+        gate_status = "waiting_for_evidence_recovery"
+    else:
+        gate_status = "waiting_for_audit"
+    if gate.get("bypassed_for_testing") and blocking:
+        gate_status = "bypassed_for_testing"
     return {
         "text": text,
         "vision_total": len(vision_entries),
         "vision_human_reviewed": len(reviewed),
         "vision_review_required": len(visual_required),
         "vision_required_entry_ids": [str(e.get("entry_id") or "") for e in visual_required],
+        "vision_evidence_recovery_required": len(evidence_recovery_required),
+        "vision_evidence_recovery_entry_ids": [str(e.get("entry_id") or "") for e in evidence_recovery_required],
         "review_required": blocking,
         "review_complete": blocking == 0,
         "bypassed_for_testing": bool(gate.get("bypassed_for_testing")),
         "blocking_review_required": 0 if gate.get("bypassed_for_testing") else blocking,
-        "gate_status": "bypassed_for_testing" if gate.get("bypassed_for_testing") and blocking else ("ready" if blocking == 0 else "waiting_for_audit"),
+        "gate_status": gate_status,
     }
 
+
+
+
+def _entry_has_visual_evidence(entry: dict[str, Any]) -> bool:
+    return bool(
+        (entry.get("visible_text") or [])
+        or (entry.get("visible_objects") or [])
+        or str(entry.get("generated_summary") or "").strip()
+    )
+
+
+def merge_human_visual_evidence(
+    result_dir: Path,
+    entry_id: str,
+    recovered: dict[str, Any],
+    recovery_audit_file: str | None = None,
+) -> dict[str, Any]:
+    """Fill evidence for a human-accepted visual without changing human authority.
+
+    The original verifier verdict/audit is retained. Only evidence fields are
+    refreshed from the bounded recovery pass. This prevents an automatic rerun
+    from overwriting a human Useful/Technical decision while still allowing the
+    accepted image to become useful to visual RAG.
+    """
+    path = result_dir / "correction_ledger.json"
+    try:
+        ledger = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    except (OSError, json.JSONDecodeError, TypeError) as exc:
+        raise ValueError("Correction ledger is unavailable") from exc
+    entries = list(ledger.get("entries") or [])
+    entry = next((e for e in entries if str(e.get("entry_id") or "") == str(entry_id)), None)
+    if not entry or entry.get("entry_type") != "vision_enrichment":
+        raise ValueError("Vision audit entry was not found")
+    decision = str(entry.get("human_visual_decision") or "").lower()
+    if not entry.get("human_verified") or decision not in {"technical", "useful"}:
+        raise ValueError("Visual evidence recovery requires an authoritative human Useful/Technical decision")
+
+    def merge_list(name: str, limit: int) -> list[str]:
+        values: list[str] = []
+        seen: set[str] = set()
+        for source in (entry.get(name) or [], recovered.get(name) or []):
+            for item in source if isinstance(source, list) else []:
+                text = re.sub(r"\s+", " ", str(item or "")).strip()
+                key = text.casefold()
+                if text and key not in seen:
+                    seen.add(key)
+                    values.append(text[:220])
+                if len(values) >= limit:
+                    return values
+        return values
+
+    entry["visible_text"] = merge_list("visible_text", 20)
+    entry["visible_objects"] = merge_list("visible_objects", 12)
+    category = str(recovered.get("diagram_category") or "unknown").strip().lower().replace(" ", "_")
+    if category in ALL_DIAGRAM_CATEGORIES and category != "unknown":
+        entry["diagram_category"] = category
+    if str(recovered.get("summary") or "").strip():
+        entry["generated_summary"] = str(recovered.get("summary") or "").strip()[:1200]
+    entry["crop_coverage"] = recovered.get("crop_coverage") or entry.get("crop_coverage")
+    entry["human_evidence_recovery_required"] = not _entry_has_visual_evidence(entry)
+    entry["human_evidence_recovered_at_epoch"] = time.time()
+    entry["human_evidence_recovery_unresolved"] = bool(recovered.get("unresolved", False))
+    entry["human_evidence_recovery_incomplete_crop_count"] = int(recovered.get("incomplete_crop_count") or 0)
+    entry["human_evidence_recovery_verdict"] = recovered.get("verdict")
+    entry["human_evidence_recovery_audit_file"] = recovery_audit_file
+    # The audit gate was already resolved by the human. Evidence-level
+    # uncertainty is tracked separately above and must not reopen classification.
+    entry["unresolved"] = False
+    entry["status"] = "applied"
+    entry["status_reason"] = "HUMAN_VISUAL_ACCEPTED"
+    ledger["entries"] = entries
+    ledger["updated_at_epoch"] = time.time()
+    _atomic_json(path, ledger)
+    rebuild_chunk_overlays(result_dir, entries)
+    return entry
 
 def apply_human_visual_decision(result_dir: Path, entry_id: str, decision: str) -> dict[str, Any]:
     decision = str(decision or "").strip().lower()
@@ -1390,6 +1484,11 @@ def apply_human_visual_decision(result_dir: Path, entry_id: str, decision: str) 
     entry = next((e for e in entries if str(e.get("entry_id") or "") == str(entry_id)), None)
     if not entry or entry.get("entry_type") != "vision_enrichment":
         raise ValueError("Vision audit entry was not found")
+    evidence_was_incomplete = bool(
+        entry.get("verification_parse_failed")
+        or int(entry.get("verification_incomplete_crop_count") or 0) > 0
+        or not _entry_has_visual_evidence(entry)
+    )
     entry["human_visual_decision"] = decision
     entry["human_verified"] = True
     entry["human_visual_decided_at_epoch"] = time.time()
@@ -1399,10 +1498,12 @@ def apply_human_visual_decision(result_dir: Path, entry_id: str, decision: str) 
         entry["status"] = "applied"
         entry["status_reason"] = "HUMAN_VISUAL_ACCEPTED"
         entry["unresolved"] = False
+        entry["human_evidence_recovery_required"] = evidence_was_incomplete
     else:
         entry["status"] = "excluded"
         entry["status_reason"] = "HUMAN_VISUAL_EXCLUDED"
         entry["unresolved"] = False
+        entry["human_evidence_recovery_required"] = False
     ledger["entries"] = entries
     ledger["updated_at_epoch"] = time.time()
     _atomic_json(path, ledger)

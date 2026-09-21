@@ -229,3 +229,47 @@ def test_visual_grounding_accepts_exact_technical_value_when_visible_in_image_te
     result = citation_audit("Set SW1 to 12 V [V1].", sources)
     assert result["grounding_passed"] is True
     assert result["grounding_warning"] is None
+
+
+def test_human_useful_overrides_uncertain_verdict_once_evidence_exists(tmp_path: Path):
+    result_dir = tmp_path / "FireAlarm__job8"
+    result_dir.mkdir()
+    (result_dir / "source_manifest.json").write_text(json.dumps({"source_filename":"Fire alarm panel.zip"}), encoding="utf-8")
+    ledger = {"entries":[{
+        "entry_id":"g:vision:R00006", "entry_type":"vision_enrichment", "route_id":"R00006",
+        "verification_job_id":76294, "page":8, "source_index":4,
+        "status":"applied", "status_reason":"HUMAN_VISUAL_ACCEPTED",
+        "verification_verdict":"UNCERTAIN", "human_verified":True,
+        "human_visual_decision":"useful", "unresolved":False,
+        "diagram_category":"wiring_diagram",
+        "visible_text":["POWER SUPPLY CONNECTIONS MAIN CABINET", "24V DC 5 A"],
+        "visible_objects":["power supply module"],
+        "generated_summary":"Main cabinet power supply wiring.",
+    }]}
+    (result_dir / "correction_ledger.json").write_text(json.dumps(ledger), encoding="utf-8")
+    summary = build_visual_evidence(result_dir, postprocess_job_id=8)
+    assert summary["rag_eligible_visuals"] == 1
+    row = json.loads((result_dir / "visual_evidence.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert row["rag_eligible"] is True
+    assert row["rag_eligibility_reason"] == "human_accepted_technical_visual"
+    assert row["verification_verdict"] == "UNCERTAIN"  # original audit preserved
+    assert row["human_visual_decision"] == "useful"
+
+
+def test_human_useful_without_evidence_stays_out_of_rag_until_recovered(tmp_path: Path):
+    result_dir = tmp_path / "FireAlarm__job9"
+    result_dir.mkdir()
+    (result_dir / "source_manifest.json").write_text(json.dumps({"source_filename":"Fire alarm panel.zip"}), encoding="utf-8")
+    ledger = {"entries":[{
+        "entry_id":"g:vision:R00007", "entry_type":"vision_enrichment", "route_id":"R00007",
+        "status":"applied", "status_reason":"HUMAN_VISUAL_ACCEPTED",
+        "verification_verdict":"UNCERTAIN", "human_verified":True,
+        "human_visual_decision":"useful", "unresolved":False,
+        "visible_text":[], "visible_objects":[], "generated_summary":"",
+        "human_evidence_recovery_required":True,
+    }]}
+    (result_dir / "correction_ledger.json").write_text(json.dumps(ledger), encoding="utf-8")
+    build_visual_evidence(result_dir, postprocess_job_id=9)
+    row = json.loads((result_dir / "visual_evidence.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert row["rag_eligible"] is False
+    assert row["rag_eligibility_reason"] == "human_accepted_evidence_recovery_required"

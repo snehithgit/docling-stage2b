@@ -1,3 +1,15 @@
+## 2026.09.21.40.9.4 — Vision truncation recovery + human-authority evidence
+
+- A length-truncated full-image vision response no longer discards useful leading evidence or suppresses crops. Closed fields/labels are conservatively recovered, marked incomplete, and the configured crop regions are allowed to rescue the route.
+- The old second attempt no longer repeats the same verbose full-image request after a format failure; it uses a compact classification-only repair prompt.
+- Crop calls use a compact technical-evidence prompt and merged evidence now retains up to 20 unique visible-text items across the full image/crops.
+- Human **Useful / Technical** is now authoritative for visual-RAG classification even when the original machine verdict was `UNCERTAIN`; empty evidence still blocks Stage 3 until evidence recovery finishes.
+- Human-accepted images with missing/truncated evidence automatically queue a background OnePlus recovery pass. That pass inspects the full image plus every configured crop, merges the evidence, preserves the original verifier audit and human decision, and writes a separate recovery audit JSON.
+- Existing pre-.40.9.4 human-accepted/empty entries are detected dynamically; the Vision Audit page exposes **Recover evidence** without requiring Stage 2A/Stage 2B to be rerun.
+- OnePlus visual output headroom is raised from 384 to 512 tokens, while partial recovery/compact prompts prevent that increase from becoming an unbounded OCR dump.
+- Stage 3 remains blocked while accepted visual evidence recovery is outstanding (unless the explicit testing bypass is active).
+- Validation: **501/501 tests pass** before packaging; final ZIP is separately revalidated. See `docs/RELEASE_VALIDATION_2026.09.21.40.9.4.md`.
+
 ## 2026.09.21.40.9.3 — Pi5 correction-backfill outage hardening
 
 - Pi5 transport/liveness failures during correction generation are no longer converted into normal-looking `pending` correction results.

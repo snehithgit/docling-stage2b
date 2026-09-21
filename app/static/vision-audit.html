@@ -4,8 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Vision Verifier Audit · Docling Auto-Convert</title>
-<link rel="stylesheet" href="/assets/styles.css?v=2026.09.21.40.9.3" />
-<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.21.40.9.3" />
+<link rel="stylesheet" href="/assets/styles.css?v=2026.09.21.40.9.4" />
+<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.21.40.9.4" />
 </head>
 <body class="ui29">
 <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -50,7 +50,7 @@
 
     <section class="crossover-explainer vision-audit-notice">
       <strong>Human audit gate.</strong>
-      <p>Uncertain visual evidence must be classified here before Stage 3 proceeds. Artifact-sweep items use Technical / Decorative; normal vision routes use Useful / Not useful. Human decisions override automatic classification. A book-level testing bypass is available without accepting unresolved evidence.</p>
+      <p>Uncertain visual evidence must be classified here before Stage 3 proceeds. Artifact-sweep items use Technical / Decorative; normal vision routes use Useful / Not useful. Human decisions override automatic classification. If an accepted image has no usable evidence because the model response was truncated, full-image + crop evidence recovery must finish before Stage 3. A book-level testing bypass remains available without accepting unresolved evidence.</p>
     </section>
 
     <section class="vision-audit-summary" aria-label="Audit totals">
@@ -61,6 +61,7 @@
       <div class="vision-audit-stat"><span>Used crops</span><strong id="va-crops">0</strong></div>
       <div class="vision-audit-stat"><span>Stage 2C applied / excluded</span><strong id="va-downstream">0 / 0</strong></div>
       <div class="vision-audit-stat"><span>Human review required</span><strong id="va-review-required">0</strong></div>
+      <div class="vision-audit-stat"><span>Evidence recovery</span><strong id="va-evidence-recovery">0</strong></div>
     </section>
 
     <section class="panel vision-audit-filter-panel">
@@ -77,7 +78,7 @@
     <nav class="vision-audit-pager" aria-label="Audit pagination"><button class="secondary-button" id="va-prev" type="button">Previous</button><span id="va-page">Page 1</span><button class="secondary-button" id="va-next" type="button">Next</button></nav>
   </main>
 </div>
-<script src="/assets/nav.js?v=2026.09.21.40.9.3"></script>
-<script src="/assets/vision-audit.js?v=2026.09.21.40.9.3"></script>
+<script src="/assets/nav.js?v=2026.09.21.40.9.4"></script>
+<script src="/assets/vision-audit.js?v=2026.09.21.40.9.4"></script>
 </body>
 </html>

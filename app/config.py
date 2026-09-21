@@ -206,7 +206,7 @@ class AppConfig:
     # 512-1024 token budget, but verifier/reverification JSON also needs enough
     # headroom to avoid length-truncated technical responses.
     stage2b_pi5_max_tokens: int = 512
-    stage2b_oneplus_max_tokens: int = 384
+    stage2b_oneplus_max_tokens: int = 512
     stage2b_vision_crops_enabled: bool = True
     stage2b_vision_crop_overlap: float = 0.20
     stage2b_vision_crop_upscale: float = 1.25
@@ -579,12 +579,12 @@ def load_config(path: Path) -> AppConfig:
         and "stage2b_oneplus_stream_idle_timeout_seconds" not in values
     ):
         values["stage2b_oneplus_job_timeout_seconds"] = 0
-    # 240 was the historical OnePlus vision output budget. Real streamed runs
-    # showed many otherwise healthy responses ending with finish_reason=length
-    # exactly at that ceiling, so migrate that old default to 384 in memory.
-    # Values other than the old default are preserved as explicit user choices.
-    if values.get("stage2b_oneplus_max_tokens") == 240:
-        values["stage2b_oneplus_max_tokens"] = 384
+    # 240/384 were historical OnePlus vision output budgets. Real technical
+    # drawings demonstrated valid responses being cut at those ceilings. The
+    # compact/partial-recovery path prevents 512 from becoming permission for
+    # unbounded OCR-style listing; it is fallback headroom for complete JSON.
+    if values.get("stage2b_oneplus_max_tokens") in {240, 384}:
+        values["stage2b_oneplus_max_tokens"] = 512
     # 160 and 220 were historical Pi5 output ceilings. Real target-source
     # transcriptions demonstrated a valid paragraph being cut at the token
     # boundary, so migrate those old defaults to 512. Explicit custom values

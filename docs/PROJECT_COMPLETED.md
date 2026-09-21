@@ -1,4 +1,17 @@
-# Current release — 2026.09.21.40.9.3
+# Current release — 2026.09.21.40.9.4
+
+## `.40.9.4` complete — vision evidence recovery
+- [x] Preserve usable leading fields from max-token-truncated vision JSON.
+- [x] Run crop recovery when full-image parsing fails or evidence is incomplete.
+- [x] Use compact repair/evidence prompts to avoid repeating the OCR-style overflow.
+- [x] Human Useful/Technical is the classification authority for visual RAG.
+- [x] Accepted-but-empty images remain downstream-blocking until evidence is recovered.
+- [x] Full image + all configured crop evidence is merged for human-accepted recovery.
+- [x] Original verifier audit remains unchanged; recovery audit is separate.
+- [x] 512-token OnePlus headroom with bounded evidence extraction.
+- [x] Regression suite: 501/501 tests pass before packaging.
+
+# Previous release — 2026.09.21.40.9.3
 
 ## `.40.9.3` complete — Pi5 correction-backfill outage hardening
 - [x] Preserve transport failures as infrastructure failures, never correction outcomes.

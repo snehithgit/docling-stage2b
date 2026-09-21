@@ -1952,11 +1952,27 @@ async def stage2b_vision_audit(postprocess_job_id: int | None = None, limit: int
                     "status_reason": entry.get("status_reason"),
                     "diagram_category": entry.get("diagram_category"),
                     "generated_summary": entry.get("generated_summary"),
+                    "visible_text": entry.get("visible_text") or [],
+                    "visible_objects": entry.get("visible_objects") or [],
+                    "crop_coverage": entry.get("crop_coverage"),
                     "unresolved": entry.get("unresolved"),
                     "raw_docling_immutable": entry.get("raw_docling_immutable", True),
                     "entry_id": entry.get("entry_id"),
                     "human_visual_decision": entry.get("human_visual_decision"),
                     "human_verified": bool(entry.get("human_verified")),
+                    "human_evidence_recovery_required": bool(
+                        entry.get("human_evidence_recovery_required")
+                        or (
+                            str(entry.get("human_visual_decision") or "") in {"technical", "useful"}
+                            and not (
+                                (entry.get("visible_text") or [])
+                                or (entry.get("visible_objects") or [])
+                                or str(entry.get("generated_summary") or "").strip()
+                            )
+                        )
+                    ),
+                    "human_evidence_recovered_at_epoch": entry.get("human_evidence_recovered_at_epoch"),
+                    "human_evidence_recovery_audit_file": entry.get("human_evidence_recovery_audit_file"),
                 }
 
         crop_regions = [str(item.get("region")) for item in crop_audit if isinstance(item, dict) and item.get("region")]
@@ -2003,6 +2019,8 @@ async def stage2b_vision_audit(postprocess_job_id: int | None = None, limit: int
                 "crop_coverage": parsed.get("crop_coverage"),
                 "crop_early_stop": parsed.get("crop_early_stop"),
                 "incomplete_crop_count": parsed.get("incomplete_crop_count", 0),
+                "full_image_parse_failed": bool(parsed.get("full_image_parse_failed")),
+                "full_image_partial_recovery": bool(parsed.get("full_image_partial_recovery")),
             },
             "full_image": {
                 "parsed": parsed.get("full_image") if isinstance(parsed.get("full_image"), dict) else None,
@@ -2032,6 +2050,7 @@ async def stage2b_vision_audit(postprocess_job_id: int | None = None, limit: int
         "applied_enrichment": sum(1 for j in jobs if (j.get("downstream") or {}).get("status") == "applied"),
         "excluded": sum(1 for j in jobs if (j.get("downstream") or {}).get("status") == "excluded"),
         "human_review_required": sum(1 for j in jobs if not (j.get("downstream") or {}).get("human_visual_decision") and (str((j.get("classification") or {}).get("verdict") or j.get("verdict") or "").upper() == "UNCERTAIN" or bool((j.get("classification") or {}).get("unresolved")) or (j.get("downstream") or {}).get("status") == "pending")),
+        "evidence_recovery_required": sum(1 for j in jobs if (j.get("downstream") or {}).get("human_evidence_recovery_required")),
         "human_reviewed": sum(1 for j in jobs if (j.get("downstream") or {}).get("human_visual_decision")),
     }
     return {"schema": "docling-vision-verifier-audit/v1", "summary": summary, "jobs": jobs}
@@ -2048,10 +2067,20 @@ async def vision_audit_human_decision(job_id: int, entry_id: str, request: Visua
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     runtime.events.notify("verifier_audit_decision")
+    recovery = None
+    if bool(entry.get("human_evidence_recovery_required")) and str(entry.get("human_visual_decision") or "") in {"technical", "useful"}:
+        verification_job_id = entry.get("verification_job_id")
+        if verification_job_id is not None:
+            try:
+                recovery = await runtime.stage2b_worker.start_human_visual_evidence_recovery(
+                    int(verification_job_id), str(entry.get("entry_id") or entry_id)
+                )
+            except ValueError as exc:
+                recovery = {"status": "not_queued", "error": str(exc)}
     audit = await asyncio.to_thread(
         verifier_audit_summary, result_dir, text_require_human=bool(runtime.config.stage2c_require_human_review)
     )
-    return {"ok": True, "entry": entry, "audit": audit}
+    return {"ok": True, "entry": entry, "audit": audit, "evidence_recovery": recovery}
 
 
 @app.get("/api/postprocess/jobs/{job_id}/verifier-audit")

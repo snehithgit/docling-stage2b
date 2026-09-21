@@ -23,6 +23,7 @@ from app.stage2b import (
     _docling_bbox_to_fitz,
     _render_source_target,
     _render_source_table_cell,
+    _recover_vision_partial_json,
     _table_cell_context_parts,
     _target_crop_rect,
     _pi5_prompt_payload,
@@ -200,10 +201,40 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(parsed["legacy_visible_labels"], ["K59", "relay symbol"])
         self.assertTrue(parsed["legacy_schema"])
 
-    def test_full_image_parse_failure_does_not_launch_crop_fanout(self):
+    def test_full_image_parse_failure_launches_bounded_crop_recovery(self):
         full = {"verdict": "UNCERTAIN", "unresolved": True, "parse_failed": True}
-        self.assertFalse(_should_crop_vision(full, True))
+        self.assertTrue(_should_crop_vision(full, True))
         self.assertTrue(_should_crop_vision({"verdict": "UNCERTAIN", "unresolved": True}, True))
+        self.assertFalse(_should_crop_vision(full, False))
+
+    def test_merge_parse_failed_full_with_resolved_crop_uses_crop_evidence(self):
+        full = {
+            "verdict": "UNCERTAIN", "confidence": 0, "visible_text": [], "visible_objects": [],
+            "diagram_category": "unknown", "summary": "", "unresolved": True,
+            "unresolved_reason": "MODEL_RESPONSE_PARSE_FAILED", "parse_failed": True,
+        }
+        crop = {
+            "verdict": "TECHNICAL_USEFUL", "confidence": 0.93,
+            "visible_text": ["PSU 1", "24V DC 5 A"], "visible_objects": ["power supply module"],
+            "diagram_category": "wiring_diagram", "summary": "Power supply wiring.",
+            "unresolved": False, "unresolved_reason": "",
+        }
+        merged = _merge_vision(full, [crop])
+        self.assertEqual(merged["verdict"], "TECHNICAL_USEFUL")
+        self.assertFalse(merged["unresolved"])
+        self.assertTrue(merged["full_image_parse_failed"])
+        self.assertIn("24V DC 5 A", merged["visible_text"])
+
+    def test_truncated_vision_partial_json_recovers_closed_labels(self):
+        raw = {
+            "choices": [{"message": {"content": '{"verdict":"TECHNICAL_USEFUL","confidence":0.98,"visible_text":["POWER SUPPLY CONNECTIONS MAIN CABINET","PSU 1","24V DC 5 A","'}, "finish_reason": "length"}],
+            "_stream": {"finish_reason": "length"},
+        }
+        recovered = _recover_vision_partial_json(raw)
+        self.assertIsNotNone(recovered)
+        self.assertEqual(recovered["verdict"], "TECHNICAL_USEFUL")
+        self.assertEqual(recovered["visible_text"][:3], ["POWER SUPPLY CONNECTIONS MAIN CABINET", "PSU 1", "24V DC 5 A"])
+        self.assertTrue(recovered["unresolved"])
 
 
 class Pi5ParseRecoveryTests(unittest.IsolatedAsyncioTestCase):
@@ -436,6 +467,30 @@ class VisionParseRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parsed["parse_attempt_count"], 2)
         self.assertEqual(len(attempts), 2)
         self.assertEqual(raw, attempts[-1])
+
+    async def test_length_truncated_vision_salvages_partial_and_skips_repeat_full_call(self):
+        class FakeClient:
+            def __init__(self):
+                self.calls = 0
+
+            async def inspect_image_stream(self, *args, **kwargs):
+                self.calls += 1
+                return {
+                    "choices": [{"message": {"content": '{"verdict":"TECHNICAL_USEFUL","confidence":0.98,"visible_text":["PSU 1","24V DC 5 A","'}, "finish_reason": "length"}],
+                    "_stream": {"finish_reason": "length", "done_received": False, "protocol_complete": True},
+                }
+
+        client = FakeClient()
+        parsed, _, attempts = await _inspect_vision_region(
+            client, b"image", "prompt", "image/png", "model", 512,
+            first_token_timeout_seconds=1200, stream_idle_timeout_seconds=300,
+        )
+        self.assertEqual(client.calls, 1)
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(parsed["verdict"], "TECHNICAL_USEFUL")
+        self.assertTrue(parsed["recovered_from_partial_json"])
+        self.assertTrue(parsed["unresolved"])
+        self.assertIn("PSU 1", parsed["visible_text"])
 
     async def test_valid_repair_response_is_used(self):
         class FakeClient:

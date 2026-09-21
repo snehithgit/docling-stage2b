@@ -1,4 +1,18 @@
-# Current release — 2026.09.21.40.9.3
+# Current release — 2026.09.21.40.9.4
+
+## `.40.9.4` complete — visual truncation/crop recovery and human-authority evidence
+- [x] Length-truncated vision JSON salvages closed classification/evidence fields instead of becoming empty evidence.
+- [x] Parse failure/omitted-detail results trigger bounded crop recovery instead of suppressing crops.
+- [x] Compact repair prompt replaces repeated oversized full-image retry.
+- [x] Human Useful/Technical overrides automatic UNCERTAIN for RAG classification.
+- [x] Human-accepted empty evidence blocks Stage 3 until evidence recovery completes.
+- [x] Background recovery inspects full image + all configured crops and merges evidence without altering the human decision.
+- [x] Original verifier result remains auditable; recovery gets its own JSON audit file.
+- [x] Existing human-accepted empty entries are detected without rerunning Stage 2A.
+- [x] OnePlus visual output ceiling migrated to 512 tokens.
+- [x] Regression coverage includes the real max-token truncation failure class and human-recovery path.
+
+# Previous release — 2026.09.21.40.9.3
 
 ## `.40.9.3` complete — Pi5 correction-backfill outage hardening
 - [x] Correction transport failures propagate instead of becoming fake pending results.

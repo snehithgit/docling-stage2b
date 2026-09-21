@@ -33,7 +33,7 @@ from .verifier_clients import GroqStructuredVerifier, GroqVisionVerifier, OpenAI
 from .stage2c import (
     ALL_DIAGRAM_CATEGORIES, DECORATIVE_IMAGE_CATEGORIES, TECHNICAL_DIAGRAM_CATEGORIES,
     TECHNICAL_IMAGE_CATEGORIES, analyze_text_structure, correction_fidelity,
-    STAGE2C_RULE_VERSION, human_review_summary, image_structure_evidence, normalize_human_verified_ledger, revalidate_unreviewed_text_entries, source_sha256, source_transcription_safety_profile, supersede_vision_entries_for_routes, upsert_ledger_entry, vision_enrichment_status,
+    STAGE2C_RULE_VERSION, human_review_summary, image_structure_evidence, merge_human_visual_evidence, normalize_human_verified_ledger, revalidate_unreviewed_text_entries, source_sha256, source_transcription_safety_profile, supersede_vision_entries_for_routes, upsert_ledger_entry, vision_enrichment_status,
 )
 
 
@@ -41,6 +41,12 @@ PI5_VERDICTS = {"LIKELY_CORRUPT", "LIKELY_OK", "UNCERTAIN"}
 VISION_VERDICTS = {"TECHNICAL_USEFUL", "DECORATIVE_OR_LOW_VALUE", "UNCERTAIN"}
 PI5_EVIDENCE_MAX_CHARS = 120
 logger = logging.getLogger("uvicorn.error")
+
+
+def _atomic_write_json_payload(path: Path, payload: dict[str, Any]) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(path)
 
 TEXT_TRIAGE_SCHEMA = {
     "type": "object",
@@ -1421,6 +1427,119 @@ def _vision_prompt(job: dict[str, Any], region: str = "full image") -> str:
     )
 
 
+
+
+def _vision_evidence_prompt(job: dict[str, Any], region: str, *, human_accepted: bool = False) -> str:
+    authority = (
+        "A human reviewer has already confirmed that this image is technically useful. Do not reclassify it as decorative. "
+        if human_accepted else
+        "The image has already been selected for technical evidence extraction. "
+    )
+    return (
+        authority
+        + "Extract only concise evidence visibly present in this image region. Do not infer hidden wiring, function, identity, or values. "
+        "Return ONE compact JSON object only. Use verdict TECHNICAL_USEFUL when technical evidence is visible; otherwise UNCERTAIN. "
+        "visible_text: at most 8 short exact technical strings; omit repeated single-letter terminals and title-block/publisher text unless technically important. "
+        "visible_objects: at most 4 short descriptions of visible components/structures. "
+        f"diagram_category: exactly one of: {VISION_CATEGORIES_TEXT}. "
+        "summary: at most 25 words describing visible technical structure. "
+        "unresolved must be true only when important technical detail in this region remains unreadable or omitted; unresolved_reason must be CLASSIFICATION, UNREADABLE_DETAILS, OMITTED_DETAILS, or empty. "
+        f"Region: {region}. Stage-2 route reason: {job.get('reason') or 'visual ambiguity'}."
+    )
+
+
+def _vision_compact_repair_prompt() -> str:
+    return (
+        "Classify the same technical-manual image. Return ONE complete compact JSON object only; no markdown and no thinking text. "
+        "Keys: verdict, confidence, visible_text, visible_objects, diagram_category, summary, unresolved, unresolved_reason. "
+        "verdict is TECHNICAL_USEFUL, DECORATIVE_OR_LOW_VALUE, or UNCERTAIN. "
+        "For this FORMAT REPAIR set visible_text=[] and visible_objects=[] so the JSON cannot overflow. "
+        f"diagram_category is one of: {VISION_CATEGORIES_TEXT}. summary is at most 12 words."
+    )
+
+
+def _has_visual_evidence(value: dict[str, Any]) -> bool:
+    return bool(
+        (value.get("visible_text") or [])
+        or (value.get("visible_objects") or [])
+        or str(value.get("summary") or value.get("generated_summary") or "").strip()
+    )
+
+
+def _recover_vision_partial_json(raw_response: dict[str, Any]) -> dict[str, Any] | None:
+    """Recover complete fields/items from a length-truncated vision JSON response.
+
+    This is intentionally conservative: only syntactically closed JSON strings
+    and scalar fields are retained. The recovered result stays unresolved and
+    therefore drives crop evidence recovery instead of pretending the truncated
+    full-image answer was complete.
+    """
+    try:
+        content = raw_response["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        return None
+    if isinstance(content, list):
+        content = "\n".join(str(item.get("text") or "") if isinstance(item, dict) else str(item) for item in content)
+    text = str(content or "")
+    if not text:
+        return None
+
+    def string_field(name: str) -> str | None:
+        m = re.search(rf'"{re.escape(name)}"\s*:\s*("(?:\\.|[^"\\])*")', text, flags=re.I | re.S)
+        if not m:
+            return None
+        try:
+            return str(json.loads(m.group(1)))
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    def array_field(name: str, limit: int) -> list[str]:
+        m = re.search(rf'"{re.escape(name)}"\s*:\s*\[(.*)', text, flags=re.I | re.S)
+        if not m:
+            return []
+        tail = m.group(1)
+        # Stop at the first completed array close when present; otherwise parse
+        # only fully closed string tokens from the truncated tail.
+        close = tail.find("]")
+        if close >= 0:
+            tail = tail[:close]
+        values: list[str] = []
+        for token in re.finditer(r'"(?:\\.|[^"\\])*"', tail, flags=re.S):
+            try:
+                value = str(json.loads(token.group(0))).strip()
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if value:
+                values.append(value[:160])
+            if len(values) >= limit:
+                break
+        return values
+
+    verdict = str(string_field("verdict") or "").upper()
+    cm = re.search(r'"confidence"\s*:\s*(-?(?:\d+(?:\.\d*)?|\.\d+))', text, flags=re.I)
+    if verdict not in VISION_VERDICTS or not cm:
+        return None
+    try:
+        confidence = float(cm.group(1))
+    except ValueError:
+        return None
+    category = str(string_field("diagram_category") or "unknown").lower().replace(" ", "_")
+    if category not in ALL_DIAGRAM_CATEGORIES:
+        category = "unknown"
+    summary = string_field("summary") or ""
+    return {
+        "verdict": verdict,
+        "confidence": confidence,
+        "visible_text": array_field("visible_text", 12),
+        "visible_objects": array_field("visible_objects", 8),
+        "diagram_category": category,
+        "summary": summary[:500],
+        "unresolved": True,
+        "unresolved_reason": "OMITTED_DETAILS",
+        "recovered_from_partial_json": True,
+        "truncated": True,
+    }
+
 def _normalize_evidence_text(value: str) -> str:
     """Normalize representation details without semantic/fuzzy matching."""
     text = unicodedata.normalize("NFKC", str(value or "")).casefold()
@@ -1673,12 +1792,17 @@ def _validate_vision(parsed: dict[str, Any]) -> dict[str, Any]:
 
 
 def _should_crop_vision(full: dict[str, Any], enabled: bool) -> bool:
-    # If the full-image model response itself could not be parsed after the
-    # one repair attempt, complete the route conservatively as UNCERTAIN.
-    # Starting up to eight more crop calls here can consume the entire route
-    # budget and turn a format problem back into a timeout/retry loop.
-    return bool(enabled) and not bool(full.get("parse_failed")) and (
-        full.get("verdict") == "UNCERTAIN" or bool(full.get("unresolved"))
+    # Crops are the bounded recovery path for an uncertain, detail-incomplete,
+    # or format-truncated full-image result. A parse failure is not evidence
+    # that the picture is useless; it is exactly when smaller regions can rescue
+    # technical evidence without repeating the same oversized full-image call.
+    if not bool(enabled):
+        return False
+    return bool(
+        full.get("parse_failed")
+        or full.get("verdict") == "UNCERTAIN"
+        or bool(full.get("unresolved"))
+        or (full.get("verdict") == "TECHNICAL_USEFUL" and not _has_visual_evidence(full))
     )
 
 
@@ -1729,17 +1853,23 @@ def _merge_vision(full: dict[str, Any], crops: list[dict[str, Any]]) -> dict[str
     return {
         "verdict": verdict,
         "confidence": round(max(confidences) if confidences else 0.0, 4),
-        "visible_text": visible_text[:12],
-        "visible_labels": visible_text[:12],
+        "visible_text": visible_text[:20],
+        "visible_labels": visible_text[:20],
         "legacy_visible_labels": legacy_visible_labels[:20],
         "legacy_schema": any(bool(item.get("legacy_schema")) for item in all_results),
-        "visible_objects": visible_objects[:10],
+        "visible_objects": visible_objects[:12],
         "diagram_category": category,
         "summary": full.get("summary") or next((item.get("summary") for item in crops if item.get("summary")), ""),
-        "unresolved": any(item.get("unresolved", True) for item in all_results),
+        "unresolved": (
+            any(item.get("unresolved", True) for item in crops)
+            if crops and (bool(full.get("parse_failed")) or str(full.get("unresolved_reason") or "").upper() in {"OMITTED_DETAILS", "MODEL_RESPONSE_PARSE_FAILED", "UNREADABLE_DETAILS"})
+            else any(item.get("unresolved", True) for item in all_results)
+        ),
         "full_image": full,
         "crops": crops,
         "crop_count": len(crops),
+        "full_image_parse_failed": bool(full.get("parse_failed")),
+        "full_image_partial_recovery": bool(full.get("recovered_from_partial_json")),
     }
 
 
@@ -1818,6 +1948,17 @@ async def _inspect_vision_region(
 
     def parse(raw_response: dict[str, Any]) -> dict[str, Any]:
         if _stream_response_truncated(raw_response):
+            recovered = _recover_vision_partial_json(raw_response)
+            if recovered is not None:
+                validated = _validate_vision(recovered)
+                validated["recovered_from_partial_json"] = True
+                validated["truncated"] = True
+                # A length-truncated full/crop response is evidence-incomplete
+                # even when its leading classification was usable. Crops can
+                # now fill that evidence instead of discarding the whole route.
+                validated["unresolved"] = True
+                validated["unresolved_reason"] = "OMITTED_DETAILS"
+                return validated
             raise ValueError("Verifier stopped at max_tokens before a clean completion")
         return _validate_vision(_json_from_model_response(raw_response))
 
@@ -1826,11 +1967,10 @@ async def _inspect_vision_region(
     try:
         return parse(raw), raw, attempts
     except ValueError:
-        repair_prompt = (
-            prompt
-            + "\n\nYour previous response was not valid/complete JSON. Return ONLY one complete JSON object now. "
-              "Do not use markdown fences and do not include thinking text. Keep it compact; shorten visible_text, visible_objects, and summary rather than truncating JSON."
-        )
+        # Do not repeat the original verbose request after a format failure.
+        # The repair call is classification-only; evidence recovery is delegated
+        # to smaller crops when the result remains incomplete.
+        repair_prompt = _vision_compact_repair_prompt()
         raw_retry = await call(repair_prompt)
         attempts.append(raw_retry)
         try:
@@ -2386,6 +2526,11 @@ class Stage2BWorker:
         # generates missing human-review suggestions without rerunning Stage 2B.
         self._correction_suggestion_tasks: dict[int, asyncio.Task[Any]] = {}
         self.correction_suggestion_state: dict[int, dict[str, Any]] = {}
+        # Human Useful/Technical is authoritative classification. If the original
+        # verifier JSON was truncated/empty, recover evidence in the background
+        # without changing the human decision or replacing the original audit.
+        self._human_visual_recovery_tasks: dict[int, asyncio.Task[Any]] = {}
+        self.human_visual_recovery_state: dict[int, dict[str, Any]] = {}
 
     def device_lock(self, provider: str) -> asyncio.Lock:
         """Share the physical-provider lock with explicit RAG generation.
@@ -2434,6 +2579,11 @@ class Stage2BWorker:
         if self._correction_suggestion_tasks:
             await asyncio.gather(*self._correction_suggestion_tasks.values(), return_exceptions=True)
         self._correction_suggestion_tasks.clear()
+        for task in self._human_visual_recovery_tasks.values():
+            task.cancel()
+        if self._human_visual_recovery_tasks:
+            await asyncio.gather(*self._human_visual_recovery_tasks.values(), return_exceptions=True)
+        self._human_visual_recovery_tasks.clear()
 
     def _auto_run(self, target: str) -> bool:
         config = self._config_getter()
@@ -3606,6 +3756,8 @@ class Stage2BWorker:
         self._events.notify(f"stage2b_{provider}_endpoint_circuit_closed")
         if provider == "pi5" and not self._stopping.is_set():
             asyncio.create_task(self._resume_waiting_pi5_backfills(), name="resume-pi5-backfills")
+        if provider == "oneplus" and not self._stopping.is_set():
+            asyncio.create_task(self._resume_waiting_human_visual_recoveries(), name="resume-human-visual-recoveries")
 
     async def _endpoint_provider_ready(self, provider: str) -> bool:
         if provider not in self._endpoint_circuit:
@@ -4020,6 +4172,10 @@ class Stage2BWorker:
                 ),
                 "unresolved": parsed.get("unresolved", True),
                 "crop_coverage": parsed.get("crop_coverage"),
+                "verification_parse_failed": bool(parsed.get("parse_failed") or parsed.get("full_image_parse_failed")),
+                "verification_partial_recovery": bool(parsed.get("recovered_from_partial_json") or parsed.get("full_image_partial_recovery")),
+                "verification_incomplete_crop_count": int(parsed.get("incomplete_crop_count") or 0),
+                "verification_crop_count": int(parsed.get("crop_count") or 0),
                 "structural_image_evidence": parsed.get("structural_image_evidence"),
                 "deterministic_override": parsed.get("deterministic_override"),
                 "provenance_note": (
@@ -4458,7 +4614,7 @@ class Stage2BWorker:
                 config.stage2b_vision_max_crops,
             )
             for label, crop_bytes, crop_mime in crops:
-                prompt = _vision_prompt(job, label)
+                prompt = _vision_evidence_prompt(job, label)
                 job["_active_stage"] = f"crop_{label}"
                 crop_progress = self._prepare_oneplus_stream_region(f"crop {label}", target=role_target)
                 parsed, raw, attempts = await _inspect_vision_region(
@@ -4526,7 +4682,7 @@ class Stage2BWorker:
             "image_sha256": source_sha256(image_bytes),
             "reason": job.get("reason") or "",
             "full_image_prompt": full_prompt,
-            "crop_policy": "full image first; overlapping crops only if unresolved",
+            "crop_policy": "full image first; overlapping crops recover uncertainty, truncation, or missing technical evidence",
             "vision_provider": str(getattr(client, "provider", "oneplus")),
             "streaming": {
                 "enabled": str(getattr(client, "provider", "oneplus")) == "oneplus",
@@ -4552,6 +4708,165 @@ class Stage2BWorker:
         self.worker_state[role_target]["active_stage"] = "merging result"
         result["vision_provider"] = str(getattr(client, "provider", "oneplus"))
         return request, result, merged["verdict"], model, endpoint
+
+
+    async def _resume_waiting_human_visual_recoveries(self) -> None:
+        waiting = [
+            (int(job_id), str(state.get("entry_id") or ""))
+            for job_id, state in self.human_visual_recovery_state.items()
+            if state.get("status") == "waiting_for_device" and state.get("entry_id")
+        ]
+        for job_id, entry_id in waiting:
+            try:
+                await self.start_human_visual_evidence_recovery(job_id, entry_id)
+            except ValueError:
+                logger.exception("Could not resume human visual evidence recovery for job %s", job_id)
+
+    async def start_human_visual_evidence_recovery(self, verification_job_id: int, entry_id: str) -> dict[str, Any]:
+        job_id = int(verification_job_id)
+        running = self._human_visual_recovery_tasks.get(job_id)
+        if running and not running.done():
+            return dict(self.human_visual_recovery_state.get(job_id) or {"status": "running", "job_id": job_id})
+        job = await self._store.get_job(job_id)
+        if not job:
+            raise ValueError("Vision verification job not found")
+        try:
+            source = json.loads(job.get("source_json") or "{}")
+        except json.JSONDecodeError as exc:
+            raise ValueError("Vision verification source metadata is invalid") from exc
+        if str(source.get("type") or "") != "picture":
+            raise ValueError("Evidence recovery is only available for picture verification jobs")
+        state = {
+            "status": "queued",
+            "job_id": job_id,
+            "entry_id": str(entry_id),
+            "provider": self._selected_provider("oneplus"),
+            "started_at_epoch": None,
+            "completed_at_epoch": None,
+            "error": None,
+        }
+        self.human_visual_recovery_state[job_id] = state
+        task = asyncio.create_task(
+            self._run_human_visual_evidence_recovery(job, str(entry_id)),
+            name=f"human-visual-evidence-recovery-{job_id}",
+        )
+        self._human_visual_recovery_tasks[job_id] = task
+        self._events.notify("human_visual_evidence_recovery_queued")
+        return dict(state)
+
+    async def _run_human_visual_evidence_recovery(self, job: dict[str, Any], entry_id: str) -> None:
+        job_id = int(job["id"])
+        state = self.human_visual_recovery_state[job_id]
+        state["status"] = "running"
+        state["started_at_epoch"] = time.time()
+        config = self._config_getter()
+        provider = self._selected_provider("oneplus")
+        try:
+            zip_path = Path(config.output_dir) / str(job["output_filename"])
+            doc = await self._document_for(zip_path)
+            source = json.loads(job.get("source_json") or "{}")
+            picture_index = int(source.get("index"))
+            image_bytes, mime, member = await asyncio.to_thread(
+                _read_picture, zip_path, doc, picture_index, source.get("artifact")
+            )
+            # Human accepted technical evidence follows the configured visual
+            # provider (normally OnePlus), never the text provider by accident.
+            client = self._vision_client_for_role("oneplus", job)
+            provider = str(getattr(client, "provider", provider) or provider)
+            state["provider"] = provider
+            endpoint = str(getattr(client, "endpoint", self._endpoint_for_provider(provider)))
+            if provider in self._endpoint_circuit and not await self._endpoint_provider_ready(provider):
+                raise ConnectionError(f"{provider} visual endpoint is unavailable")
+            model = await self._model_for(f"human-visual-recovery:{provider}", endpoint, client)
+            audit: dict[str, Any] = {
+                "schema": "marine-human-visual-evidence-recovery/v1",
+                "verification_job_id": job_id,
+                "entry_id": entry_id,
+                "provider": provider,
+                "model": model,
+                "artifact": member,
+                "started_at_epoch": state["started_at_epoch"],
+                "regions": [],
+            }
+
+            full_prompt = _vision_evidence_prompt(job, "full image", human_accepted=True)
+            full_progress = self._prepare_oneplus_stream_region("human evidence full image", target="oneplus")
+            full, full_raw, full_attempts = await _inspect_vision_region(
+                client, image_bytes, full_prompt, mime, model, int(config.stage2b_oneplus_max_tokens),
+                first_token_timeout_seconds=config.stage2b_oneplus_first_token_timeout_seconds,
+                stream_idle_timeout_seconds=config.stage2b_oneplus_stream_idle_timeout_seconds,
+                on_progress=full_progress,
+            )
+            audit["regions"].append({
+                "region": "full image", "prompt": full_prompt, "parsed": full,
+                "raw_response": full_raw, "attempts": full_attempts,
+            })
+
+            crop_results: list[dict[str, Any]] = []
+            crop_audit: list[dict[str, Any]] = []
+            if bool(config.stage2b_vision_crops_enabled):
+                crops = await asyncio.to_thread(
+                    _vision_crops, image_bytes, config.stage2b_vision_crop_overlap,
+                    config.stage2b_vision_crop_upscale, config.stage2b_vision_max_crops,
+                )
+                # Human-accepted recovery is quality-first: inspect every
+                # configured region and merge all successfully recovered evidence.
+                for label, crop_bytes, crop_mime in crops:
+                    prompt = _vision_evidence_prompt(job, label, human_accepted=True)
+                    progress = self._prepare_oneplus_stream_region(f"human evidence {label}", target="oneplus")
+                    parsed, raw, attempts = await _inspect_vision_region(
+                        client, crop_bytes, prompt, crop_mime, model, int(config.stage2b_oneplus_max_tokens),
+                        first_token_timeout_seconds=config.stage2b_oneplus_first_token_timeout_seconds,
+                        stream_idle_timeout_seconds=config.stage2b_oneplus_stream_idle_timeout_seconds,
+                        on_progress=progress,
+                    )
+                    item = {"region": label, "prompt": prompt, "parsed": parsed, "raw_response": raw, "attempts": attempts}
+                    crop_audit.append(item)
+                    audit["regions"].append(item)
+                    if not parsed.get("parse_failed"):
+                        crop_results.append(parsed)
+
+            merged = _merge_vision(full, crop_results)
+            merged["verdict"] = "TECHNICAL_USEFUL"  # human classification authority
+            merged["human_classification_authority"] = True
+            merged["crop_coverage"] = "human_recovery_all_configured_regions" if crop_audit else "human_recovery_full_image_only"
+            merged["incomplete_crop_count"] = sum(1 for item in crop_audit if (item.get("parsed") or {}).get("parse_failed"))
+            merged["structural_image_evidence"] = await asyncio.to_thread(image_structure_evidence, image_bytes)
+            audit["merged"] = merged
+            audit["completed_at_epoch"] = time.time()
+
+            result_dir = Path(config.processed_dir) / Path(str(job["result_dir"])).name
+            recovery_dir = result_dir / "verification"
+            recovery_dir.mkdir(parents=True, exist_ok=True)
+            audit_path = recovery_dir / f"human_visual_recovery_{job_id}_{int(time.time())}.json"
+            await asyncio.to_thread(_atomic_write_json_payload, audit_path, audit)
+            async with self._stage2c_ledger_lock:
+                updated = await asyncio.to_thread(
+                    merge_human_visual_evidence, result_dir, entry_id, merged, str(audit_path.name)
+                )
+            state.update({
+                "status": "completed",
+                "completed_at_epoch": time.time(),
+                "evidence_items": len(updated.get("visible_text") or []) + len(updated.get("visible_objects") or []),
+                "audit_file": str(audit_path),
+            })
+            self._events.notify("human_visual_evidence_recovery_completed")
+        except asyncio.CancelledError:
+            state["status"] = "cancelled"
+            raise
+        except (httpx.TransportError, TimeoutError, ConnectionError) as exc:
+            state.update({
+                "status": "waiting_for_device",
+                "completed_at_epoch": None,
+                "error": f"{type(exc).__name__}: {exc}"[:1000],
+            })
+            if provider in self._endpoint_circuit and self._is_endpoint_connection_failure(exc):
+                await self._open_endpoint_circuit(provider, f"human visual evidence recovery: {type(exc).__name__}: {exc}")
+            self._events.notify("human_visual_evidence_recovery_waiting")
+        except Exception as exc:
+            state.update({"status": "failed", "completed_at_epoch": time.time(), "error": f"{type(exc).__name__}: {exc}"[:1000]})
+            logger.exception("Human visual evidence recovery failed for verification job %s", job_id)
+            self._events.notify("human_visual_evidence_recovery_failed")
 
     async def text_audit_image(self, job_id: int) -> tuple[bytes, str, str]:
         """Reconstruct the exact persisted target crop used by a Text verifier job.
