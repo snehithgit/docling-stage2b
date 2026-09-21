@@ -1,0 +1,20 @@
+{
+  "schema": "docling-release-benchmark-plan/v1",
+  "release": "2026.09.18.40.4",
+  "model": "BAAI/bge-small-en-v1.5",
+  "runtime": "TEI CPU 1.9 on N150",
+  "required_run": "fresh_machine_hybrid",
+  "endpoint": "/api/retrieval/benchmark/run-hybrid",
+  "metrics": ["top1_percent", "top3_percent", "top5_percent", "top10_percent", "mrr", "eligible_cases", "skipped_cases"],
+  "historical_references": {
+    "lexical_40_3": {"top1": 72.18, "top3": 88.72, "top5": 92.48, "top10": 94.74, "mrr": 0.80944},
+    "structured_id_candidate_replay": {"top1": 83.46, "top3": 93.23, "top5": 96.99, "top10": 98.50, "mrr": 0.89105, "fresh_tei_run": false}
+  },
+  "rules": [
+    "keep the original 133 cases frozen",
+    "use one physical machine scope per eligible case",
+    "skip ambiguous/unassigned machine scope rather than guessing",
+    "do not report replay metrics as fresh production results",
+    "inspect individual misses before adding stronger ranking rules"
+  ]
+}

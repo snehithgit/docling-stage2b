@@ -1,0 +1,109 @@
+{
+  "source": "_processed (9).zip",
+  "stage2c": {
+    "5. AD136TI Operation and maintenance manual__job7__run3": {
+      "active_automatic_corrections": 16,
+      "newly_blocked": []
+    },
+    "Anemometer-Anemoscope__job1__run11": {
+      "active_automatic_corrections": 2,
+      "newly_blocked": []
+    },
+    "Instruction Manual__job6__run7": {
+      "active_automatic_corrections": 81,
+      "newly_blocked": [
+        {
+          "route_id": "R00041",
+          "source_type": "table_cell",
+          "reason": "TABLE_CELL_CONTEXT_CONTAMINATION_KEEP_ORIGINAL"
+        },
+        {
+          "route_id": "R00053",
+          "source_type": "table_cell",
+          "reason": "TABLE_CELL_CONTEXT_CONTAMINATION_KEEP_ORIGINAL"
+        },
+        {
+          "route_id": "R00055",
+          "source_type": "table_cell",
+          "reason": "TABLE_CELL_CONTEXT_CONTAMINATION_KEEP_ORIGINAL"
+        },
+        {
+          "route_id": "R00083",
+          "source_type": "text",
+          "reason": "SCOPE_INVERSION_DISCARDED_TARGET_KEEP_ORIGINAL"
+        }
+      ]
+    },
+    "MacGregor_Crane_Instruction_Manual__job5__run6": {
+      "active_automatic_corrections": 97,
+      "newly_blocked": []
+    },
+    "hydraulics-for-mariners_compress__job3__run6": {
+      "active_automatic_corrections": 58,
+      "newly_blocked": []
+    },
+    "marine-electrical-maintenance-and-troubleshooting-deck-and-hull-machinery-pdf__job4__run7": {
+      "active_automatic_corrections": 69,
+      "newly_blocked": [
+        {
+          "route_id": "R00136",
+          "source_type": "table_cell",
+          "reason": "TABLE_CELL_CONTEXT_CONTAMINATION_KEEP_ORIGINAL"
+        }
+      ]
+    },
+    "marine-electrical-maintenance-and-troubleshooting-engine-room-equipment-pdf__job2__run6": {
+      "active_automatic_corrections": 82,
+      "newly_blocked": []
+    }
+  },
+  "stage3": {
+    "5. AD136TI Operation and maintenance manual__job7__run3": {
+      "chunks_before": 777,
+      "oversized_before": 182,
+      "chunks_after_replay": 785,
+      "oversized_after_replay": 0
+    },
+    "Anemometer-Anemoscope__job1__run11": {
+      "chunks_before": 30,
+      "oversized_before": 0,
+      "chunks_after_replay": 30,
+      "oversized_after_replay": 0
+    },
+    "Instruction Manual__job6__run7": {
+      "chunks_before": 1913,
+      "oversized_before": 217,
+      "chunks_after_replay": 1919,
+      "oversized_after_replay": 1
+    },
+    "MacGregor_Crane_Instruction_Manual__job5__run6": {
+      "chunks_before": 1637,
+      "oversized_before": 202,
+      "chunks_after_replay": 1639,
+      "oversized_after_replay": 0
+    },
+    "hydraulics-for-mariners_compress__job3__run6": {
+      "chunks_before": 697,
+      "oversized_before": 30,
+      "chunks_after_replay": 697,
+      "oversized_after_replay": 0
+    },
+    "marine-electrical-maintenance-and-troubleshooting-deck-and-hull-machinery-pdf__job4__run7": {
+      "chunks_before": 2231,
+      "oversized_before": 726,
+      "chunks_after_replay": 2489,
+      "oversized_after_replay": 44
+    },
+    "marine-electrical-maintenance-and-troubleshooting-engine-room-equipment-pdf__job2__run6": {
+      "chunks_before": 3577,
+      "oversized_before": 1670,
+      "chunks_after_replay": 4261,
+      "oversized_after_replay": 582
+    }
+  },
+  "totals": {
+    "stage2c_newly_blocked": 5,
+    "oversized_before": 3027,
+    "oversized_after_replay": 627
+  }
+}

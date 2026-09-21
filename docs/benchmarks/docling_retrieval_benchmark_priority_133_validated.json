@@ -1,0 +1,1631 @@
+{
+  "schema": "docling-retrieval-benchmark/v1",
+  "items": [
+    {
+      "id": "RB-67c2969b",
+      "query": "Anemometer display is showing Err on every FND; what wiring and DIP-switch checks should I make?",
+      "expected_postprocess_job_id": 1,
+      "expected_source_filename": "Anemometer-Anemoscope.pdf",
+      "expected_chunk_id": "CHK-000020",
+      "expected_pages": [
+        9
+      ],
+      "category": "troubleshooting",
+      "note": "Only this chunk ties an all-FND Err condition to sensor wiring, unit communication and matching DIP settings."
+    },
+    {
+      "id": "RB-07c5a645",
+      "query": "How does the older MacGregor crane warm its hydraulic oil before work using the separately driven screw-type feed pump?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000203",
+      "expected_pages": [
+        58
+      ],
+      "category": "procedure",
+      "note": "This chunk uniquely describes warming the oil by circulation with the separate screw-type feed pump."
+    },
+    {
+      "id": "RB-02db10cb",
+      "query": "What exactly does the XA10 start/stop selector energize in position 1 and remove in position 0?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000315",
+      "expected_pages": [
+        86
+      ],
+      "category": "procedure",
+      "note": "This chunk defines both positions of the XA10 complete-crane start/stop control."
+    },
+    {
+      "id": "RB-ae676354",
+      "query": "For the COMPACT winch, where in the manual are the separate motor and MDA brake instructions?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000631",
+      "expected_pages": [
+        150,
+        151
+      ],
+      "category": "cross_reference",
+      "note": "This chunk points to section 6.1 for the COMPACT motor and 6.2 for the MDA brake."
+    },
+    {
+      "id": "RB-afe61148",
+      "query": "How do I strip an MDA 42 brake without releasing the Belleville-spring preload unsafely?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000750",
+      "expected_pages": [
+        183
+      ],
+      "category": "procedure",
+      "note": "This chunk gives the staged one-turn screw-loosening sequence before lifting the brake cover."
+    },
+    {
+      "id": "RB-b76a7608",
+      "query": "If I plug in the emergency card for hoist or luff, which normal safety switch no longer protects that motion?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000868",
+      "expected_pages": [
+        208
+      ],
+      "category": "troubleshooting",
+      "note": "This chunk uniquely warns that the high-hook switch is bypassed with the emergency card installed."
+    },
+    {
+      "id": "RB-edd07637",
+      "query": "How do I hook up the emergency hand pump around valve 1131 and 1128-1?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-001060",
+      "expected_pages": [
+        243
+      ],
+      "category": "cross_reference",
+      "note": "This chunk gives the hose/pressure-switch connection steps and directs the reader to the relevant figures and hydraulic diagram."
+    },
+    {
+      "id": "RB-dcb1b85f",
+      "query": "What pressure setting is specified for the hoisting shock circuit at 1111-3 and 1112-3?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-001336",
+      "expected_pages": [
+        372
+      ],
+      "category": "technical_value",
+      "note": "Only this specification row pairs those valve points with 42 MPa / 420 bar."
+    },
+    {
+      "id": "RB-558f5177",
+      "query": "For the A26 TP40I ABB time-delay contactor, what delay setting and article number are listed?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-001402",
+      "expected_pages": [
+        397
+      ],
+      "category": "technical_value",
+      "note": "This parts row uniquely couples A26 with its 2.0 s setting and article number."
+    },
+    {
+      "id": "RB-c8778d72",
+      "query": "What is the article number for emergency-stop item 033 in this parts list?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-001587",
+      "expected_pages": [
+        425
+      ],
+      "category": "technical_value",
+      "note": "Only this chunk pairs item 033 Emergency stop with its article number."
+    },
+    {
+      "id": "RB-237d9ea2",
+      "query": "Cable 1684 2136~127 is in the list; what type and length is it supposed to be?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-001610",
+      "expected_pages": [
+        440
+      ],
+      "category": "technical_value",
+      "note": "This chunk uniquely lists that cable code with RU 7x1.5 and its stated length."
+    },
+    {
+      "id": "RB-e2011e02",
+      "query": "For cold-weather crane operation, where is the optional hydraulic-oil heater fitted and from which cabinet is it started?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000190",
+      "expected_pages": [
+        62
+      ],
+      "category": "procedure",
+      "note": "This chunk uniquely places the optional heater in the oil tank and identifies the CT1 cabinet control."
+    },
+    {
+      "id": "RB-edb71f78",
+      "query": "Which MC cards marked Ho, Lu and SL receive the crane joystick commands?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000241",
+      "expected_pages": [
+        74
+      ],
+      "category": "definition",
+      "note": "This chunk uniquely maps the two joystick axes to the MC cards labelled Ho, Lu and SL."
+    },
+    {
+      "id": "RB-e1905620",
+      "query": "What does the hydraulic contamination switch actually sense, and how does it raise a warning in the cab?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000425",
+      "expected_pages": [
+        108
+      ],
+      "category": "definition",
+      "note": "This chunk explains the magnet/steel-sleeve sensing principle and the pilot-light/buzzer indication path."
+    },
+    {
+      "id": "RB-d1e2a1e5",
+      "query": "Contamination alarm came up on the crane pump circuit; how do I clean the switch and decide if the pump needs checking?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000427",
+      "expected_pages": [
+        109,
+        110
+      ],
+      "category": "procedure",
+      "note": "This chunk gives the stop-clean-reassemble-run-8-to-12-hours decision sequence."
+    },
+    {
+      "id": "RB-88ec638d",
+      "query": "A crane motion has failed in service; which CT2 troubleshooting reference should I use before going deeper?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000641",
+      "expected_pages": [
+        156,
+        157
+      ],
+      "category": "cross_reference",
+      "note": "This chunk directs the first diagnostic check to the CT2 panel error/signal lists under section 6.3."
+    },
+    {
+      "id": "RB-fd4e6444",
+      "query": "How do I check hoisting-winch plussing pressure on pump 1111, including gauge point and brake isolation?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000726",
+      "expected_pages": [
+        184,
+        185
+      ],
+      "category": "cross_reference",
+      "note": "This chunk gives the gauge-at-3.1 setup and sends incorrect values back to the hydraulic circuit diagram for adjustment."
+    },
+    {
+      "id": "RB-91b916bb",
+      "query": "When changing the hoisting wire, what marks and measurements do I record so I do not have to reset all the limits?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000863",
+      "expected_pages": [
+        224
+      ],
+      "category": "procedure",
+      "note": "This chunk gives the drum/limit-box marking and AL-measure steps before removing the old wire."
+    },
+    {
+      "id": "RB-3cf63708",
+      "query": "On the CC/MC-card control system, what pot readings should I get at centre, then at full hoist/luff-in/slew-left and full opposite travel?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000939",
+      "expected_pages": [
+        246,
+        247
+      ],
+      "category": "technical_value",
+      "note": "This chunk uniquely combines the CC/MC-card feed with the directional 6, 10.5 and 1.5 V potentiometer readings."
+    },
+    {
+      "id": "RB-438dfe9d",
+      "query": "For CC3000 encoder calibration, where should Ho, Lu and SL physically be positioned before zeroing?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000985",
+      "expected_pages": [
+        259
+      ],
+      "category": "technical_value",
+      "note": "This chunk is the CC3000 calibration table for hoist, luff and slew reference positions."
+    },
+    {
+      "id": "RB-7fe1f356",
+      "query": "Can we run a crane overload test ourselves, or what class-surveyor condition has to be met first?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-001165",
+      "expected_pages": [
+        290
+      ],
+      "category": "procedure",
+      "note": "This chunk states the classification request, surveyor-presence and signed-form requirements."
+    },
+    {
+      "id": "RB-974eb203",
+      "query": "What is the cable winch doing during cargo work, and how does the turbo coupling help keep cable tension?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-001196",
+      "expected_pages": [
+        308
+      ],
+      "category": "definition",
+      "note": "This chunk describes the cable-winch purpose, drivetrain and constant-tension behavior."
+    },
+    {
+      "id": "RB-c449d5f9",
+      "query": "For slewing direction valve 3221, what article number is shown in the hydraulic component list?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-001502",
+      "expected_pages": [
+        479
+      ],
+      "category": "technical_value",
+      "note": "This chunk uniquely pairs component 3221 with article number 2891598-801."
+    },
+    {
+      "id": "RB-7873a705",
+      "query": "What's the article number for +HE.CT1-K0, the star/delta starter in the crane panel?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-001798",
+      "expected_pages": [
+        610
+      ],
+      "category": "technical_value",
+      "note": "Only this parts chunk maps +HE.CT1-K0 to the star/delta starter article number."
+    },
+    {
+      "id": "RB-52317329",
+      "query": "I need the plug hood at +CN-XC4 position 199; which article number should stores order?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-001844",
+      "expected_pages": [
+        614
+      ],
+      "category": "technical_value",
+      "note": "This chunk uniquely pairs +CN-XC4 position 199 with its plug-hood article number."
+    },
+    {
+      "id": "RB-9a2f1661",
+      "query": "For the stabilization winch, what part number is listed for the +CN.CT23-SG9 push button?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-001899",
+      "expected_pages": [
+        648
+      ],
+      "category": "technical_value",
+      "note": "This chunk is the stabilization-winch row for that push-button designation."
+    },
+    {
+      "id": "RB-0149e3a0",
+      "query": "Engine warning comes with high coolant temperature or a wavering gauge; what should I do immediately before restarting?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000076",
+      "expected_pages": [
+        18
+      ],
+      "category": "troubleshooting",
+      "note": "This chunk gives the immediate idle/neutral response and no-restart warning for the coolant alarm."
+    },
+    {
+      "id": "RB-7b912a19",
+      "query": "How do I drain and refill coolant on the AD136-family engine, and where are the two drain plugs?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000103",
+      "expected_pages": [
+        26
+      ],
+      "category": "procedure",
+      "note": "This chunk gives the expansion-cap release, two drain locations and refill sequence."
+    },
+    {
+      "id": "RB-81d3856e",
+      "query": "AD136 alternator is charging abnormally; what running voltage should I see from B, L and R terminals to the body?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000238",
+      "expected_pages": [
+        50,
+        51
+      ],
+      "category": "technical_value",
+      "note": "Only this chunk gives the expected about 28–29 V DC readings at all three alternator terminals."
+    },
+    {
+      "id": "RB-2696bc7b",
+      "query": "During cylinder-block inspection, how do I check for cracks, blocked passages and hidden leakage?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000289",
+      "expected_pages": [
+        67
+      ],
+      "category": "procedure",
+      "note": "This chunk gives visual inspection, oil/water passage checks and a hydraulic leak test."
+    },
+    {
+      "id": "RB-3622c809",
+      "query": "What are the cam-lobe wear limits for intake and exhaust on this engine?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000321",
+      "expected_pages": [
+        74
+      ],
+      "category": "technical_value",
+      "note": "This chunk is the camshaft table with separate intake and exhaust lobe standard/limit values."
+    },
+    {
+      "id": "RB-c4908e42",
+      "query": "How do I find exact injection timing on the L086TI/AD086TI using the No.1 fuel line drip method?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000399",
+      "expected_pages": [
+        102
+      ],
+      "category": "procedure",
+      "note": "This chunk gives the crank-turning and one-drop-per-5-or-6-seconds timing method."
+    },
+    {
+      "id": "RB-6bffc200",
+      "query": "How do I mount the actuator on an AD136/T/TI injection pump, and what torques are specified for the link hardware?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000518",
+      "expected_pages": [
+        122
+      ],
+      "category": "procedure",
+      "note": "This chunk is the KT288 actuator-installation sequence with the listed M5 fastening torques."
+    },
+    {
+      "id": "RB-a05ceb24",
+      "query": "Governor system is dead but all the voltage checks look normal; where does this section tell me to continue testing?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000576",
+      "expected_pages": [
+        137
+      ],
+      "category": "cross_reference",
+      "note": "This chunk redirects normal-voltage cases to the actuator publication and actuator wiring tests."
+    },
+    {
+      "id": "RB-58eef2b4",
+      "query": "Which turbocharger models are specified for L136T/TI versus L086TIH and L086TIM?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000610",
+      "expected_pages": [
+        148
+      ],
+      "category": "technical_value",
+      "note": "This chunk is the engine data table mapping those variants to T04E55 and HX35 turbochargers."
+    },
+    {
+      "id": "RB-6bb1e752",
+      "query": "Cylinder liner is worn; what bore limit and liner projection range does the maintenance table allow?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000672",
+      "expected_pages": [
+        179
+      ],
+      "category": "technical_value",
+      "note": "This chunk uniquely gives the liner inside-diameter limit and required projection range."
+    },
+    {
+      "id": "RB-183ff34b",
+      "query": "On the older MacGregor luffing circuit, what happens to valves 2221, 2226 and 4326 when I move into brake-release?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000233",
+      "expected_pages": [
+        66
+      ],
+      "category": "procedure",
+      "note": "Only this chunk couples luffing brake release with valve 4326 in this manual."
+    },
+    {
+      "id": "RB-5846415d",
+      "query": "On the newer crane luffing circuit using valve 2127, where should I look for the plussing adjustment procedure?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000219",
+      "expected_pages": [
+        69
+      ],
+      "category": "cross_reference",
+      "note": "This chunk identifies valve 2127 and points to High pressure pumps in section 6.1 for plussing."
+    },
+    {
+      "id": "RB-0a3a5120",
+      "query": "What are the oil-pump gear end-play and backlash limits before I replace parts?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000423",
+      "expected_pages": [
+        109
+      ],
+      "category": "technical_value",
+      "note": "This chunk gives the oil-pump axial end-play and gear-backlash limit ranges together."
+    },
+    {
+      "id": "RB-79e0336d",
+      "query": "Bridge repeater is not receiving NMEA-0183 from the wind display; what output, LED146 and BPS DIP checks should I make?",
+      "expected_postprocess_job_id": 1,
+      "expected_source_filename": "Anemometer-Anemoscope.pdf",
+      "expected_chunk_id": "CHK-000021",
+      "expected_pages": [
+        9
+      ],
+      "category": "troubleshooting",
+      "note": "Only this chunk ties missing NMEA-0183 output to the display terminal, LED146 activity and BPS DIP selection."
+    },
+    {
+      "id": "RB-9b205b9a",
+      "query": "During the A(-) to F(+) overspeed test, what does a reading under 1.0 VDC point to?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000583",
+      "expected_pages": [
+        138
+      ],
+      "category": "troubleshooting",
+      "note": "This chunk is the specific overspeed row that diagnoses a sub-1.0 VDC A-to-F reading as a defective speed-control unit."
+    },
+    {
+      "id": "RB-fbfd3d95",
+      "query": "What opening-pressure range should the AD136 cooling-system filler cap hold during the pre-start check?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000065",
+      "expected_pages": [
+        15
+      ],
+      "category": "technical_value",
+      "note": "This chunk uniquely specifies the pressure-cap opening range of 0.5 to 0.9 kg/cm²."
+    },
+    {
+      "id": "RB-78323d63",
+      "query": "On the AD136/T/TI actuator setup, what must I change if the fuel setting has to go above 14.5 mm?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000522",
+      "expected_pages": [
+        123,
+        124
+      ],
+      "category": "technical_value",
+      "note": "This chunk uniquely warns that settings above 14.5 mm require the shorter M6×25 stop screw."
+    },
+    {
+      "id": "RB-474c3308",
+      "query": "What are the minimum acceptable intake and exhaust valve-stem diameters on this engine?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000297",
+      "expected_pages": [
+        68
+      ],
+      "category": "technical_value",
+      "note": "This chunk gives the separate wear limits for intake and exhaust valve stems."
+    },
+    {
+      "id": "RB-9c3484c0",
+      "query": "When checking con-rod bearing oil clearance by the first method, what cap-bolt torque and maximum clearance apply?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000334",
+      "expected_pages": [
+        77,
+        78
+      ],
+      "category": "technical_value",
+      "note": "This chunk uniquely combines the 18 kg·m cap-bolt torque with the connecting-rod bearing clearance range and limit."
+    },
+    {
+      "id": "RB-1e188ba6",
+      "query": "After the first valves are set, how do I position cylinders 1 and 6 before doing the remaining valve clearances?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000389",
+      "expected_pages": [
+        97,
+        98
+      ],
+      "category": "procedure",
+      "note": "This chunk gives the 360-degree crank turn with No.1 at overlap TDC and No.6 at firing TDC."
+    },
+    {
+      "id": "RB-a2a9f639",
+      "query": "For the MDA 42 with CA 420 brake motor, what pressure starts brake release, what pressure fully opens it, and what is the maximum allowed?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000742",
+      "expected_pages": [
+        179
+      ],
+      "category": "technical_value",
+      "note": "This table uniquely gives the MDA 42/CA 420 brake opening thresholds and maximum permitted pressure."
+    },
+    {
+      "id": "RB-7da235e2",
+      "query": "How do I lift out the crane hydraulic pump unit from the tank before dismantling it?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000705",
+      "expected_pages": [
+        167
+      ],
+      "category": "procedure",
+      "note": "This chunk gives the pump-unit removal sequence from parking the jib through disconnecting and lifting the motor/pump assembly."
+    },
+    {
+      "id": "RB-95a6d000",
+      "query": "Which hydraulic pressures should I check at gauge points 1, 2 and 3.1, and where do I get their correct values?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000393",
+      "expected_pages": [
+        102
+      ],
+      "category": "cross_reference",
+      "note": "This chunk uniquely maps the three gauge points and refers to the Hydraulic Component Specification in section 9.4 for the required pressures."
+    },
+    {
+      "id": "RB-98199b3c",
+      "query": "CC3000 is showing 35_01 or 35_02; what fault family is that and what does the list tell me to do?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-001091",
+      "expected_pages": [
+        267
+      ],
+      "category": "troubleshooting",
+      "note": "Only this CC3000 alarm table maps codes 35_01/35_02 to excessive MC-card temperature and the specified power-off/service action."
+    },
+    {
+      "id": "RB-918c11d8",
+      "query": "Luffing brake releases through 2221/2226 and the companion valve is 4326; which chunk explains that sequence?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000233",
+      "expected_pages": [
+        66
+      ],
+      "category": "confusion",
+      "note": "The Instruction Manual has a near-identical luffing sequence, but it uses valve 2127 instead of 4326."
+    },
+    {
+      "id": "RB-6c6b9502",
+      "query": "Luffing plussing is on the crane with valve 2127, not 4326; where is the brake-release description?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000219",
+      "expected_pages": [
+        69
+      ],
+      "category": "confusion",
+      "note": "The older MacGregor manual is a tempting match because its wording is almost the same, but its corresponding valve is 4326."
+    },
+    {
+      "id": "RB-980df51e",
+      "query": "All FND windows on the wind display show Err and I need to compare main/display DIP communication settings; where is that fault?",
+      "expected_postprocess_job_id": 1,
+      "expected_source_filename": "Anemometer-Anemoscope.pdf",
+      "expected_chunk_id": "CHK-000020",
+      "expected_pages": [
+        9
+      ],
+      "category": "confusion",
+      "note": "Other manuals contain many error codes, but only the anemometer manual links all FNDs showing Err to those DIP communication settings."
+    },
+    {
+      "id": "RB-ab2d14d7",
+      "query": "Which unit is the 24 V flush-mounted wind repeater on the overhead gauge board, and what drawing number belongs to it?",
+      "expected_postprocess_job_id": 1,
+      "expected_source_filename": "Anemometer-Anemoscope.pdf",
+      "expected_chunk_id": "CHK-000003",
+      "expected_pages": [
+        2
+      ],
+      "category": "technical_value",
+      "note": "This parts table uniquely identifies the HWD-500 remote display, its mounting/supply, location and drawing reference."
+    },
+    {
+      "id": "RB-0d12f002",
+      "query": "What model is the cup-type wind transmitter fitted at the top mast?",
+      "expected_postprocess_job_id": 1,
+      "expected_source_filename": "Anemometer-Anemoscope.pdf",
+      "expected_chunk_id": "CHK-000004",
+      "expected_pages": [
+        2
+      ],
+      "category": "technical_value",
+      "note": "Only this chunk identifies the top-mast encoder/cup transmitter as model HWD-130."
+    },
+    {
+      "id": "RB-28c87219",
+      "query": "For the HWD-600 main wind unit, what are the maximum speed indication, DC supply, and selectable NMEA baud rates?",
+      "expected_postprocess_job_id": 1,
+      "expected_source_filename": "Anemometer-Anemoscope.pdf",
+      "expected_chunk_id": "CHK-000007",
+      "expected_pages": [
+        4
+      ],
+      "category": "technical_value",
+      "note": "This specification block uniquely combines the HWD-600 range, power input and NMEA communication rates."
+    },
+    {
+      "id": "RB-1f1bcfa5",
+      "query": "What does the HWD-130 sensor need for power, and how often does it transmit its NMEA wind sentence?",
+      "expected_postprocess_job_id": 1,
+      "expected_source_filename": "Anemometer-Anemoscope.pdf",
+      "expected_chunk_id": "CHK-000008",
+      "expected_pages": [
+        4
+      ],
+      "category": "technical_value",
+      "note": "This chunk gives the transmitter supply and its five-times-per-second NMEA output rate."
+    },
+    {
+      "id": "RB-9b678a13",
+      "query": "Before wiring the wind system, what should I check for cable damage and signal/power polarity?",
+      "expected_postprocess_job_id": 1,
+      "expected_source_filename": "Anemometer-Anemoscope.pdf",
+      "expected_chunk_id": "CHK-000009",
+      "expected_pages": [
+        5
+      ],
+      "category": "procedure",
+      "note": "This installation chunk is specifically the pre-wiring checklist for cable condition and polarity."
+    },
+    {
+      "id": "RB-1759c221",
+      "query": "When wiring the wind display, where do the remote-control connection and outgoing NMEA feed to other equipment come from?",
+      "expected_postprocess_job_id": 1,
+      "expected_source_filename": "Anemometer-Anemoscope.pdf",
+      "expected_chunk_id": "CHK-000010",
+      "expected_pages": [
+        5
+      ],
+      "category": "procedure",
+      "note": "This chunk explains the display wiring, remote switch terminal and external NMEA output ports."
+    },
+    {
+      "id": "RB-05363430",
+      "query": "On the wind indicator front panel, which controls change speed units and dimming, and what wind values are shown?",
+      "expected_postprocess_job_id": 1,
+      "expected_source_filename": "Anemometer-Anemoscope.pdf",
+      "expected_chunk_id": "CHK-000014",
+      "expected_pages": [
+        6,
+        7
+      ],
+      "category": "definition",
+      "note": "This control-description chunk maps the front switches and the individual wind display fields."
+    },
+    {
+      "id": "RB-c48ab2ac",
+      "query": "How do I set the HWD-600 DIP switches for 38,400 baud, five NMEA updates per second, and a 360-degree bearing display?",
+      "expected_postprocess_job_id": 1,
+      "expected_source_filename": "Anemometer-Anemoscope.pdf",
+      "expected_chunk_id": "CHK-000018",
+      "expected_pages": [
+        8
+      ],
+      "category": "technical_value",
+      "note": "Only this DIP table maps switch positions to baud rate, transmit rate and bearing range on the main unit."
+    },
+    {
+      "id": "RB-925cfdce",
+      "query": "Main wind unit is powered but the display stays completely blank; which LEDs, fuses and wiring should I check?",
+      "expected_postprocess_job_id": 1,
+      "expected_source_filename": "Anemometer-Anemoscope.pdf",
+      "expected_chunk_id": "CHK-000019",
+      "expected_pages": [
+        9
+      ],
+      "category": "troubleshooting",
+      "note": "This fault entry uniquely covers no display indication and calls out LED7/LED146 plus fuses F1, F2 and F4."
+    },
+    {
+      "id": "RB-8160264c",
+      "query": "On the remote wind indicator, which internal SW-1 choices control NMEA baud, transmit frequency and 180/360-degree bearing mode?",
+      "expected_postprocess_job_id": 1,
+      "expected_source_filename": "Anemometer-Anemoscope.pdf",
+      "expected_chunk_id": "CHK-000030",
+      "expected_pages": [
+        14,
+        15,
+        16,
+        17,
+        18,
+        19
+      ],
+      "category": "technical_value",
+      "note": "This later internal-DIP section is the remote-indicator setting table for communication and bearing modes."
+    },
+    {
+      "id": "RB-9e739899",
+      "query": "If I hit the crane emergency stop or the hydraulic overload sensor operates, what motions and brakes should the system command?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000072",
+      "expected_pages": [
+        8
+      ],
+      "category": "troubleshooting",
+      "note": "This safety-function chunk uniquely describes emergency-stop braking and overload-driven high-to-low-speed or stop behavior."
+    },
+    {
+      "id": "RB-edade6aa",
+      "query": "How should we store and decant hydraulic oil drums so water and dirt do not get into the crane system?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000139",
+      "expected_pages": [
+        23,
+        24,
+        25
+      ],
+      "category": "procedure",
+      "note": "This chunk gives the specific barrel orientation, cleanliness and last-oil precautions for filling."
+    },
+    {
+      "id": "RB-92cdd677",
+      "query": "On this crane hoist, what do pressure switches 1311 and 1381 protect against?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000217",
+      "expected_pages": [
+        68
+      ],
+      "category": "troubleshooting",
+      "note": "This hoisting safety chunk maps 1311 to overload action and 1381 to loss of feed pressure."
+    },
+    {
+      "id": "RB-ed6c88ea",
+      "query": "CC3000 control-system lamp is on; how do I read each stored fault number from the flashing card LED?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000259",
+      "expected_pages": [
+        76
+      ],
+      "category": "troubleshooting",
+      "note": "Only this chunk explains error LED 28, the Select/Info button and stepping through multiple diagnostic messages."
+    },
+    {
+      "id": "RB-3b4e0e1a",
+      "query": "CT1 motor switches and overload relays look normal; which control-system instruction and section does this fault check send me to next?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000278",
+      "expected_pages": [
+        80,
+        81
+      ],
+      "category": "cross_reference",
+      "note": "This CT1 fault chunk explicitly redirects the technician to the CC2000/CC3000 control-system instruction in Section 3."
+    },
+    {
+      "id": "RB-e60d27af",
+      "query": "H3 CHECK OIL FILTER lamp came on; at what filter differential does it trigger and how long before the crane stops?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000290",
+      "expected_pages": [
+        85
+      ],
+      "category": "troubleshooting",
+      "note": "This chunk uniquely states the greater-than-five-bar trigger and five-minute automatic stop delay."
+    },
+    {
+      "id": "RB-32e72003",
+      "query": "For the hydraulic-tank service, which Section 5 references cover reservoir cleaning and the correct refill oil?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000410",
+      "expected_pages": [
+        103,
+        104
+      ],
+      "category": "cross_reference",
+      "note": "This chunk points separately to the Hydraulic Oil Tank and Lubricants for Deck Machinery material in Section 5."
+    },
+    {
+      "id": "RB-614a3bf6",
+      "query": "How do I grease the slewing bearing if I cannot continuously rotate the crane while lubricating it?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000444",
+      "expected_pages": [
+        113
+      ],
+      "category": "procedure",
+      "note": "This chunk gives the alternate grease-and-slew sequence, approximate movement and grease quantity."
+    },
+    {
+      "id": "RB-16dcb68c",
+      "query": "What tools and O-rings do I need to change the two hydraulic filter cartridges, and what is the removal order?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000517",
+      "expected_pages": [
+        131,
+        132
+      ],
+      "category": "procedure",
+      "note": "This chunk is the detailed two-cartridge filter-change procedure with spanner sizes and drain/cap sequence."
+    },
+    {
+      "id": "RB-21ea395c",
+      "query": "How do I take a representative hydraulic-oil sample from the hoisting circuit for lab analysis?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000533",
+      "expected_pages": [
+        141,
+        142
+      ],
+      "category": "procedure",
+      "note": "This chunk uniquely specifies oil temperature, gauge outlet 3.1, flushing volume and maximum-speed hoisting during sampling."
+    },
+    {
+      "id": "RB-e065f229",
+      "query": "What is the correct way to clean the crane oil tank without leaving lint or contamination inside?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000546",
+      "expected_pages": [
+        144,
+        145
+      ],
+      "category": "procedure",
+      "note": "This chunk specifies isolation, sediment removal, white-spirit flushing, lint-free wiping and filtered refill."
+    },
+    {
+      "id": "RB-c8ae8db6",
+      "query": "A crane function is acting up; what questions should I use first to decide whether the fault is electrical, hydraulic or mechanical?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000642",
+      "expected_pages": [
+        157
+      ],
+      "category": "troubleshooting",
+      "note": "This troubleshooting introduction provides the fault-isolation checklist by subsystem, motion, direction, speed and noise."
+    },
+    {
+      "id": "RB-a30f96e6",
+      "query": "Before doing service inside the crane, what must be parked, electrically isolated and function-tested afterward?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000645",
+      "expected_pages": [
+        158,
+        159,
+        160
+      ],
+      "category": "procedure",
+      "note": "This safety chunk uniquely gives the complete service lockout, warning-sign and post-work safety-test requirements."
+    },
+    {
+      "id": "RB-610c7444",
+      "query": "A hydraulic high-speed motor will not run, runs the wrong way, or is jerky; what causes and checks does the chart give?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000708",
+      "expected_pages": [
+        180
+      ],
+      "category": "troubleshooting",
+      "note": "This is the dedicated high-speed motor fault table covering pressure, oil supply, connection direction and flow fluctuations."
+    },
+    {
+      "id": "RB-01123f8d",
+      "query": "How do I measure and adjust luffing plussing pressure on pump 2111 using test point 5.1 and valve 2661?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000728",
+      "expected_pages": [
+        186
+      ],
+      "category": "procedure",
+      "note": "This chunk uniquely combines the 0–400 bar gauge, closed brake valve, 40°C oil and manual operation of valve 2221."
+    },
+    {
+      "id": "RB-fb6e631c",
+      "query": "After connecting the charging rig to the hydraulic accumulator, how do I finish the nitrogen charge and leak-check the gas valve?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000744",
+      "expected_pages": [
+        195
+      ],
+      "category": "procedure",
+      "note": "This chunk gives the final nitrogen charging, stabilization, bleed-down and soap-water tightness check sequence."
+    },
+    {
+      "id": "RB-f556090f",
+      "query": "After changing the hoist wire, how do I reset the pressure roller clearance and spring preload?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000827",
+      "expected_pages": [
+        208,
+        209,
+        210
+      ],
+      "category": "procedure",
+      "note": "This chunk uniquely specifies about 2 mm play and twelve turns of the adjusting nut at a full drum."
+    },
+    {
+      "id": "RB-46a299df",
+      "query": "How much wear is allowed on a crane wire sheave before it should be treated as beyond limit?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000877",
+      "expected_pages": [
+        230
+      ],
+      "category": "technical_value",
+      "note": "Only this chunk defines the 25-percent-of-thickness criterion capped at 3 mm and gives the size table."
+    },
+    {
+      "id": "RB-e96d6d0a",
+      "query": "At CT2, what electrical levels should I expect on the slewing-pump PWM/current return and the hoist limit-switch inputs?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000958",
+      "expected_pages": [
+        250
+      ],
+      "category": "technical_value",
+      "note": "This signal table uniquely gives the CT2 terminal numbers, 0–600 mA behavior and 24 V/0 V limit logic."
+    },
+    {
+      "id": "RB-148ac348",
+      "query": "CC3000 shows 32_04, 32_05/06, 32_10 or a 33-series load fault; what subsystem should I investigate?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-001090",
+      "expected_pages": [
+        267
+      ],
+      "category": "troubleshooting",
+      "note": "This error table maps the 32-series codes to encoder faults and the 33-series group to load/weight sensing."
+    },
+    {
+      "id": "RB-a7b8d851",
+      "query": "Crane stopped with a suspended load because oil level is below MIN; what emergency float-switch position permits limited operation?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-001145",
+      "expected_pages": [
+        275
+      ],
+      "category": "troubleshooting",
+      "note": "This chunk uniquely permits emergency restart with FLOAT SWITCH position 2 under stated no-major-leak conditions."
+    },
+    {
+      "id": "RB-8c867174",
+      "query": "After renewing the luffing wire, which instruction does the manual say to follow so I do not have to reset the travel limits?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-001154",
+      "expected_pages": [
+        280,
+        281
+      ],
+      "category": "cross_reference",
+      "note": "This limit-switch chunk explicitly redirects wire-renewal work to the Replacement of Wires instruction in Section 6.2."
+    },
+    {
+      "id": "RB-9009a3be",
+      "query": "During emergency lowering, how does the hand pump release the brake and what pressure is needed before it opens?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-001179",
+      "expected_pages": [
+        298
+      ],
+      "category": "definition",
+      "note": "This chunk explains the hydraulic lowering path and gives an approximate brake-opening pressure of 1.2 MPa."
+    },
+    {
+      "id": "RB-94db25e7",
+      "query": "How do I drain and refill the cable-winch turbo coupling, including the fuse plug and final oil level?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-001209",
+      "expected_pages": [
+        310
+      ],
+      "category": "procedure",
+      "note": "This chunk is the turbo-coupling oil-change sequence using the safety fuse plug and filling-hole level."
+    },
+    {
+      "id": "RB-e9363ea6",
+      "query": "What is the oil-change sequence for the cable-winch spur gear, including the vent screw and sight glass?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-001211",
+      "expected_pages": [
+        310,
+        311
+      ],
+      "category": "procedure",
+      "note": "This chunk uniquely covers immediate draining, drain/vent plugs and refill to the sight glass."
+    },
+    {
+      "id": "RB-3ac5e97a",
+      "query": "Operator display has a communication fault, or its LED flashes red and the program never starts; what basic checks are specified?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-001261",
+      "expected_pages": [
+        323
+      ],
+      "category": "troubleshooting",
+      "note": "This display-manual chunk gives cable checks for communication loss and a power-cycle action for the red-LED startup fault."
+    },
+    {
+      "id": "RB-90ef4619",
+      "query": "For HPV 105 pump article 289 5330-801, what pressure ratings belong to the two relief-valve items?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-001362",
+      "expected_pages": [
+        374
+      ],
+      "category": "technical_value",
+      "note": "This parts table uniquely pairs the pump with 150-bar and 420-bar relief valves."
+    },
+    {
+      "id": "RB-cbd62d88",
+      "query": "Which article numbers identify the oil-tank level/temperature guard, heater and air-filter/dipstick assembly?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-001384",
+      "expected_pages": [
+        394
+      ],
+      "category": "technical_value",
+      "note": "This oil-tank assembly table uniquely lists those three components and their article numbers."
+    },
+    {
+      "id": "RB-89f19b2a",
+      "query": "What are the settings for pressure cut-off 1112-8b, pre-load valve 1112-9 and max-load switch 1311?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-001519",
+      "expected_pages": [
+        481
+      ],
+      "category": "technical_value",
+      "note": "This hydraulic settings table uniquely groups the 37.5 MPa, 0.3 MPa and 33 MPa values."
+    },
+    {
+      "id": "RB-42d5e432",
+      "query": "When the older crane senses hydraulic overload during hoisting, how should it change motion speed or stop?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000075",
+      "expected_pages": [
+        6
+      ],
+      "category": "troubleshooting",
+      "note": "This safety section uniquely describes the hydraulic pressure sensor reducing speed or stopping the hoist."
+    },
+    {
+      "id": "RB-35823480",
+      "query": "If a high-pressure hose bursts or the oil overheats, which automatic protections stop and brake this crane?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000076",
+      "expected_pages": [
+        7
+      ],
+      "category": "troubleshooting",
+      "note": "This chunk combines feed-pressure-switch shutdown, automatic mechanical braking and over-temperature main-motor trip logic."
+    },
+    {
+      "id": "RB-b0400d39",
+      "query": "What are the continuous/S6 power, speed, voltage and starting current for main motor 388 6313-801?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000190",
+      "expected_pages": [
+        54
+      ],
+      "category": "technical_value",
+      "note": "This motor data block uniquely lists all ratings for main electrical motor 388 6313-801."
+    },
+    {
+      "id": "RB-f1292061",
+      "query": "For motor 388 0369-801, what are the 2-pole and 4-pole ratings, and what is the feed-pump displacement?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000192",
+      "expected_pages": [
+        54
+      ],
+      "category": "technical_value",
+      "note": "This chunk uniquely combines both motor speed/current ratings with the 49.1 cm³/rev feed-pump displacement."
+    },
+    {
+      "id": "RB-9cff048c",
+      "query": "What do hoist pressure switches 1311, 1316 and 1381 each do on this older MacGregor crane?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000229",
+      "expected_pages": [
+        64
+      ],
+      "category": "troubleshooting",
+      "note": "This chunk uniquely contains both overload switches 1311/1316 plus the 1381 low-feed-pressure trip."
+    },
+    {
+      "id": "RB-77c75266",
+      "query": "How do the four MPC cards in cubicle MB divide communication, hoist, luff and slew control?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000260",
+      "expected_pages": [
+        72
+      ],
+      "category": "definition",
+      "note": "This control-system chunk explains the four-card MPC architecture, motion logic and pump-solenoid outputs."
+    },
+    {
+      "id": "RB-16520ecc",
+      "query": "One MPC card has failed; can I still run the crane, and what speed/safety functions remain in default mode?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000284",
+      "expected_pages": [
+        76
+      ],
+      "category": "troubleshooting",
+      "note": "This chunk uniquely explains three-card fallback operation with at least 50% maximum speed and retained safety functions."
+    },
+    {
+      "id": "RB-60b5585b",
+      "query": "Crane has tripped for overheating; what test-pump and oil-cooler-fan checks should I do before trying another start?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000295",
+      "expected_pages": [
+        80
+      ],
+      "category": "troubleshooting",
+      "note": "This chunk is the dedicated overheat recovery check using TEST PUMP, the cooler fan and the SUMMER setting."
+    },
+    {
+      "id": "RB-dffd35f1",
+      "query": "How do I slew this crane into its parking lock and confirm both lock pins have actually engaged?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000352",
+      "expected_pages": [
+        96
+      ],
+      "category": "procedure",
+      "note": "This chunk gives the parking-slew key-switch sequence, position lamp and lock-pin indications."
+    },
+    {
+      "id": "RB-8dc41e1b",
+      "query": "During scheduled hydraulic-tank service, what float-switch, breather and filter work goes with the oil change?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000395",
+      "expected_pages": [
+        101
+      ],
+      "category": "procedure",
+      "note": "This chunk combines reservoir draining with the float switch, air breather and all filter cartridges."
+    },
+    {
+      "id": "RB-f8c0799a",
+      "query": "How do I replace the hydraulic filter cartridges on this older crane without losing the drain-plug O-ring?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000483",
+      "expected_pages": [
+        117
+      ],
+      "category": "procedure",
+      "note": "This chunk gives the exact cartridge, cap, drain plug and O-ring handling sequence."
+    },
+    {
+      "id": "RB-ee485c48",
+      "query": "Before opening the hydraulic tank for cleaning, how do I secure the crane and drain the oil, and what tank-mounted components are shown?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000497",
+      "expected_pages": [
+        124
+      ],
+      "category": "procedure",
+      "note": "This chunk uniquely gives the cleaning preconditions and identifies the feed pump, guard, filter, breather and related tank hardware."
+    },
+    {
+      "id": "RB-e25be4a1",
+      "query": "While refitting the slewing gearset, which separate procedure should I use to verify and adjust pinion-to-rim backlash?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000593",
+      "expected_pages": [
+        143
+      ],
+      "category": "cross_reference",
+      "note": "This assembly chunk explicitly points to the Checking and adjusting slewing rim backlash procedure."
+    },
+    {
+      "id": "RB-61856cc7",
+      "query": "A new hoist hydraulic motor has not been run in yet; what power limit applies and for how many operating hours?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000682",
+      "expected_pages": [
+        159,
+        160
+      ],
+      "category": "technical_value",
+      "note": "Only this chunk specifies a 75% power ceiling during the first 100 working hours."
+    },
+    {
+      "id": "RB-7f3fe259",
+      "query": "How do I carry out the luffing-winch pump zero-setting check that requires opening MB and pulling the first card?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000710",
+      "expected_pages": [
+        169
+      ],
+      "category": "procedure",
+      "note": "This chunk uniquely includes isolating the first MB electronic card, gauge point 5.1 and the pump zero-setting screw."
+    },
+    {
+      "id": "RB-0501f29d",
+      "query": "How do I set luffing pump pressure cut-off 2111-10 while the crane is running at quarter speed?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000716",
+      "expected_pages": [
+        170
+      ],
+      "category": "procedure",
+      "note": "This chunk uniquely specifies a 0–400 bar gauge, closed valve 2661, 25% speed and adjustment of 2111-10."
+    },
+    {
+      "id": "RB-54a4b3a9",
+      "query": "How do I strip an MDA 14/21 brake safely and what torque is used when refitting seal-retainer screws 43?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000745",
+      "expected_pages": [
+        181
+      ],
+      "category": "procedure",
+      "note": "This chunk gives the Belleville-spring unloading sequence and the 114 Nm refit torque for screws 43."
+    },
+    {
+      "id": "RB-90c9467e",
+      "query": "When assembling an MDA 42 brake, how do I align the disc splines before lowering the disc centre?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000753",
+      "expected_pages": [
+        183
+      ],
+      "category": "procedure",
+      "note": "This chunk uniquely specifies the 7–9 mm round-bar alignment method and the subsequent piston/spring preparation."
+    },
+    {
+      "id": "RB-b84cb627",
+      "query": "If an MPC motion card dies, what can the CC2000 emergency card replace, what speed does it give, and what limit remains bypassed?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000865",
+      "expected_pages": [
+        208
+      ],
+      "category": "troubleshooting",
+      "note": "This chunk defines which Ho/Lu/SL cards can be substituted, the roughly 30% fixed speed and the high-hook exception."
+    },
+    {
+      "id": "RB-5c9c593d",
+      "query": "What are the specified luffing pressure, slewing shock pressure and slewing cut-off pressure in this hydraulic settings table?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-001337",
+      "expected_pages": [
+        372
+      ],
+      "category": "technical_value",
+      "note": "This chunk uniquely lists 10 MPa, 34 MPa and 29 MPa for those three functions."
+    },
+    {
+      "id": "RB-33617f2b",
+      "query": "Engine is still hot and I need to open the cooling or lube system; what precautions does the manual require before loosening anything?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000053",
+      "expected_pages": [
+        12
+      ],
+      "category": "procedure",
+      "note": "This safety chunk uniquely covers hot filler-cap pressure release, hot oil, live piping and fuel-fire precautions."
+    },
+    {
+      "id": "RB-54d01341",
+      "query": "What are the scheduled intervals for cleaning the heat exchanger, changing the seawater-pump impeller and checking the thermostat?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000099",
+      "expected_pages": [
+        25
+      ],
+      "category": "technical_value",
+      "note": "This maintenance table uniquely groups the 1,200-hour, 2,000-hour and yearly cooling-system tasks."
+    },
+    {
+      "id": "RB-583ac3c0",
+      "query": "After a cold start, why should I avoid loading the engine hard straight away, and how should coolant be drained or refilled around the thermostat?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000119",
+      "expected_pages": [
+        31
+      ],
+      "category": "procedure",
+      "note": "This thermostat section links wax-pellet response to warm-up practice and slow coolant filling for air bleeding."
+    },
+    {
+      "id": "RB-504c8169",
+      "query": "For long lay-up, what should I do with the reduction gear oil circulation, seawater side, pump impeller and battery?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000221",
+      "expected_pages": [
+        44
+      ],
+      "category": "procedure",
+      "note": "This preservation chunk uniquely combines the five-minute gear-circulation routine, complete seawater draining, impeller storage and battery isolation."
+    },
+    {
+      "id": "RB-22fb16ac",
+      "query": "The engine electrical system keeps blowing a fuse; what does the manual warn against doing, and what battery/start precautions go with it?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000240",
+      "expected_pages": [
+        51
+      ],
+      "category": "troubleshooting",
+      "note": "This alternator/electrical precaution chunk forbids foil in place of a fuse and covers polarity, restart delay and battery hazards."
+    },
+    {
+      "id": "RB-69535ffe",
+      "query": "What happens mechanically inside the starter when I turn the key, and why must I release the key once the engine fires?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000242",
+      "expected_pages": [
+        52
+      ],
+      "category": "definition",
+      "note": "This chunk uniquely explains pinion engagement, main-contact closure and automatic pinion return after starting."
+    },
+    {
+      "id": "RB-580b2879",
+      "query": "How do I remove an injection nozzle holder, and when does the manual say not to dismantle the nozzle itself?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000272",
+      "expected_pages": [
+        61
+      ],
+      "category": "procedure",
+      "note": "This disassembly chunk gives the nozzle-removal jig step and the specific warning against unnecessary nozzle teardown."
+    },
+    {
+      "id": "RB-8e6813c8",
+      "query": "When rebuilding the timing gear train, how do I line up the gear marks and what should I check after tightening?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000370",
+      "expected_pages": [
+        89,
+        90
+      ],
+      "category": "procedure",
+      "note": "This chunk uniquely covers alignment of crank/cam/injection-pump/idle-gear marks and the final backlash check."
+    },
+    {
+      "id": "RB-746d37af",
+      "query": "For the L086TI/AD086TI injection-pump bracket, what is the maximum runout and the fixing-bolt torque?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000393",
+      "expected_pages": [
+        99
+      ],
+      "category": "technical_value",
+      "note": "Only this chunk pairs a 0.2 mm maximum runout with a 4.4 kg·m bolt torque."
+    },
+    {
+      "id": "RB-21606190",
+      "query": "What are the opening pressures for the lube-oil relief, oil-cooler bypass, spray-nozzle valve and filter bypasses?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000420",
+      "expected_pages": [
+        108
+      ],
+      "category": "technical_value",
+      "note": "This lubricating-system table uniquely groups all of those valve-opening specifications."
+    },
+    {
+      "id": "RB-3c652f15",
+      "query": "When rebuilding the cooling-water pump, what impeller-to-housing clearance must not be exceeded?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000426",
+      "expected_pages": [
+        110
+      ],
+      "category": "technical_value",
+      "note": "This chunk gives the pump disassembly sequence and the 0.35 mm maximum clearance for a reused impeller."
+    },
+    {
+      "id": "RB-f218a8cb",
+      "query": "On the AD086TI governor controller, what do STARTING FUEL, SPEED RAMPING, GAIN, STABILITY, DROOP and TEST controls actually do?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000559",
+      "expected_pages": [
+        133
+      ],
+      "category": "definition",
+      "note": "This chunk is the dedicated control-unit function list for the electronic governor and overspeed controller."
+    },
+    {
+      "id": "RB-cb727414",
+      "query": "How should I wire the AD086TI governor speed sensor and battery feed—wire size, fuse, sensor gap and cranking signal?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000561",
+      "expected_pages": [
+        133
+      ],
+      "category": "technical_value",
+      "note": "This wiring chunk uniquely specifies #16 AWG minimum, 15 A fuse, shield grounding, 0.45 mm minimum gap and at least 1 VAC while cranking."
+    },
+    {
+      "id": "RB-637edfe9",
+      "query": "How do I set injector opening pressure on the nozzle tester and verify the spray afterward?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000606",
+      "expected_pages": [
+        147
+      ],
+      "category": "procedure",
+      "note": "This maintenance chunk gives bleeding, pressure adjustment, cap-nut tightening and final spray-pattern verification."
+    },
+    {
+      "id": "RB-544f6b18",
+      "query": "What cylinder-head height and piston-to-liner clearance limits are given in the major-parts specification table?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000673",
+      "expected_pages": [
+        179
+      ],
+      "category": "technical_value",
+      "note": "This chunk uniquely combines the cylinder-head replacement height and piston/liner clearance figures."
+    },
+    {
+      "id": "RB-ccb591f9",
+      "query": "What are the crankshaft runout/balance limits and the con-rod bearing clearances in the major-parts table?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000678",
+      "expected_pages": [
+        180
+      ],
+      "category": "technical_value",
+      "note": "This chunk groups crankshaft runout and balance with connecting-rod end play and bearing clearances."
+    },
+    {
+      "id": "RB-459b3217",
+      "query": "What cooling-water temperatures, thermostat opening points and injector pressure are specified in the final maintenance table?",
+      "expected_postprocess_job_id": 7,
+      "expected_source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "expected_chunk_id": "CHK-000784",
+      "expected_pages": [
+        183
+      ],
+      "category": "technical_value",
+      "note": "This chunk uniquely combines normal/short-term coolant limits, thermostat temperatures and the 220 kg/cm² injector setting."
+    },
+    {
+      "id": "RB-f1e12dfa",
+      "query": "Which hoist safety circuit uses TWO overload pressure switches, 1311 and 1316, before the separate 1381 low-feed-pressure trip?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000229",
+      "expected_pages": [
+        64
+      ],
+      "category": "confusion",
+      "note": "The newer Instruction Manual is a tempting match but its comparable hoist chunk lists 1311 alone, not the 1311/1316 pair."
+    },
+    {
+      "id": "RB-ee25b554",
+      "query": "Which crane control architecture uses one CC communication card plus three MC motion cards in CT2, rather than four MPC cards in cubicle MB?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-000242",
+      "expected_pages": [
+        74
+      ],
+      "category": "confusion",
+      "note": "The older MacGregor manual also describes a four-card controller, but it calls them MPC cards and locates them in cubicle MB."
+    },
+    {
+      "id": "RB-9e4d3792",
+      "query": "Which luffing pressure check tells me to open cubicle MB, remove the first electronic card, disconnect the pump plugs and then use the zero-setting screw?",
+      "expected_postprocess_job_id": 5,
+      "expected_source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "expected_chunk_id": "CHK-000710",
+      "expected_pages": [
+        169
+      ],
+      "category": "confusion",
+      "note": "The newer Instruction Manual has a similar pump-2111 test, but it uses manual valve 2221 and does not call for the MB-card removal sequence."
+    },
+    {
+      "id": "RB-b7b9bbf0",
+      "query": "The operator display has a red flashing LED and its program will not start; which troubleshooting chunk tells me to power-cycle that display?",
+      "expected_postprocess_job_id": 6,
+      "expected_source_filename": "Instruction Manual.pdf",
+      "expected_chunk_id": "CHK-001261",
+      "expected_pages": [
+        323
+      ],
+      "category": "confusion",
+      "note": "The anemometer manual is a plausible distractor because it also troubleshoots a dead display, but it focuses on NMEA/power/fuses rather than a red program-status LED."
+    }
+  ]
+}

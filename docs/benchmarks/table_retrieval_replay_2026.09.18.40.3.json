@@ -1,0 +1,215 @@
+{
+  "schema": "docling-table-retrieval-replay/v1",
+  "release": "2026.09.18.40.3",
+  "created_at_epoch": 1789733916.6626441,
+  "basis": "In-memory deterministic replay over the seven existing processed manuals; canonical files were not modified. Lexical retrieval only, not a fresh TEI hybrid benchmark.",
+  "manuals": [
+    {
+      "result_dir": "5. AD136TI Operation and maintenance manual__job7__run3",
+      "source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+      "canonical_chunks": 785,
+      "canonical_searchable_chunks": 722,
+      "stitched_table_evidence": 48,
+      "table_data_without_header_chunks": 4,
+      "flattened_table_chunks": 0,
+      "excluded_chunks": 63
+    },
+    {
+      "result_dir": "Anemometer-Anemoscope__job1__run11",
+      "source_filename": "Anemometer-Anemoscope.pdf",
+      "canonical_chunks": 30,
+      "canonical_searchable_chunks": 30,
+      "stitched_table_evidence": 1,
+      "table_data_without_header_chunks": 0,
+      "flattened_table_chunks": 0,
+      "excluded_chunks": 0
+    },
+    {
+      "result_dir": "Instruction Manual__job6__run7",
+      "source_filename": "Instruction Manual.pdf",
+      "canonical_chunks": 1908,
+      "canonical_searchable_chunks": 1798,
+      "stitched_table_evidence": 133,
+      "table_data_without_header_chunks": 7,
+      "flattened_table_chunks": 178,
+      "excluded_chunks": 110
+    },
+    {
+      "result_dir": "MacGregor_Crane_Instruction_Manual__job5__run6",
+      "source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+      "canonical_chunks": 1639,
+      "canonical_searchable_chunks": 1561,
+      "stitched_table_evidence": 100,
+      "table_data_without_header_chunks": 1,
+      "flattened_table_chunks": 135,
+      "excluded_chunks": 78
+    },
+    {
+      "result_dir": "hydraulics-for-mariners_compress__job3__run6",
+      "source_filename": "hydraulics-for-mariners_compress.pdf",
+      "canonical_chunks": 697,
+      "canonical_searchable_chunks": 690,
+      "stitched_table_evidence": 9,
+      "table_data_without_header_chunks": 0,
+      "flattened_table_chunks": 0,
+      "excluded_chunks": 7
+    },
+    {
+      "result_dir": "marine-electrical-maintenance-and-troubleshooting-deck-and-hull-machinery-pdf__job4__run7",
+      "source_filename": "marine-electrical-maintenance-and-troubleshooting-deck-and-hull-machinery-pdf.pdf",
+      "canonical_chunks": 2511,
+      "canonical_searchable_chunks": 2052,
+      "stitched_table_evidence": 166,
+      "table_data_without_header_chunks": 0,
+      "flattened_table_chunks": 0,
+      "excluded_chunks": 459
+    },
+    {
+      "result_dir": "marine-electrical-maintenance-and-troubleshooting-engine-room-equipment-pdf__job2__run6",
+      "source_filename": "marine-electrical-maintenance-and-troubleshooting-engine-room-equipment-pdf.pdf",
+      "canonical_chunks": 4257,
+      "canonical_searchable_chunks": 3186,
+      "stitched_table_evidence": 247,
+      "table_data_without_header_chunks": 0,
+      "flattened_table_chunks": 0,
+      "excluded_chunks": 1071
+    }
+  ],
+  "totals": {
+    "canonical_chunks": 11827,
+    "stitched_table_evidence": 704,
+    "table_data_without_header_chunks": 12,
+    "flattened_table_chunks": 313,
+    "excluded_chunks": 1788
+  },
+  "swl_trigger": {
+    "query": "what is the swl value of this crane safe working load",
+    "scope": "Instruction Manual only",
+    "top10": [
+      {
+        "rank": 1,
+        "chunk_id": "CHK-000891",
+        "content_type": "prose",
+        "page_numbers": [
+          233
+        ],
+        "score": 43.1496,
+        "snippet": "Extra equipment Section D D. Inspection of door hinges Lifting Block/Beam WLL = Working Load Limit (SWL) T = 1 metric ton = 1000 kg PL = Proof Load",
+        "stitched_table": false,
+        "source_chunk_ids": []
+      },
+      {
+        "rank": 2,
+        "chunk_id": "CHK-000886",
+        "content_type": "table",
+        "page_numbers": [
+          233
+        ],
+        "score": 33.5546,
+        "snippet": "Extra equipment Section D D. Inspection of door hinges Lifting Block/Beam Table 1. | Proof load for lifting blocks with 2-part rigging | Proof load for lifting blocks with 2-part rigging | Proof load for lifting blocks with 2-part rigging | |-----------------------------------------------------|-----------------------------------------------------|-----------------------------------------------------| | Class | Working load limit | Proof load | | ABS | | PL = 2 x WLL |",
+        "stitched_table": false,
+        "source_chunk_ids": []
+      },
+      {
+        "rank": 3,
+        "chunk_id": "CHK-001457",
+        "content_type": "table",
+        "page_numbers": [
+          448
+        ],
+        "score": 29.3069,
+        "snippet": "…PARTS MANUAL Date Group Fig. Page 2 (2) MACGREGOR Item Qty Article no Description Supplementary data 000 1 289 5332-802 LIFTING BLOCK SWL 36 tonnes. 001 1 875 12401-022 . SHEAVE, COMPLETE Incl. bearing and lock rings. 002 1 875 12054-004 .. BEARING 003 2 875 12062-003 .. LOCK RING 004 2 875 12009-011 . SPACER 005 1 875 12404-018 . SHAFT, COMPLETE Incl. retainer, screw, nipple. 006 1 2545 2011-025 .. GREASE NIPPLE M10 x 1; DIN 71412 007 1 875 12419-002 . SWIVEL, COMPLETE 008 3 2545 2011-025 .. G",
+        "stitched_table": false,
+        "source_chunk_ids": []
+      },
+      {
+        "rank": 4,
+        "chunk_id": "TBL-000011-P0057-001",
+        "content_type": "table_reconstructed",
+        "page_numbers": [
+          57
+        ],
+        "score": 28.9847,
+        "snippet": "Section: Extra equipment > MACGREGOR > 3. Electric Symbols Elektrische Schaltzeichen > BASIC DATA Table columns: Hoisting capacity Low speed (ton) | Hoisting speed Low (m/min) | Hoisting capacity High speed (ton) | Hoisting speed High (m/min) | Jib radius Minimum (m) | Jib radius Maximum (m) | Luffing time Max - min radius (sec) | Slewing speed (rev/min) Lifting height H 8,5 m Lifting height K 27,5 m | 36 | 23 | 18 | 36 | 4.0 | 28 | 65 | 0.8 | | 28.8 | 23 | 14.4 | 36 | 4.0 | 28 | 65 | 0.8 | Logo",
+        "stitched_table": true,
+        "source_chunk_ids": [
+          "CHK-000167",
+          "CHK-000169"
+        ]
+      },
+      {
+        "rank": 5,
+        "chunk_id": "CHK-000887",
+        "content_type": "table",
+        "page_numbers": [
+          233
+        ],
+        "score": 28.907,
+        "snippet": "Lifting Block/Beam | Proof load for lifting blocks with 2-part rigging | Proof load for lifting blocks with 2-part rigging | Proof load for lifting blocks with 2-part rigging | | BV | WLL < 25 T 25 T < WLL < 160 T WLL > 160 T | PL = 2 x WLL PL = (0.933 x WLL) + 27 PL = 1.1 x WLL |",
+        "stitched_table": false,
+        "source_chunk_ids": []
+      },
+      {
+        "rank": 6,
+        "chunk_id": "CHK-000889",
+        "content_type": "table",
+        "page_numbers": [
+          233
+        ],
+        "score": 28.0759,
+        "snippet": "Extra equipment Section D D. Inspection of door hinges Lifting Block/Beam | Proof load for lifting blocks with 2-part rigging | Proof load for lifting blocks with 2-part rigging | Proof load for lifting blocks with 2-part rigging | |-----------------------------------------------------|-----------------------------------------------------|-----------------------------------------------------| | GL | WLL < 25 T WLL > 25 T | PL = 2 x WLL PL = (1.22 x WLL) + 20 |",
+        "stitched_table": false,
+        "source_chunk_ids": []
+      },
+      {
+        "rank": 7,
+        "chunk_id": "CHK-000890",
+        "content_type": "table",
+        "page_numbers": [
+          233
+        ],
+        "score": 28.0759,
+        "snippet": "Extra equipment Section D D. Inspection of door hinges Lifting Block/Beam | Proof load for lifting blocks with 2-part rigging | Proof load for lifting blocks with 2-part rigging | Proof load for lifting blocks with 2-part rigging | |-----------------------------------------------------|-----------------------------------------------------|-----------------------------------------------------| | LRS | WLL < 25 T WLL > 25 T | PL = 2 x WLL PL = (1.22 x WLL) + 20 |",
+        "stitched_table": false,
+        "source_chunk_ids": []
+      },
+      {
+        "rank": 8,
+        "chunk_id": "CHK-000281",
+        "content_type": "prose",
+        "page_numbers": [
+          83
+        ],
+        "score": 26.3851,
+        "snippet": "Extra equipment Make sure that there is nobody in the crane house who might be caught in the machinery or strangled by the wire ropes. WARNING! Only ship's crew is allowed to operate key switches. Keys must be stored in a safe place by responsible officer. - Notify responsible officer on board before taking crane into operation. - Make sure that there is nobody in the crane house who might be caught in the machinery or strangled by the wire ropes. - When using grab or magnet, handling log or pal",
+        "stitched_table": false,
+        "source_chunk_ids": []
+      },
+      {
+        "rank": 9,
+        "chunk_id": "CHK-000335",
+        "content_type": "prose",
+        "page_numbers": [
+          89
+        ],
+        "score": 25.8102,
+        "snippet": "Extra equipment Make sure that there is nobody in the crane house who might be caught in the machinery or strangled by the wire ropes. LOAD The current load in the hook in ton. If the value equals or exceeds the limit, the box fl ashes in red. Icon",
+        "stitched_table": false,
+        "source_chunk_ids": []
+      },
+      {
+        "rank": 10,
+        "chunk_id": "CHK-000888",
+        "content_type": "table",
+        "page_numbers": [
+          233
+        ],
+        "score": 24.3715,
+        "snippet": "Extra equipment Section D D. Inspection of door hinges Lifting Block/Beam | Proof load for lifting blocks with 2-part rigging | Proof load for lifting blocks with 2-part rigging | Proof load for lifting blocks with 2-part rigging | |-----------------------------------------------------|-----------------------------------------------------|-----------------------------------------------------| | DNV | | PL = 2 x WLL |",
+        "stitched_table": false,
+        "source_chunk_ids": []
+      }
+    ],
+    "note": "Direct lifting-block SWL 36 tonnes and reconstructed page-57 hoisting-capacity evidence both appear in lexical Top-5. They remain distinct source contexts."
+  }
+}

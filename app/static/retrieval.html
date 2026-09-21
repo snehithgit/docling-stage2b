@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Machine RAG · Docling Auto-Convert</title>
+<link rel="stylesheet" href="/assets/styles.css?v=2026.09.21.40.8A.1" />
+<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.21.40.8A.1" />
+</head>
+<body class="ui29">
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<header class="mobile-topbar">
+  <button class="hamburger" id="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg></button>
+  <a class="brand" href="/" aria-label="Docling Auto-Convert"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a>
+</header>
+<div id="nav-backdrop" hidden></div>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <button class="sidebar-close" id="sidebar-close" type="button" aria-label="Close navigation">×</button>
+    <a class="brand" href="/" aria-label="Docling Auto-Convert dashboard"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a>
+    <div class="sidebar-label">Workspace</div>
+    <nav class="nav" aria-label="Primary navigation">
+      <a href="/"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M8 4v16M11 8h5M11 12h5"/></svg>Books</span></a>
+      <a href="/queue"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11m0-11 4 4m-4-4L8 7"/><path d="M5 14v4a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-4"/></svg>Convert</span></a>
+      <a href="/verification"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M4 12h7M4 17h5"/><path d="m15 15 2 2 4-5"/></svg>Verification</span></a>
+      <a href="/artifact-audit"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 10h8M8 14h5"/></svg>Artifact audit</span></a>
+      <a href="/text-audit"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z"/><circle cx="12" cy="12" r="2.5"/></svg>Verifier audit</span></a>
+      <a class="active" aria-current="page" href="/retrieval"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 5 5M8 8.5h5M8 11.5h3"/></svg>Machine RAG</span></a>
+      <a href="/oneplus"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M10 5h4M11 18.5h2"/></svg>OnePlus</span></a>
+    </nav>
+    <a class="settings-trigger nav-settings" href="/queue#settings"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.5 1a7 7 0 0 0-1.7-1L14.4 3h-4.8l-.4 3.1a7 7 0 0 0-1.7 1l-2.5-1-2 3.4L5 11a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.5-1a7 7 0 0 0 1.7 1l.4 3.1h4.8l.4-3.1a7 7 0 0 0 1.7-1l2.5 1 2-3.4L18.9 13a7 7 0 0 0 .1-1Z"/></svg>Settings</span></a>
+    <div class="sidebar-footer"><span class="footer-dot"></span><span><strong>Local pipeline</strong><br><a href="/errors">Errors & diagnostics</a></span></div>
+  </aside>
+
+  <main class="main-content retrieval-main" id="main-content">
+    <header class="page-header retrieval-hero">
+      <div>
+        <p class="eyebrow">Stage 3 · Machine-scoped retrieval</p>
+        <h1>Machine RAG</h1>
+        <p class="subtle">Group all manuals for one physical machine, build one machine embedding index, then search only inside that machine. Single-manual mode is available for lexical inspection.</p>
+      </div>
+      <div class="document-actions retrieval-header-actions">
+        <a class="secondary-button" id="open-chunk-viewer" href="/chunks">Browse chunks</a>
+      </div>
+    </header>
+
+    <section class="ui29-summary-grid retrieval-summary-grid" aria-label="Machine RAG summary">
+      <article><span>Machines configured</span><strong id="metric-machines">0</strong></article>
+      <article><span>Machines embedded</span><strong id="metric-hybrid">0 / 0</strong></article>
+      <article><span>Searchable text chunks</span><strong id="metric-searchable">0</strong></article>
+      <article><span>RAG visual evidence</span><strong id="metric-visual">0</strong></article>
+    </section>
+
+    <div id="retrieval-feedback" class="status-message" role="status" aria-live="polite" hidden></div>
+
+    <section class="panel machine-rag-panel">
+      <div class="panel-heading retrieval-panel-heading">
+        <div>
+          <p class="eyebrow">Search workflow</p>
+          <h2>Ask one machine at a time</h2>
+          <p class="subtle">1) choose the physical machine, 2) make sure its machine embeddings are ready, 3) ask a technical question and inspect the evidence.</p>
+        </div>
+      </div>
+
+      <div class="rag-step-strip" aria-label="Machine RAG steps">
+        <div><span>1</span><strong>Select scope</strong><small>Machine for normal RAG · one manual for lexical inspection</small></div>
+        <div><span>2</span><strong>Check embeddings</strong><small>Hybrid vectors are stored per physical machine, never across unrelated machines</small></div>
+        <div><span>3</span><strong>Search & inspect</strong><small>Open the exact chunk or original PDF page before generating an answer</small></div>
+      </div>
+
+      <form id="retrieval-search-form" class="machine-rag-search-form">
+        <label class="rag-scope-field"><span class="field-label">Machine or manual</span><select class="text-input" id="retrieval-scope"><option value="" selected disabled>Choose a machine or manual…</option></select></label>
+        <label class="rag-mode-field"><span class="field-label">Retrieval mode</span><select class="text-input" id="retrieval-mode"><option value="hybrid" disabled>Hybrid · loading model…</option><option value="lexical">Lexical only</option></select></label>
+        <label class="retrieval-query-field"><span class="field-label">Question or technical terms</span><input class="text-input" id="retrieval-query" required minlength="2" placeholder="Example: Why is the hoist not building pressure?" /></label>
+        <button class="primary-button rag-search-button" type="submit" disabled>Search</button>
+      </form>
+
+      <div class="scope-readiness-card" id="scope-readiness" aria-live="polite">
+        <div class="scope-readiness-copy">
+          <span class="scope-readiness-badge" id="scope-readiness-badge">Choose scope</span>
+          <div><strong id="scope-readiness-title">No machine selected</strong><p class="subtle retrieval-scope-help" id="retrieval-scope-help">Choose a machine for normal hybrid RAG. If the manual is not assigned yet, create the machine below and attach all manuals that belong to it.</p></div>
+        </div>
+        <button class="secondary-button" id="build-hybrid-index" type="button" disabled>Build machine embeddings</button>
+      </div>
+
+      <div id="retrieval-results" class="retrieval-results"><p class="empty-state">Choose a scope and run a search. The top Stage 3 text chunks will appear here.</p></div>
+
+      <section id="retrieval-visual-section" class="retrieval-visual-section" hidden>
+        <div class="panel-heading retrieval-panel-heading"><div><p class="eyebrow">Visual evidence</p><h3>Matched technical artifacts</h3><p class="subtle">These [V#] records come from resolved Stage 2C vision enrichment for the selected machine/manual. Retrieval does not rerun vision.</p></div></div>
+        <div id="retrieval-visual-results" class="retrieval-results"></div>
+      </section>
+
+      <section class="retrieval-answer-workspace" id="retrieval-answer-workspace" hidden aria-label="Grounded answer generation">
+        <div class="retrieval-answer-head">
+          <div><p class="eyebrow">Optional final step</p><h3>Generate only from the evidence above</h3><p class="subtle">Choose one generator. No automatic fallback. For a machine scope, every [S#]/[V#] source stays inside that machine’s assigned manuals.</p></div>
+          <div class="retrieval-answer-controls">
+            <label><span class="field-label">Generator</span><select class="text-input" id="answer-provider"><option value="pi5">Pi5 · local</option><option value="oneplus">OnePlus · local</option><option value="groq">Groq · cloud</option></select></label>
+            <button class="primary-button" id="generate-answer" type="button">Generate answer</button>
+            <button class="secondary-button" id="copy-external-prompt" type="button">Copy for other LLM</button>
+          </div>
+        </div>
+        <div id="answer-message" class="status-message" role="status" aria-live="polite" hidden></div>
+        <article class="grounded-answer-card" id="grounded-answer-card" hidden>
+          <div class="grounded-answer-meta"><div><span id="answer-provider-label">Generator</span><strong id="answer-model"></strong></div><div><span id="answer-latency"></span><button class="mini-action" id="copy-generated-answer" type="button">Copy answer</button></div></div>
+          <div class="grounded-answer-text" id="grounded-answer-text"></div>
+          <div class="grounded-answer-sources"><strong>Evidence sent to generator</strong><div id="grounded-answer-sources"></div></div>
+        </article>
+      </section>
+    </section>
+
+    <details class="ui29-details machine-manager-panel" id="machine-manager">
+      <summary><span><strong>Machines & manuals</strong><small id="machine-manager-summary">Create physical machines and attach their description, operation, maintenance, electrical, hydraulic, parts and tools manuals.</small></span></summary>
+      <div class="ui29-details-body">
+        <div class="machine-manager-intro"><p>Hybrid embeddings are built <strong>per machine</strong>. A manual can belong to only one machine. Mark the revision used for normal RAG as <strong>Current</strong>; Historical and Draft revisions stay available for audit but are excluded from machine retrieval. Changing a current manual, its revision status, or its Stage 3 index marks the machine embedding stale until the strict pipeline rebuild finishes.</p></div>
+        <form id="equipment-form" class="equipment-form">
+          <input type="hidden" id="equipment-id" />
+          <div class="equipment-fields">
+            <label><span class="field-label">Machine name</span><input class="text-input" id="equipment-name" required maxlength="160" placeholder="Example: Crane No. 1" /></label>
+            <label><span class="field-label">Manufacturer</span><input class="text-input" id="equipment-manufacturer" maxlength="160" placeholder="Optional" /></label>
+            <label><span class="field-label">Model</span><input class="text-input" id="equipment-model" maxlength="160" placeholder="Optional" /></label>
+          </div>
+          <div><span class="field-label">Manuals belonging to this machine</span><p class="subtle equipment-manual-help">Choose the manual type and revision. <strong>Current</strong> revisions are included in Machine RAG; <strong>Historical</strong> and <strong>Draft</strong> copies are retained for audit only.</p><div id="equipment-manual-list" class="equipment-manual-list"><p class="empty-state">Loading manuals…</p></div></div>
+          <div class="equipment-form-actions"><button class="primary-button" type="submit" id="equipment-save">Save machine</button><button class="secondary-button" type="button" id="equipment-cancel" hidden>Cancel edit</button></div>
+        </form>
+        <div id="equipment-groups" class="equipment-groups"></div>
+      </div>
+    </details>
+
+    <details class="ui29-details retrieval-maintenance-details">
+      <summary><span><strong>Stage 3 index maintenance</strong><small>Only needed after chunk/index changes or an upgrade. No model calls.</small></span></summary>
+      <div class="ui29-details-body retrieval-maintenance-body">
+        <div class="maintenance-metrics">
+          <span><small>Books indexed</small><strong id="metric-books">0 / 0</strong></span>
+          <span><small>Noise excluded</small><strong id="metric-excluded">0</strong></span>
+          <span><small>Oversized searchable</small><strong id="metric-oversized">0</strong></span>
+        </div>
+        <button class="secondary-button" id="prepare-index" type="button">Refresh Stage 3 text indexes</button>
+      </div>
+    </details>
+
+    <details class="ui29-details retrieval-benchmark-details">
+      <summary><span><strong>Retrieval benchmark</strong><small>Developer/quality check using saved expected chunks.</small></span></summary>
+      <section class="retrieval-benchmark-panel ui29-details-body">
+        <div class="panel-heading retrieval-panel-heading">
+          <div><p class="eyebrow">Fixed test set</p><h2>Benchmark</h2><p class="subtle">Mark correct result(s) as expected. A question can have more than one acceptable source.</p></div>
+          <div class="retrieval-benchmark-actions"><button class="secondary-button" id="run-benchmark" type="button">Run lexical benchmark</button><button class="secondary-button" id="run-hybrid-benchmark" type="button">Run fresh machine hybrid</button></div>
+        </div>
+        <div class="retrieval-benchmark-metrics" id="benchmark-metrics">
+          <span><small>Cases</small><strong id="bench-cases">0</strong></span>
+          <span><small>Top 1</small><strong id="bench-top1">—</strong></span>
+          <span><small>Top 3</small><strong id="bench-top3">—</strong></span>
+          <span><small>Top 5</small><strong id="bench-top5">—</strong></span>
+        </div>
+        <details class="ui29-details retrieval-cases-details"><summary>Saved benchmark cases</summary><div id="benchmark-cases" class="retrieval-cases"><p class="empty-state">No benchmark cases yet.</p></div></details>
+      </section>
+    </details>
+  </main>
+</div>
+
+<div class="source-page-modal" id="source-page-modal" hidden aria-hidden="true">
+  <div class="source-page-dialog" role="dialog" aria-modal="true" aria-labelledby="source-page-title">
+    <div class="source-page-head">
+      <div><p class="eyebrow">Original source</p><h2 id="source-page-title">Source page</h2><p class="subtle" id="source-page-meta"></p></div>
+      <button class="source-page-close" id="source-page-close" type="button" aria-label="Close source page">×</button>
+    </div>
+    <div class="source-page-canvas"><div class="source-page-loading" id="source-page-loading">Loading original PDF page…</div><img id="source-page-image" alt="Original manual page" hidden /></div>
+    <div class="source-page-actions"><button class="secondary-button" id="source-page-prev" type="button">Previous page</button><span id="source-page-counter" class="subtle"></span><button class="secondary-button" id="source-page-next" type="button">Next page</button></div>
+    <p class="source-page-note">Red outline = Docling source item used by this retrieval result. If no usable provenance exists, the original page is still shown without a box.</p>
+  </div>
+</div>
+<script src="/assets/nav.js?v=2026.09.21.40.8A.1"></script>
+<script src="/assets/retrieval.js?v=2026.09.21.40.8A.1"></script>
+</body>
+</html>

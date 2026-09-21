@@ -1,0 +1,115 @@
+{
+  "schema": "docling-table-reconstruction-lexical-133/v1",
+  "release": "2026.09.18.40.3",
+  "scope": "expected-manual proxy; benchmark source matching uses expected job + Docling refs/pages, so derived stitched evidence from the expected source page counts as the same source.",
+  "baseline": {
+    "top1_percent": 70.68,
+    "top3_percent": 87.22,
+    "top5_percent": 91.73,
+    "top10_percent": 94.74,
+    "mrr": 0.80072
+  },
+  "overall": {
+    "cases": 133,
+    "top1_percent": 72.18,
+    "top3_percent": 88.72,
+    "top5_percent": 92.48,
+    "top10_percent": 94.74,
+    "mrr": 0.80944,
+    "not_in_top10": 7
+  },
+  "by_category": {
+    "confusion": {
+      "cases": 7,
+      "top1_percent": 85.71,
+      "top3_percent": 100.0,
+      "top5_percent": 100.0,
+      "top10_percent": 100.0,
+      "mrr": 0.92857,
+      "not_in_top10": 0
+    },
+    "cross_reference": {
+      "cases": 11,
+      "top1_percent": 63.64,
+      "top3_percent": 63.64,
+      "top5_percent": 81.82,
+      "top10_percent": 90.91,
+      "mrr": 0.68737,
+      "not_in_top10": 1
+    },
+    "definition": {
+      "cases": 8,
+      "top1_percent": 50.0,
+      "top3_percent": 100.0,
+      "top5_percent": 100.0,
+      "top10_percent": 100.0,
+      "mrr": 0.72917,
+      "not_in_top10": 0
+    },
+    "procedure": {
+      "cases": 41,
+      "top1_percent": 70.73,
+      "top3_percent": 95.12,
+      "top5_percent": 100.0,
+      "top10_percent": 100.0,
+      "mrr": 0.83496,
+      "not_in_top10": 0
+    },
+    "technical_value": {
+      "cases": 43,
+      "top1_percent": 79.07,
+      "top3_percent": 81.4,
+      "top5_percent": 83.72,
+      "top10_percent": 88.37,
+      "mrr": 0.81072,
+      "not_in_top10": 5
+    },
+    "troubleshooting": {
+      "cases": 23,
+      "top1_percent": 69.57,
+      "top3_percent": 95.65,
+      "top5_percent": 95.65,
+      "top10_percent": 95.65,
+      "mrr": 0.81159,
+      "not_in_top10": 1
+    }
+  },
+  "by_manual": {
+    "5. AD136TI Operation and maintenance manual.pdf": {
+      "cases": 34,
+      "top1_percent": 76.47,
+      "top3_percent": 88.24,
+      "top5_percent": 88.24,
+      "top10_percent": 91.18,
+      "mrr": 0.81699,
+      "not_in_top10": 3
+    },
+    "Anemometer-Anemoscope.pdf": {
+      "cases": 13,
+      "top1_percent": 76.92,
+      "top3_percent": 100.0,
+      "top5_percent": 100.0,
+      "top10_percent": 100.0,
+      "mrr": 0.88462,
+      "not_in_top10": 0
+    },
+    "Instruction Manual.pdf": {
+      "cases": 50,
+      "top1_percent": 62.0,
+      "top3_percent": 86.0,
+      "top5_percent": 94.0,
+      "top10_percent": 96.0,
+      "mrr": 0.75022,
+      "not_in_top10": 2
+    },
+    "MacGregor_Crane_Instruction_Manual.pdf": {
+      "cases": 36,
+      "top1_percent": 80.56,
+      "top3_percent": 88.89,
+      "top5_percent": 91.67,
+      "top10_percent": 94.44,
+      "mrr": 0.85741,
+      "not_in_top10": 2
+    }
+  }
+}

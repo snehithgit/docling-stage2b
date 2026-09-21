@@ -1,0 +1,271 @@
+{
+  "schema": "docling-stage3-retrieval-real-replay/v1",
+  "source": "_processed (10).zip",
+  "books": [
+    {
+      "book": "5. AD136TI Operation and maintenance manual__job7__run3",
+      "before_chunks": 785,
+      "after_chunks": 785,
+      "stage3": {
+        "oversized_chunks_seen": 0,
+        "oversized_chunks_split": 0,
+        "oversized_chunks_remaining": 0
+      },
+      "retrieval": {
+        "schema": "docling-retrieval-quality/v1",
+        "generated_at_epoch": 1789371789.7342944,
+        "postprocess_job_id": null,
+        "source_filename": "5. AD136TI Operation and maintenance manual__job7__run3",
+        "result_dir": "5. AD136TI Operation and maintenance manual__job7__run3",
+        "total_chunks": 785,
+        "searchable_chunks": 741,
+        "excluded_chunks": 44,
+        "oversized_searchable_chunks": 0,
+        "oversized_all_chunks": 0,
+        "mean_quality_score": 96.58,
+        "content_types": {
+          "prose": 371,
+          "table": 371,
+          "table_fragment": 22,
+          "table_header_only": 21
+        },
+        "warnings": {
+          "REPETITIVE_OCR_BLOCK": 17,
+          "TABLE_FRAGMENT": 22,
+          "TABLE_HEADER_ONLY": 21,
+          "TOKEN_COUNT_ESTIMATED": 223,
+          "TOO_LITTLE_SEARCHABLE_TEXT": 6
+        },
+        "raw_docling_immutable": true
+      }
+    },
+    {
+      "book": "Anemometer-Anemoscope__job1__run11",
+      "before_chunks": 30,
+      "after_chunks": 30,
+      "stage3": {
+        "oversized_chunks_seen": 0,
+        "oversized_chunks_split": 0,
+        "oversized_chunks_remaining": 0
+      },
+      "retrieval": {
+        "schema": "docling-retrieval-quality/v1",
+        "generated_at_epoch": 1789371789.7398384,
+        "postprocess_job_id": null,
+        "source_filename": "Anemometer-Anemoscope__job1__run11",
+        "result_dir": "Anemometer-Anemoscope__job1__run11",
+        "total_chunks": 30,
+        "searchable_chunks": 30,
+        "excluded_chunks": 0,
+        "oversized_searchable_chunks": 0,
+        "oversized_all_chunks": 0,
+        "mean_quality_score": 99.6,
+        "content_types": {
+          "prose": 23,
+          "table": 6,
+          "table_fragment": 1
+        },
+        "warnings": {
+          "TABLE_FRAGMENT": 1,
+          "TOKEN_COUNT_ESTIMATED": 2
+        },
+        "raw_docling_immutable": true
+      }
+    },
+    {
+      "book": "Instruction Manual__job6__run7",
+      "before_chunks": 1908,
+      "after_chunks": 1908,
+      "stage3": {
+        "oversized_chunks_seen": 1,
+        "oversized_chunks_split": 0,
+        "oversized_chunks_remaining": 1
+      },
+      "retrieval": {
+        "schema": "docling-retrieval-quality/v1",
+        "generated_at_epoch": 1789371790.1583805,
+        "postprocess_job_id": null,
+        "source_filename": "Instruction Manual__job6__run7",
+        "result_dir": "Instruction Manual__job6__run7",
+        "total_chunks": 1908,
+        "searchable_chunks": 1829,
+        "excluded_chunks": 79,
+        "oversized_searchable_chunks": 0,
+        "oversized_all_chunks": 1,
+        "mean_quality_score": 97.12,
+        "content_types": {
+          "prose": 1059,
+          "table": 712,
+          "table_fragment": 98,
+          "table_header_only": 39
+        },
+        "warnings": {
+          "OVERSIZED_CHUNK": 1,
+          "REPETITIVE_OCR_BLOCK": 40,
+          "TABLE_FRAGMENT": 98,
+          "TABLE_HEADER_ONLY": 39,
+          "TOKEN_COUNT_ESTIMATED": 511,
+          "TOO_LITTLE_SEARCHABLE_TEXT": 2
+        },
+        "raw_docling_immutable": true
+      }
+    },
+    {
+      "book": "MacGregor_Crane_Instruction_Manual__job5__run6",
+      "before_chunks": 1639,
+      "after_chunks": 1639,
+      "stage3": {
+        "oversized_chunks_seen": 0,
+        "oversized_chunks_split": 0,
+        "oversized_chunks_remaining": 0
+      },
+      "retrieval": {
+        "schema": "docling-retrieval-quality/v1",
+        "generated_at_epoch": 1789371790.4964285,
+        "postprocess_job_id": null,
+        "source_filename": "MacGregor_Crane_Instruction_Manual__job5__run6",
+        "result_dir": "MacGregor_Crane_Instruction_Manual__job5__run6",
+        "total_chunks": 1639,
+        "searchable_chunks": 1590,
+        "excluded_chunks": 49,
+        "oversized_searchable_chunks": 0,
+        "oversized_all_chunks": 0,
+        "mean_quality_score": 97.81,
+        "content_types": {
+          "prose": 876,
+          "table": 649,
+          "table_fragment": 74,
+          "table_header_only": 40
+        },
+        "warnings": {
+          "REPETITIVE_OCR_BLOCK": 8,
+          "TABLE_FRAGMENT": 74,
+          "TABLE_HEADER_ONLY": 40,
+          "TOKEN_COUNT_ESTIMATED": 408,
+          "TOO_LITTLE_SEARCHABLE_TEXT": 9
+        },
+        "raw_docling_immutable": true
+      }
+    },
+    {
+      "book": "hydraulics-for-mariners_compress__job3__run6",
+      "before_chunks": 697,
+      "after_chunks": 697,
+      "stage3": {
+        "oversized_chunks_seen": 0,
+        "oversized_chunks_split": 0,
+        "oversized_chunks_remaining": 0
+      },
+      "retrieval": {
+        "schema": "docling-retrieval-quality/v1",
+        "generated_at_epoch": 1789371790.6779482,
+        "postprocess_job_id": null,
+        "source_filename": "hydraulics-for-mariners_compress__job3__run6",
+        "result_dir": "hydraulics-for-mariners_compress__job3__run6",
+        "total_chunks": 697,
+        "searchable_chunks": 691,
+        "excluded_chunks": 6,
+        "oversized_searchable_chunks": 0,
+        "oversized_all_chunks": 0,
+        "mean_quality_score": 99.32,
+        "content_types": {
+          "prose": 605,
+          "table": 75,
+          "table_fragment": 12,
+          "table_header_only": 5
+        },
+        "warnings": {
+          "REPETITIVE_OCR_BLOCK": 1,
+          "TABLE_FRAGMENT": 12,
+          "TABLE_HEADER_ONLY": 5,
+          "TOKEN_COUNT_ESTIMATED": 50
+        },
+        "raw_docling_immutable": true
+      }
+    },
+    {
+      "book": "marine-electrical-maintenance-and-troubleshooting-deck-and-hull-machinery-pdf__job4__run7",
+      "before_chunks": 2511,
+      "after_chunks": 2511,
+      "stage3": {
+        "oversized_chunks_seen": 44,
+        "oversized_chunks_split": 44,
+        "oversized_chunks_remaining": 0
+      },
+      "retrieval": {
+        "schema": "docling-retrieval-quality/v1",
+        "generated_at_epoch": 1789371791.1482973,
+        "postprocess_job_id": null,
+        "source_filename": "marine-electrical-maintenance-and-troubleshooting-deck-and-hull-machinery-pdf__job4__run7",
+        "result_dir": "marine-electrical-maintenance-and-troubleshooting-deck-and-hull-machinery-pdf__job4__run7",
+        "total_chunks": 2511,
+        "searchable_chunks": 2112,
+        "excluded_chunks": 399,
+        "oversized_searchable_chunks": 0,
+        "oversized_all_chunks": 0,
+        "mean_quality_score": 91.12,
+        "content_types": {
+          "prose": 488,
+          "table": 1631,
+          "table_fragment": 29,
+          "table_header_only": 363
+        },
+        "warnings": {
+          "REPETITIVE_OCR_BLOCK": 2,
+          "TABLE_FRAGMENT": 29,
+          "TABLE_HEADER_ONLY": 363,
+          "TOKEN_COUNT_ESTIMATED": 1278,
+          "TOO_LITTLE_SEARCHABLE_TEXT": 51
+        },
+        "raw_docling_immutable": true
+      }
+    },
+    {
+      "book": "marine-electrical-maintenance-and-troubleshooting-engine-room-equipment-pdf__job2__run6",
+      "before_chunks": 4257,
+      "after_chunks": 4257,
+      "stage3": {
+        "oversized_chunks_seen": 582,
+        "oversized_chunks_split": 581,
+        "oversized_chunks_remaining": 1
+      },
+      "retrieval": {
+        "schema": "docling-retrieval-quality/v1",
+        "generated_at_epoch": 1789371791.8652494,
+        "postprocess_job_id": null,
+        "source_filename": "marine-electrical-maintenance-and-troubleshooting-engine-room-equipment-pdf__job2__run6",
+        "result_dir": "marine-electrical-maintenance-and-troubleshooting-engine-room-equipment-pdf__job2__run6",
+        "total_chunks": 4257,
+        "searchable_chunks": 3327,
+        "excluded_chunks": 930,
+        "oversized_searchable_chunks": 1,
+        "oversized_all_chunks": 1,
+        "mean_quality_score": 87.76,
+        "content_types": {
+          "prose": 658,
+          "table": 2684,
+          "table_fragment": 79,
+          "table_header_only": 836
+        },
+        "warnings": {
+          "OVERSIZED_CHUNK": 1,
+          "REPETITIVE_OCR_BLOCK": 10,
+          "TABLE_FRAGMENT": 79,
+          "TABLE_HEADER_ONLY": 836,
+          "TOKEN_COUNT_ESTIMATED": 2714,
+          "TOO_LITTLE_SEARCHABLE_TEXT": 108
+        },
+        "raw_docling_immutable": true
+      }
+    }
+  ],
+  "totals": {
+    "books": 7,
+    "chunks": 11827,
+    "oversized_before": 627,
+    "oversized_after": 2,
+    "searchable_chunks": 10320,
+    "excluded_chunks": 1507,
+    "oversized_searchable_chunks": 1
+  }
+}
