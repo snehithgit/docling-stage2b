@@ -355,6 +355,50 @@ class PostprocessStore:
             ).fetchone()
             return dict(row) if row else None
 
+    async def delete_book_records(self, job_id: int) -> dict[str, Any] | None:
+        """Atomically remove one book's queue records from all pipeline tables.
+
+        Files are handled by the API lifecycle layer.  Keeping the three table
+        deletes in one SQLite transaction prevents a half-deleted book from
+        remaining visible in another stage after a crash/error.
+        """
+        return await self._run(self._delete_book_records_sync, job_id)
+
+    def _delete_book_records_sync(self, job_id: int) -> dict[str, Any] | None:
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """SELECT p.*,
+                          j.filename AS conversion_filename,
+                          j.status AS conversion_status,
+                          j.output_filename AS conversion_output_filename,
+                          j.source_kind AS conversion_source_kind,
+                          j.source_sha256 AS conversion_source_sha256
+                   FROM postprocess_jobs p
+                   LEFT JOIN jobs j ON j.id=p.conversion_job_id
+                   WHERE p.id=?""",
+                (job_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            if str(row["status"] or "") in {"pending", "processing"}:
+                raise RuntimeError("Stage 2A is queued or running. Wait for it to finish before deleting the book.")
+            if str(row["conversion_status"] or "") in {"pending", "processing"}:
+                raise RuntimeError("Docling conversion is queued or running. Wait for it to finish before deleting the book.")
+            active = connection.execute(
+                """SELECT COUNT(*) FROM verification_jobs
+                   WHERE postprocess_job_id=? AND status='processing'""",
+                (job_id,),
+            ).fetchone()[0]
+            if int(active or 0) > 0:
+                raise RuntimeError("Book has active verification work. Stop/wait for it before deleting the book.")
+
+            conversion_job_id = int(row["conversion_job_id"])
+            connection.execute("DELETE FROM verification_jobs WHERE postprocess_job_id=?", (job_id,))
+            connection.execute("DELETE FROM postprocess_jobs WHERE id=?", (job_id,))
+            connection.execute("DELETE FROM jobs WHERE id=?", (conversion_job_id,))
+            return dict(row)
+
     async def list_jobs(self, limit: int = 100) -> list[dict[str, Any]]:
         return await self._run(self._list_jobs_sync, limit)
 

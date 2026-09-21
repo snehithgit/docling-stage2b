@@ -18,11 +18,12 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 import fitz
 
 from .archive import select_docling_document
+from .book_lifecycle import quarantine_book_artifacts, restore_quarantined_artifacts
 from .config import AppConfig, config_path, load_config, save_config
 from .database import JobStore
 from .docling_client import DoclingApiError, DoclingClient
 from .events import EventBroker
-from .equipment_scope import delete_equipment, equipment_catalog, load_registry, resolve_equipment_books, upsert_equipment
+from .equipment_scope import delete_equipment, equipment_catalog, load_registry, remove_manual_from_equipment, resolve_equipment_books, upsert_equipment
 from .hybrid_retrieval import (
     EmbeddingServiceError,
     HybridIndexNotReady,
@@ -191,6 +192,10 @@ class SettingsUpdate(BaseModel):
 
 class WatcherAutoRunUpdate(BaseModel):
     enabled: bool
+
+
+class DeleteBookRequest(BaseModel):
+    confirm: bool = False
 
 
 class Stage2BAutoRunUpdate(BaseModel):
@@ -1641,6 +1646,79 @@ async def rerun_postprocess_job(job_id: int) -> dict:
         raise HTTPException(status_code=409, detail="Stage 2 could not be queued for rerun.")
     runtime.events.notify("postprocess_rerun")
     return {"accepted": True, "stage": "quality_routing", "docling_reconversion": False}
+
+
+@app.post("/api/postprocess/jobs/{job_id}/delete")
+async def delete_book(job_id: int, request: DeleteBookRequest) -> dict:
+    """Remove one book from the active pipeline without destroying source files.
+
+    The original input, converted Docling ZIP and processed result directory are
+    moved into per-root ``_deleted_books`` quarantine folders before their DB
+    rows are removed.  Because the watcher/importer scan only the root folders,
+    the deleted book stays deleted until the operator explicitly restores it.
+    """
+    if not request.confirm:
+        raise HTTPException(status_code=422, detail="Explicit delete confirmation is required.")
+    job = await runtime.postprocess_store.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Book not found.")
+    if str(job.get("status") or "") in {"pending", "processing"}:
+        raise HTTPException(status_code=409, detail="Stage 2A is queued or processing this book. Wait for it to finish before deleting.")
+
+    conversion = await runtime.postprocess_store.get_conversion_job(int(job.get("conversion_job_id") or 0))
+    if conversion and str(conversion.get("status") or "") in {"pending", "processing"}:
+        raise HTTPException(status_code=409, detail="Docling conversion is queued or processing this book. Wait for it to finish before deleting.")
+
+    verification_rows = await runtime.stage2b_store.list_book_jobs_raw(job_id)
+    if any(str(row.get("status") or "") == "processing" for row in verification_rows):
+        raise HTTPException(status_code=409, detail="Verification is currently processing this book. Stop/wait for it before deleting.")
+
+    stage2c_state = runtime.stage2b_worker.stage2c_state_for(job_id) or {}
+    if str(stage2c_state.get("status") or "") in {"queued", "running"}:
+        raise HTTPException(status_code=409, detail="Stage 2C is currently building this book. Wait for it to finish before deleting.")
+    stage3_state = runtime.stage3_builder.state_for(job_id) or {}
+    if str(stage3_state.get("status") or "") in {"queued", "running"}:
+        raise HTTPException(status_code=409, detail="Stage 3 is currently building this book. Wait for it to finish before deleting.")
+
+    delete_row = {
+        **job,
+        "conversion_filename": (conversion or {}).get("filename"),
+        "conversion_output_filename": (conversion or {}).get("output_filename"),
+        "conversion_source_kind": (conversion or {}).get("source_kind") or job.get("source_kind"),
+    }
+    try:
+        quarantine = await asyncio.to_thread(quarantine_book_artifacts, runtime.config, delete_row)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not quarantine the book files: {exc}") from exc
+
+    try:
+        deleted = await runtime.postprocess_store.delete_book_records(job_id)
+    except RuntimeError as exc:
+        rollback_errors = await asyncio.to_thread(restore_quarantined_artifacts, quarantine)
+        detail = str(exc)
+        if rollback_errors:
+            detail += " File rollback also reported: " + "; ".join(rollback_errors)
+        raise HTTPException(status_code=409, detail=detail) from exc
+    except Exception as exc:
+        rollback_errors = await asyncio.to_thread(restore_quarantined_artifacts, quarantine)
+        detail = f"Database deletion failed: {exc}"
+        if rollback_errors:
+            detail += " File rollback also reported: " + "; ".join(rollback_errors)
+        raise HTTPException(status_code=500, detail=detail) from exc
+    if deleted is None:
+        await asyncio.to_thread(restore_quarantined_artifacts, quarantine)
+        raise HTTPException(status_code=404, detail="Book disappeared before it could be deleted.")
+
+    equipment = await asyncio.to_thread(remove_manual_from_equipment, Path(runtime.config.processed_dir), job_id)
+    runtime.events.notify("book_deleted")
+    return {
+        "deleted": True,
+        "postprocess_job_id": job_id,
+        "source_filename": job.get("source_filename"),
+        "quarantine": quarantine,
+        "equipment": equipment,
+        "message": "Book removed from the active pipeline. Source files were quarantined, not destroyed.",
+    }
 
 
 def _verifier_provider_label(provider: str, kind: str) -> str:

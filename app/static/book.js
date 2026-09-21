@@ -111,6 +111,12 @@
     $('book-subtitle').textContent = `${book.source_kind === 'converted_folder' ? 'Imported Docling ZIP' : 'Converted source'} · Raw Docling output remains immutable.`;
     $('book-status-tag').textContent = machineEmbeddingReady ? 'Machine RAG ready' : chunksBuilt && !machineAssigned ? 'Assign machine next' : chunksBuilt ? 'Machine embeddings next' : stage2cBuilt ? 'Stage 3 next' : quotaPaused && (c.pending || c.processing) ? 'Cloud quota paused' : c.processing ? 'Verification running' : stage2bDone ? 'Auto finalizing' : 'In workflow';
     $('book-status-tag').className = `workflow-tag ${stage2bFailed ? 'attention' : ''}`;
+    const deleteButton = $('delete-book-button');
+    if (deleteButton) {
+      const activeBuild = ['pending','processing'].includes(String(book.status || '')) || c.processing > 0 || ['running','queued'].includes(String(book.stage2c_status || '')) || ['running','queued'].includes(String(book.stage3_status || ''));
+      deleteButton.disabled = busy || activeBuild;
+      deleteButton.title = activeBuild ? 'Wait for active processing to finish before deleting this book.' : 'Remove this book from the active pipeline.';
+    }
 
     const cards=[]; const rail=[];
     cards.push(stageCard('1','Docling conversion','Create the immutable Docling ZIP used by every later stage','done','Complete',`<div class="stage-summary-grid"><div><span>Source</span><strong>${esc(book.source_kind === 'converted_folder' ? 'Imported ZIP' : 'Converted')}</strong></div><div><span>Output</span><strong>${esc(book.output_filename || 'Docling ZIP')}</strong></div></div>`,`<a class="secondary-button" href="/api/outputs/${encodeURIComponent(book.output_filename || '')}">Download original converted ZIP</a>`)); rail.push('done');
@@ -176,6 +182,31 @@
     document.querySelectorAll('[data-action="chunks"]').forEach(btn => btn.onclick = () => run(btn,'chunks'));
     document.querySelectorAll('[data-action="audit-bypass"]').forEach(btn => btn.onclick = () => setAuditBypass(btn, true));
     document.querySelectorAll('[data-action="audit-enforce"]').forEach(btn => btn.onclick = () => setAuditBypass(btn, false));
+    const deleteButton = $('delete-book-button');
+    if (deleteButton) deleteButton.onclick = () => deleteBook(deleteButton);
+  }
+
+  async function deleteBook(button) {
+    if (busy || !book) return;
+    const name = String(book.source_filename || book.output_filename || 'this book');
+    const first = `Delete "${name}" from Marine Pipeline Studio?\n\nThis removes its active conversion/Stage 2A/Stage 2B/Stage 2C/Stage 3/RAG state and machine assignment.\n\nThe source manual, converted Docling ZIP, and processed result folder are moved into _deleted_books quarantine folders instead of being destroyed. They will not be auto-discovered there.\n\nChoose OK for Yes, or Cancel for No.`;
+    if (!window.confirm(first)) return;
+    const second = `Final confirmation: remove "${name}" from the active library now?\n\nYou can recover quarantined files manually later, but this book's active database history will be deleted.`;
+    if (!window.confirm(second)) return;
+    busy = true;
+    const label = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Deleting…';
+    try {
+      const result = await api(`/api/postprocess/jobs/${jobId}/delete`, 'POST', {confirm:true});
+      sessionStorage.setItem('book-delete-message', result.message || 'Book deleted.');
+      location.href = '/';
+    } catch (e) {
+      feedback(e.message, true);
+      busy = false;
+      button.textContent = label;
+      render();
+    }
   }
 
   async function setAuditBypass(button, enabled) {

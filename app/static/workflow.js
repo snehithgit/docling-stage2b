@@ -5,6 +5,15 @@
   let last = '';
   let loading = false;
 
+  const deletedMessage = sessionStorage.getItem('book-delete-message');
+  if (deletedMessage) {
+    sessionStorage.removeItem('book-delete-message');
+    const feedback = $('workflow-feedback');
+    feedback.hidden = false;
+    feedback.textContent = deletedMessage;
+    feedback.className = 'status-message success';
+  }
+
   function stage(book) {
     const v = book.verification || {};
     const pending = Number(v.pi5_pending || 0) + Number(v.oneplus_pending || 0);

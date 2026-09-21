@@ -583,6 +583,16 @@ def test_book_workflow_always_exposes_audit_testing_bypass_control():
     assert "window.confirm" in js
     assert "They are NOT accepted" in js
     assert "always visible at the top of this Book workflow page" in js
+
+
+def test_book_workflow_exposes_safe_delete_book_control():
+    html = read("book.html")
+    js = read("book.js")
+    assert 'id="delete-book-button"' in html
+    assert "Delete book" in html
+    assert "/api/postprocess/jobs/${jobId}/delete" in js
+    assert "_deleted_books" in js
+    assert "active database history will be deleted" in js
     html = read("book.html")
     assert 'id="book-audit-bypass-panel"' in html
     assert 'id="book-audit-bypass-button"' in html

@@ -4,8 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Book workflow · Docling Auto-Convert</title>
-<link rel="stylesheet" href="/assets/styles.css?v=2026.09.21.40.9.1" />
-<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.21.40.9.1" />
+<link rel="stylesheet" href="/assets/styles.css?v=2026.09.21.40.9.2" />
+<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.21.40.9.2" />
 </head>
 <body class="ui29">
 <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -40,7 +40,10 @@
         <h1 id="book-title">Loading book…</h1>
         <p class="subtle" id="book-subtitle">Checking current stage.</p>
       </div>
-      <span class="workflow-tag" id="book-status-tag">Loading</span>
+      <div class="book-header-actions">
+        <span class="workflow-tag" id="book-status-tag">Loading</span>
+        <button class="secondary-button danger-outline" id="delete-book-button" type="button" disabled>Delete book</button>
+      </div>
     </header>
     <div id="book-feedback" class="status-message page-feedback" hidden role="status" aria-live="polite"></div>
     <div id="book-quota-alert" class="status-message page-feedback warning" hidden role="status" aria-live="polite"></div>
@@ -71,7 +74,7 @@
     </section>
   </main>
 </div>
-<script src="/assets/nav.js?v=2026.09.21.40.9.1"></script>
-<script src="/assets/book.js?v=2026.09.21.40.9.1"></script>
+<script src="/assets/nav.js?v=2026.09.21.40.9.2"></script>
+<script src="/assets/book.js?v=2026.09.21.40.9.2"></script>
 </body>
 </html>

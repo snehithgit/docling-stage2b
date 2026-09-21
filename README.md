@@ -1,3 +1,12 @@
+## 2026.09.21.40.9.2 — Safe per-book deletion
+
+- Added **Delete book** to every Book workflow page.
+- Deletion is deliberately two-step confirmed and is blocked while Stage 2A/2B/2C/3 work is actively queued/running for that book.
+- Removes the book's conversion, Stage 2A, Stage 2B, Stage 2C, Stage 3, retrieval/RAG database ownership and equipment assignment.
+- Invalidates the affected machine embedding index so deleted manual content cannot remain searchable.
+- Source manuals, converted Docling ZIPs and processed result folders are moved into `_deleted_books` quarantine folders rather than destroyed. The normal input/converted scanners do not recurse into those folders, so deleted books stay deleted unless manually restored.
+- See `docs/RELEASE_VALIDATION_2026.09.21.40.9.2.md`.
+
 ## 2026.09.21.40.9.1 — GitHub publisher `.env.example` hotfix
 
 - Keeps the Git publisher secret/runtime safety guard enabled.

@@ -235,3 +235,65 @@ def delete_equipment(processed_dir: Path, equipment_id: str) -> bool:
     if index_dir.is_dir():
         shutil.rmtree(index_dir)
     return True
+
+
+def remove_manual_from_equipment(processed_dir: Path, postprocess_job_id: int) -> dict[str, Any]:
+    """Remove one deleted book from equipment scopes and invalidate machine vectors.
+
+    A deleted manual must never remain in the machine registry because an old
+    persisted embedding corpus could otherwise continue to reference content
+    that no longer exists.  We do not auto-promote historical/draft manuals to
+    authoritative when an authoritative manual is removed; that is a human
+    equipment-scope decision.
+    """
+    job_id = int(postprocess_job_id)
+    registry = load_registry(processed_dir)
+    rows = list(registry.get("equipment") or [])
+    affected: list[str] = []
+    removed = 0
+    kept_equipment: list[dict[str, Any]] = []
+
+    for raw in rows:
+        equipment = dict(raw)
+        equipment_id = str(equipment.get("equipment_id") or "").strip()
+        manuals: list[dict[str, Any]] = []
+        changed = False
+        for raw_manual in equipment.get("manuals") or []:
+            item = dict(raw_manual)
+            try:
+                manual_job_id = int(item.get("postprocess_job_id") or 0)
+            except (TypeError, ValueError):
+                manuals.append(item)
+                continue
+            if manual_job_id == job_id:
+                removed += 1
+                changed = True
+                continue
+            if item.get("supersedes_postprocess_job_id") not in {None, ""}:
+                try:
+                    supersedes = int(item.get("supersedes_postprocess_job_id"))
+                except (TypeError, ValueError):
+                    supersedes = None
+                if supersedes == job_id:
+                    item["supersedes_postprocess_job_id"] = None
+                    changed = True
+            manuals.append(item)
+
+        if changed and equipment_id:
+            affected.append(equipment_id)
+        if manuals:
+            equipment["manuals"] = manuals
+            kept_equipment.append(equipment)
+
+    if removed:
+        save_registry(processed_dir, {"equipment": kept_equipment})
+        for equipment_id in affected:
+            index_dir = Path(processed_dir) / "equipment_embedding_index" / equipment_id
+            if index_dir.is_dir():
+                shutil.rmtree(index_dir)
+
+    return {
+        "removed_assignments": removed,
+        "affected_equipment_ids": affected,
+        "deleted_empty_equipment": max(0, len(rows) - len(kept_equipment)),
+    }

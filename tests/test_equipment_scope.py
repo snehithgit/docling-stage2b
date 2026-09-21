@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from app.equipment_scope import equipment_catalog, resolve_equipment_books, upsert_equipment, delete_equipment
+from app.equipment_scope import equipment_catalog, resolve_equipment_books, upsert_equipment, delete_equipment, remove_manual_from_equipment
 from app.rag_generation import prepare_generation_sources
 
 
@@ -122,3 +122,39 @@ def test_delete_equipment_removes_derived_machine_embedding_index(tmp_path: Path
     (index_dir / "vectors.f32").write_bytes(b"vectors")
     assert delete_equipment(tmp_path, saved["equipment_id"]) is True
     assert not (tmp_path / "equipment_embedding_index" / saved["equipment_id"]).exists()
+
+
+def test_removing_deleted_manual_updates_scope_and_invalidates_machine_index(tmp_path: Path):
+    saved = upsert_equipment(
+        tmp_path,
+        _books(),
+        name="Crane No. 1",
+        manuals=[
+            {"postprocess_job_id": 1, "manual_type": "description"},
+            {"postprocess_job_id": 2, "manual_type": "maintenance", "supersedes_postprocess_job_id": 1},
+        ],
+    )
+    index_dir = tmp_path / "equipment_embedding_index" / saved["equipment_id"] / "model"
+    index_dir.mkdir(parents=True)
+    (index_dir / "vectors.f32").write_bytes(b"vectors")
+
+    result = remove_manual_from_equipment(tmp_path, 1)
+    registry = equipment_catalog(tmp_path, _books()[1:])
+    assert result["removed_assignments"] == 1
+    assert result["affected_equipment_ids"] == [saved["equipment_id"]]
+    assert not (tmp_path / "equipment_embedding_index" / saved["equipment_id"]).exists()
+    remaining = registry["equipment"][0]["manuals"]
+    assert [item["postprocess_job_id"] for item in remaining] == [2]
+    assert remaining[0]["supersedes_postprocess_job_id"] is None
+
+
+def test_removing_only_manual_deletes_empty_equipment_scope(tmp_path: Path):
+    saved = upsert_equipment(
+        tmp_path,
+        _books(),
+        name="Single Manual Machine",
+        manuals=[{"postprocess_job_id": 1, "manual_type": "operation"}],
+    )
+    result = remove_manual_from_equipment(tmp_path, 1)
+    assert result["deleted_empty_equipment"] == 1
+    assert equipment_catalog(tmp_path, _books()[1:])["equipment"] == []

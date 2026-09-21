@@ -1,3 +1,15 @@
+# Current release — 2026.09.21.40.9.2
+
+## `.40.9.2` complete — safe per-book deletion
+- [x] Delete book action on every Book workflow page.
+- [x] Two explicit confirmations before destructive database removal.
+- [x] Active Stage 2A/2B/2C/3 work blocks deletion.
+- [x] Conversion/Postprocess/Verification rows removed transactionally.
+- [x] Equipment assignment removed and affected machine embedding index invalidated.
+- [x] Source manual, converted ZIP, and processed result directory moved to `_deleted_books` quarantine instead of destroyed.
+- [x] Quarantined files are outside root-level watcher/import scans, so deleted books do not immediately reappear.
+- [x] Deletion manifest retained for recovery/audit.
+
 ## .40.9 completed — September 21 audit backlog closure
 
 - [x] Type-aware config validation.
