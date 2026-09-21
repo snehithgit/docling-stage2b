@@ -1,4 +1,13 @@
-# Current release — 2026.09.21.40.9.2
+# Current release — 2026.09.21.40.9.3
+
+## `.40.9.3` complete — Pi5 correction-backfill outage hardening
+- [x] Preserve transport failures as infrastructure failures, never correction outcomes.
+- [x] Fast-stop both correction backfill loops on Pi5 outage.
+- [x] Preserve remaining rows and resume after circuit recovery.
+- [x] Short health preflight and persisted model reuse reduce outage/healthy overhead.
+- [x] Regression tests cover transport propagation, parse isolation, manual backfill stop, and Stage 2C backfill stop.
+
+# Previous release — 2026.09.21.40.9.2
 
 ## `.40.9.2` complete — safe per-book deletion
 - [x] Delete book action on every Book workflow page.

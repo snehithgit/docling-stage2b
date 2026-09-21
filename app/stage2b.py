@@ -2274,12 +2274,36 @@ async def _attempt_pi5_correction(
             "raw_response": raw, "raw_attempts": attempts, "reverify_raw_response": reverify_raw,
             "reverify_attempts": reverify_attempts, "suggestion_only": False, "reason": correction_reason,
         }
-    except (httpx.HTTPError, TimeoutError, ConnectionError, ValueError, KeyError, TypeError) as exc:
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code if exc.response is not None else 0
+        # Retryable HTTP failures are endpoint/infrastructure state, not a
+        # correction verdict.  Propagate them so the caller can open the
+        # shared Pi5 circuit and stop the whole backfill instead of spending
+        # one full timeout per remaining row.
+        if status >= 500 or status in {408, 429}:
+            raise
         return {
             "attempted": True,
             "status": "pending",
             "eligibility": eligibility,
-            "reason": "CORRECTOR_UNAVAILABLE_OR_UNPARSEABLE",
+            "reason": "CORRECTOR_HTTP_REJECTED",
+            "error_type": type(exc).__name__,
+            "error_message": str(exc)[:1000],
+            "raw_response": raw,
+            "raw_attempts": attempts,
+            "correction_attempt_count": len(attempts),
+        }
+    except (httpx.TransportError, TimeoutError, ConnectionError):
+        # A transport/liveness failure applies to the endpoint, not this row.
+        # Never convert it into a normal-looking pending correction result.
+        raise
+    except (ValueError, KeyError, TypeError) as exc:
+        # Model/format problems remain row-local and must not abort the book.
+        return {
+            "attempted": True,
+            "status": "pending",
+            "eligibility": eligibility,
+            "reason": "CORRECTOR_UNPARSEABLE",
             "error_type": type(exc).__name__,
             "error_message": str(exc)[:1000],
             "raw_response": raw,
@@ -2724,6 +2748,11 @@ class Stage2BWorker:
             "unchanged_or_rejected": 0,
             "errors": 0,
             "current_route_id": None,
+            "remaining": len(work_rows),
+            "deferred_reason": None,
+            "retry_after_seconds": None,
+            "last_error_type": None,
+            "last_error_message": None,
             "started_at_epoch": None,
             "completed_at_epoch": None,
         }
@@ -2748,8 +2777,14 @@ class Stage2BWorker:
         state["started_at_epoch"] = time.time()
         pi5_model: str | None = None
         try:
+            if not await self._pi5_backfill_endpoint_ready():
+                self._pi5_wait_state(state, rows, "Pi5 unavailable before correction-suggestion backfill")
+                self._events.notify("stage2c_correction_suggestions_waiting_for_pi5")
+                return
+
             for row in rows:
                 state["current_route_id"] = row.get("route_id")
+                count_processed = True
                 try:
                     request = json.loads(row.get("request_json") or "{}")
                     stored_result = json.loads(row.get("result_json") or "{}")
@@ -2771,7 +2806,9 @@ class Stage2BWorker:
                     parsed = _validate_pi5(model_like, original, structure)
                     client = self._client_for("pi5", row)
                     if pi5_model is None:
-                        pi5_model = await self._model_for("pi5", config.pi5_url, client)
+                        pi5_model = str(row.get("model") or "").strip() or None
+                        if pi5_model is None and self._selected_provider("pi5") != "pi5":
+                            pi5_model = await self._model_for("pi5", config.pi5_url, client)
                     correction = await _attempt_pi5_correction(client, original, context, parsed, pi5_model, config)
                     proposed = str(correction.get("proposed_text") or "").strip()
                     if proposed and " ".join(proposed.split()) != " ".join(original.split()) and correction.get("status") in {"proposed", "applied"}:
@@ -2784,10 +2821,23 @@ class Stage2BWorker:
                         row.get("model") or pi5_model,
                     )
                 except Exception as exc:
+                    if self._is_retryable_endpoint_failure(exc):
+                        count_processed = False
+                        delay = await self._open_endpoint_circuit("pi5", f"{type(exc).__name__}: {exc}")
+                        self._pi5_wait_state(state, rows, str(exc))
+                        state["retry_after_seconds"] = delay
+                        logger.warning(
+                            "Correction-suggestion backfill for book %s paused at route %s: Pi5 unavailable; health probe in %ss",
+                            postprocess_job_id, row.get("route_id"), delay,
+                        )
+                        self._events.notify("stage2c_correction_suggestions_waiting_for_pi5")
+                        return
                     state["errors"] += 1
                     logger.warning("Correction suggestion failed for route %s: %s", row.get("route_id"), exc)
                 finally:
-                    state["processed"] += 1
+                    if count_processed:
+                        state["processed"] += 1
+                        state["remaining"] = max(0, len(rows) - int(state["processed"]))
                     self._events.notify("stage2c_correction_suggestion_progress")
             state["status"] = "completed" if not state["errors"] else "partial"
         except asyncio.CancelledError:
@@ -2795,8 +2845,9 @@ class Stage2BWorker:
             raise
         finally:
             state["current_route_id"] = None
-            state["completed_at_epoch"] = time.time()
-            self._events.notify("stage2c_correction_suggestions_completed")
+            if state.get("status") != "waiting_for_pi5":
+                state["completed_at_epoch"] = time.time()
+                self._events.notify("stage2c_correction_suggestions_completed")
 
     def stage2c_state_for(self, postprocess_job_id: int) -> dict[str, Any] | None:
         state = self.stage2c_backfill_state.get(int(postprocess_job_id))
@@ -3008,6 +3059,11 @@ class Stage2BWorker:
             "vision_entries": 0,
             "errors": 0,
             "current_route_id": None,
+            "remaining": len(completed),
+            "deferred_reason": None,
+            "retry_after_seconds": None,
+            "last_error_type": None,
+            "last_error_message": None,
             "started_at_epoch": None,
             "completed_at_epoch": None,
         }
@@ -3054,6 +3110,7 @@ class Stage2BWorker:
 
         pi5_client: OpenAICompatibleVerifier | None = None
         pi5_model: str | None = None
+        pi5_backfill_preflight_done = False
         try:
             await asyncio.to_thread(persist_state)
             for row in rows:
@@ -3064,6 +3121,7 @@ class Stage2BWorker:
                 if entry_id in existing_ids:
                     state["skipped_existing"] += 1
                     state["processed"] += 1
+                    state["remaining"] = max(0, len(rows) - int(state["processed"]))
                     continue
                 try:
                     request = json.loads(row.get("request_json") or "{}")
@@ -3117,9 +3175,19 @@ class Stage2BWorker:
                                 and float(garble.get("score") or 0) >= float(config.stage2c_correction_min_garble_score)
                             )
                             if eligible:
+                                if not pi5_backfill_preflight_done:
+                                    if not await self._pi5_backfill_endpoint_ready():
+                                        self._pi5_wait_state(state, rows, "Pi5 unavailable before Stage 2C correction backfill")
+                                        state["current_route_id"] = row.get("route_id")
+                                        await asyncio.to_thread(persist_state)
+                                        self._events.notify("stage2c_backfill_waiting_for_pi5")
+                                        return
+                                    pi5_backfill_preflight_done = True
                                 if pi5_client is None:
                                     pi5_client = self._client_for("pi5", row)
-                                    pi5_model = await self._model_for("pi5", config.pi5_url, pi5_client)
+                                    pi5_model = str(row.get("model") or "").strip() or None
+                                    if pi5_model is None and self._selected_provider("pi5") != "pi5":
+                                        pi5_model = await self._model_for("pi5", config.pi5_url, pi5_client)
                                 pi5_client = self._client_for("pi5", row)
                                 correction = await _attempt_pi5_correction(
                                     pi5_client, original, context, parsed, pi5_model, config
@@ -3180,10 +3248,23 @@ class Stage2BWorker:
                         continue
                     state["reused"] += 1
                 except Exception as exc:
+                    if self._is_retryable_endpoint_failure(exc):
+                        delay = await self._open_endpoint_circuit("pi5", f"{type(exc).__name__}: {exc}")
+                        self._pi5_wait_state(state, rows, str(exc))
+                        state["retry_after_seconds"] = delay
+                        logger.warning(
+                            "Stage 2C correction backfill for book %s paused at route %s: Pi5 unavailable; health probe in %ss",
+                            postprocess_job_id, row.get("route_id"), delay,
+                        )
+                        await asyncio.to_thread(persist_state)
+                        self._events.notify("stage2c_backfill_waiting_for_pi5")
+                        return
                     state["errors"] += 1
                     logger.exception("Stage 2C backfill route %s failed: %s", row.get("route_id"), exc)
                 finally:
-                    state["processed"] += 1
+                    if state.get("status") != "waiting_for_pi5":
+                        state["processed"] += 1
+                        state["remaining"] = max(0, len(rows) - int(state["processed"]))
                     await asyncio.to_thread(persist_state)
 
             state["current_route_id"] = None
@@ -3374,6 +3455,78 @@ class Stage2BWorker:
     def _is_endpoint_connection_failure(exc: Exception) -> bool:
         return isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, ConnectionError))
 
+    @staticmethod
+    def _is_retryable_endpoint_failure(exc: Exception) -> bool:
+        if isinstance(exc, (httpx.TransportError, TimeoutError, ConnectionError)):
+            return True
+        if isinstance(exc, httpx.HTTPStatusError):
+            status = exc.response.status_code if exc.response is not None else 0
+            return status >= 500 or status in {408, 429}
+        return False
+
+    async def _pi5_backfill_endpoint_ready(self) -> bool:
+        """Cheap liveness gate used before correction backfills.
+
+        If a circuit is already open, reuse the normal circuit-probe policy.
+        Otherwise perform one short health check so a known-dead Pi5 is caught
+        before a long list of correction rows starts.
+        """
+        state = self._endpoint_circuit["pi5"]
+        if state.get("open"):
+            return await self._endpoint_provider_ready("pi5")
+
+        config = self._config_getter()
+        endpoint = str(config.pi5_url).rstrip("/")
+        timeout = httpx.Timeout(connect=5.0, read=10.0, write=10.0, pool=5.0)
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.get(f"{endpoint}/health")
+            if response.is_success:
+                return True
+            detail = f"health HTTP {response.status_code}"
+        except httpx.HTTPError as exc:
+            detail = f"{type(exc).__name__}: {exc}"
+        await self._open_endpoint_circuit("pi5", detail or "Pi5 correction-backfill health probe failed")
+        return False
+
+    def _pi5_wait_state(self, state: dict[str, Any], rows: list[dict[str, Any]], detail: str) -> None:
+        circuit = self._endpoint_circuit["pi5"]
+        processed = int(state.get("processed") or 0)
+        state.update({
+            "status": "waiting_for_pi5",
+            "deferred_reason": "PI5_ENDPOINT_UNAVAILABLE",
+            "retry_after_seconds": max(0, int(float(circuit.get("next_probe_at_epoch") or time.time()) - time.time())),
+            "remaining": max(0, len(rows) - processed),
+            "last_error_type": "EndpointUnavailable",
+            "last_error_message": str(detail)[:1000],
+        })
+
+    async def _resume_waiting_pi5_backfills(self) -> None:
+        """Restart idempotent backfills after the shared Pi5 circuit recovers."""
+        if self._stopping.is_set():
+            return
+        for postprocess_job_id, state in list(self.stage2c_backfill_state.items()):
+            if state.get("status") != "waiting_for_pi5":
+                continue
+            running = self._stage2c_backfill_tasks.get(int(postprocess_job_id))
+            if running is not None and not running.done():
+                continue
+            try:
+                await self.start_stage2c_backfill(int(postprocess_job_id))
+            except ValueError as exc:
+                logger.info("Deferred Stage 2C backfill for book %s was not resumed: %s", postprocess_job_id, exc)
+
+        for postprocess_job_id, state in list(self.correction_suggestion_state.items()):
+            if state.get("status") != "waiting_for_pi5":
+                continue
+            running = self._correction_suggestion_tasks.get(int(postprocess_job_id))
+            if running is not None and not running.done():
+                continue
+            try:
+                await self.start_correction_suggestion_backfill(int(postprocess_job_id))
+            except ValueError as exc:
+                logger.info("Deferred correction-suggestion backfill for book %s was not resumed: %s", postprocess_job_id, exc)
+
     def _sync_endpoint_circuit_state(self, provider: str) -> None:
         if provider in self.worker_state:
             self.worker_state[provider]["endpoint_circuit"] = dict(self._endpoint_circuit[provider])
@@ -3451,6 +3604,8 @@ class Stage2BWorker:
             logger.exception("Could not persist Stage 2B %s endpoint recovery state", provider)
         self._model_cache = {key: value for key, value in self._model_cache.items() if provider not in key}
         self._events.notify(f"stage2b_{provider}_endpoint_circuit_closed")
+        if provider == "pi5" and not self._stopping.is_set():
+            asyncio.create_task(self._resume_waiting_pi5_backfills(), name="resume-pi5-backfills")
 
     async def _endpoint_provider_ready(self, provider: str) -> bool:
         if provider not in self._endpoint_circuit:

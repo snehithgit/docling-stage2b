@@ -1,4 +1,16 @@
-# Current release — 2026.09.21.40.9.2
+# Current release — 2026.09.21.40.9.3
+
+## `.40.9.3` complete — Pi5 correction-backfill outage hardening
+- [x] Correction transport failures propagate instead of becoming fake pending results.
+- [x] Manual suggestion backfill stops after the first Pi5 infrastructure failure.
+- [x] Automatic Stage 2C correction backfill stops after the first Pi5 infrastructure failure.
+- [x] Existing Pi5 circuit breaker/backoff is reused; correction rows remain unprocessed rather than failed.
+- [x] Backfills resume idempotently after endpoint recovery.
+- [x] Short Pi5 health preflight avoids starting a long correction pass against a dead endpoint.
+- [x] Parse/fidelity failures remain row-local.
+- [x] Four direct regression tests added.
+
+# Previous release — 2026.09.21.40.9.2
 
 ## `.40.9.2` complete — safe per-book deletion
 - [x] Delete book action on every Book workflow page.

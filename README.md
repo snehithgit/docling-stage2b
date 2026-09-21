@@ -1,3 +1,13 @@
+## 2026.09.21.40.9.3 — Pi5 correction-backfill outage hardening
+
+- Pi5 transport/liveness failures during correction generation are no longer converted into normal-looking `pending` correction results.
+- Manual correction-suggestion backfill and automatic Stage 2C correction backfill stop after the first retryable Pi5 endpoint failure instead of spending one full inference timeout per remaining row.
+- Backfills expose `waiting_for_pi5`, preserve all unprocessed rows, open the existing Pi5 endpoint circuit, and resume idempotently after the normal health probe closes the circuit.
+- A short `/health` preflight catches a dead Pi5 before a long correction list starts; persisted Stage 2B model identity is reused so healthy backfills avoid an unnecessary model-discovery round trip.
+- Parse/fidelity/model-format failures remain row-local and do not abort the book, preserving correction quality and existing safety gates.
+- Regression coverage reproduces both backfill outage paths and verifies transport failures are never disguised as correction verdicts.
+- Validation: **492/492 tests pass** before packaging; final ZIP is separately revalidated. See `docs/RELEASE_VALIDATION_2026.09.21.40.9.3.md`.
+
 ## 2026.09.21.40.9.2 — Safe per-book deletion
 
 - Added **Delete book** to every Book workflow page.
