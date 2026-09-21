@@ -253,3 +253,58 @@ def test_local_connection_failure_names_provider_and_endpoint(monkeypatch):
     config.validate()
     with pytest.raises(RuntimeError, match=r"Pi5 is unreachable at http://192\.168\.68\.55:8080"):
         asyncio.run(generate_grounded_answer("pi5", config, "Question?", prepare_sources(_rows(), max_sources=1)))
+
+
+def test_equipment_scope_filters_out_of_scope_anchor_and_neighbors_before_source_selection():
+    from app.rag_generation import prepare_generation_sources
+
+    rows = [
+        {
+            "postprocess_job_id": 999,
+            "source_filename": "Wrong Machine.pdf",
+            "chunk_id": "BAD-1",
+            "text": "Out of scope top result.",
+            "context_neighbors": [{"chunk_id": "BAD-2", "text": "Out of scope neighbor."}],
+        },
+        {
+            "postprocess_job_id": 7,
+            "source_filename": "Deck Crane.pdf",
+            "chunk_id": "GOOD-1",
+            "text": "Deck crane brake inspection procedure.",
+            "context_neighbors": [{"chunk_id": "GOOD-2", "text": "Inspect the brake lining clearance."}],
+        },
+    ]
+    visuals = [
+        {"postprocess_job_id": 999, "source_filename": "Wrong Machine.pdf", "chunk_id": "V-BAD", "summary": "wrong"},
+        {"postprocess_job_id": 7, "source_filename": "Deck Crane.pdf", "chunk_id": "V-GOOD", "visible_text": ["BRAKE"], "summary": "brake diagram"},
+    ]
+    sources, scope = prepare_generation_sources(
+        rows,
+        "How do I inspect the deck crane brake?",
+        visual_results=visuals,
+        max_sources=5,
+        allowed_job_ids={7},
+        equipment_name="Deck Crane",
+    )
+    assert scope["mode"] == "equipment"
+    assert sources
+    assert all(int(source.get("postprocess_job_id") or 0) == 7 for source in sources)
+    assert not any("Wrong Machine" in str(source.get("source_filename")) for source in sources)
+
+
+def test_claim_grounding_rejects_existing_citation_that_does_not_support_technical_value():
+    sources = prepare_sources(_rows(), max_sources=1)
+    result = citation_audit("The neutral output is approximately +12 V [S1].", sources)
+    assert result["citation_labels"] == ["S1"]
+    assert result["grounding_passed"] is False
+    assert result["answer_usable"] is False
+    assert result["unsupported_claim_count"] == 1
+    assert result["unsupported_claims"][0]["reason"] == "critical_token_not_in_cited_source"
+
+
+def test_claim_grounding_rejects_uncited_technical_claim_even_when_other_claim_is_cited():
+    sources = prepare_sources(_rows(), max_sources=1)
+    answer = "The neutral output is approximately +6 V [S1].\nThe trip threshold is 12 bar."
+    result = citation_audit(answer, sources)
+    assert result["grounding_passed"] is False
+    assert any(row["reason"] == "missing_claim_citation" for row in result["unsupported_claims"])

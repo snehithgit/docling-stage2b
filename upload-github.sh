@@ -51,18 +51,15 @@ git add -A
 
 # Defense in depth: .gitignore is the primary protection, but refuse a publish
 # if a sensitive/runtime path is somehow already tracked or force-added.
-# .env.example is an intentionally committed template (no real credentials) and
-# is explicitly un-ignored in .gitignore, so it is exempt from this guard too.
 forbidden_re='(^|/)(\.env($|\.)|data/|input/|converted/|processed/|embedding-cache/|[^/]+\.(db|sqlite|sqlite3)($|-))'
-allowed_re='(^|/)\.env\.example$'
-if git ls-files | grep -E "$forbidden_re" | grep -vE "$allowed_re" >/dev/null 2>&1; then
+if git ls-files | grep -vE '(^|/)\.env\.example$' | grep -E "$forbidden_re" >/dev/null 2>&1; then
   echo "Refusing to publish because sensitive/runtime files are already tracked:" >&2
-  git ls-files | grep -E "$forbidden_re" | grep -vE "$allowed_re" >&2 || true
+  git ls-files | grep -vE '(^|/)\.env\.example$' | grep -E "$forbidden_re" >&2 || true
   exit 2
 fi
-if git diff --cached --name-only | grep -E "$forbidden_re" | grep -vE "$allowed_re" >/dev/null 2>&1; then
+if git diff --cached --name-only | grep -vE '(^|/)\.env\.example$' | grep -E "$forbidden_re" >/dev/null 2>&1; then
   echo "Refusing to publish because sensitive/runtime files are staged:" >&2
-  git diff --cached --name-only | grep -E "$forbidden_re" | grep -vE "$allowed_re" >&2 || true
+  git diff --cached --name-only | grep -vE '(^|/)\.env\.example$' | grep -E "$forbidden_re" >&2 || true
   exit 2
 fi
 

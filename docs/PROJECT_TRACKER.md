@@ -1,4 +1,21 @@
-# Current release — 2026.09.21.40.8A.2
+# Current release — 2026.09.21.40.9
+
+## `.40.9` complete — remaining September 21 audit list
+- [x] Config list-type validation.
+- [x] Stage 3 table-cell correction provenance.
+- [x] Equipment-scope hard allow-list before anchor/neighbor selection.
+- [x] Identified blocking PDF/ledger/audit work moved off async request loop.
+- [x] Conservative multi-signal Stage 3 token estimates.
+- [x] Verifier HTTP lifetime audited safe and regression-tested.
+- [x] Iterative/depth-bounded Docling group traversal.
+- [x] Explicit verifier schema modes; no prompt-substring schema switching.
+- [x] Telegram regression tests.
+- [x] Deterministic claim-to-cited-evidence support audit with exact visual-value rules.
+- [x] Stage 3 canonical rule version added so these output changes invalidate older Stage 3 artifacts.
+- [-] SQLite/SMB finding omitted as non-applicable to the real deployment.
+- Full validation before packaging: 481/481 tests pass.
+
+# Previous release — 2026.09.21.40.8A.2
 
 ## .40.8A.2 complete Stage 2A verification-candidate coverage
 - Stage 2A collects and deduplicates the complete candidate set before any route ceiling is applied.
@@ -63,9 +80,9 @@ Deployment acceptance pending: complete the still-open transactional retrieval/f
 # Docling Visual RAG — Project tracker
 
 Last updated: 2026-09-21
-Current release: `2026.09.21.40.8B`
-Current phase: **`.40.8B` safety/concurrency closure implemented and release-validated**
-Next phase: **remaining transactional retrieval/freshness correctness, then measured robustness and fresh N150 benchmarking**
+Current release: `2026.09.21.40.9`
+Current phase: **`.40.9` September 21 audit backlog closure implemented and release-validated**
+Next phase: **separately tracked retrieval transaction/freshness + Docling dead-task recovery, then Revalidate all + rebuild and fresh N150 benchmarking**
 
 ## Non-negotiable architecture
 

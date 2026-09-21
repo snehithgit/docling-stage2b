@@ -20,6 +20,9 @@ from .retrieval import RETRIEVAL_RULE_VERSION, annotate_retrieval_rows, _write_j
 from .stage2c import STAGE2C_RULE_VERSION, human_review_summary, rebuild_chunk_overlays, verifier_audit_summary
 
 
+STAGE3_RULE_VERSION = "stage3-canonical-integrity-v2"
+
+
 class Stage3ChunkBuilder:
     """Build corrected, provenance-rich HybridChunker output via Docling Serve.
 
@@ -113,6 +116,7 @@ class Stage3ChunkBuilder:
             "retrieval_searchable_chunks": 0,
             "retrieval_excluded_chunks": 0,
             "retrieval_mean_quality_score": 0.0,
+            "rule_version": STAGE3_RULE_VERSION,
             "retrieval_rule_version": RETRIEVAL_RULE_VERSION,
             "task_id": None,
             "error": None,
@@ -170,7 +174,8 @@ class Stage3ChunkBuilder:
             except (OSError, json.JSONDecodeError, TypeError):
                 pass
             overlays = self._read_overlays(result_dir / "chunk_overlays.jsonl")
-            corrections: dict[int, dict[str, Any]] = {}
+            text_corrections: dict[int, dict[str, Any]] = {}
+            table_corrections: dict[int, list[dict[str, Any]]] = {}
             vision_by_page: dict[int, list[dict[str, Any]]] = {}
             texts = working_document.get("texts") or []
             for overlay in overlays:
@@ -189,12 +194,14 @@ class Stage3ChunkBuilder:
                             continue
                         original_text = str(cell.get("text") or "")
                         cell["text"] = replacement
-                        corrections[f"table:{table_index}:{cell_index}"] = {
+                        table_corrections.setdefault(table_index, []).append({
                             "entry_id": overlay.get("entry_id"), "source_type": "table_cell",
                             "table_index": table_index, "cell_index": cell_index, "page": overlay.get("page"),
+                            "row_start": overlay.get("row_start"), "row_end": overlay.get("row_end"),
+                            "col_start": overlay.get("col_start"), "col_end": overlay.get("col_end"),
                             "provenance": overlay.get("provenance"), "human_verified": bool(overlay.get("human_verified")),
                             "original_text": original_text, "corrected_text": replacement,
-                        }
+                        })
                     else:
                         try:
                             source_index = int(overlay.get("source_index"))
@@ -204,7 +211,7 @@ class Stage3ChunkBuilder:
                             continue
                         original_text = str((texts[source_index] or {}).get("text") or "")
                         texts[source_index]["text"] = replacement
-                        corrections[source_index] = {
+                        text_corrections[source_index] = {
                             "entry_id": overlay.get("entry_id"), "source_index": source_index,
                             "page": overlay.get("page"), "provenance": overlay.get("provenance"),
                             "human_verified": bool(overlay.get("human_verified")),
@@ -285,11 +292,31 @@ class Stage3ChunkBuilder:
                         pages.append(int(value))
                     except (TypeError, ValueError):
                         pass
-                corrected_refs = []
-                for source_index, correction in corrections.items():
+                corrected_refs: list[dict[str, Any]] = []
+                for source_index, correction in text_corrections.items():
                     ref = f"#/texts/{source_index}"
                     if ref in refs:
                         corrected_refs.append(correction)
+                # HybridChunker references table chunks at table granularity
+                # (for example ``#/tables/7``), while Stage 2C corrections are
+                # cell-granular. Preserve every applied cell correction for the
+                # referenced table so the final chunk keeps a complete audit
+                # trail instead of silently dropping table-cell provenance.
+                for table_index, table_entries in table_corrections.items():
+                    if f"#/tables/{table_index}" in refs:
+                        corrected_refs.extend(table_entries)
+                # A table may be split into several chunks; keep provenance on
+                # each fragment but never duplicate the same ledger entry inside
+                # one chunk.
+                deduped_refs: list[dict[str, Any]] = []
+                seen_corrections: set[str] = set()
+                for correction in corrected_refs:
+                    key = str(correction.get("entry_id") or f"{correction.get('source_type')}:{correction.get('table_index')}:{correction.get('cell_index')}:{correction.get('source_index')}")
+                    if key in seen_corrections:
+                        continue
+                    seen_corrections.add(key)
+                    deduped_refs.append(correction)
+                corrected_refs = deduped_refs
                 visual = []
                 for page in pages:
                     visual.extend(vision_by_page.get(page, []))
@@ -353,6 +380,30 @@ class Stage3ChunkBuilder:
 
 
     @staticmethod
+    def _estimate_child_tokens(candidate_text: str, parent_text: str, parent_tokens: int) -> int:
+        """Conservative tokenizer-free estimate for locally modified chunks.
+
+        Docling supplies an exact token count only for the original chunk. Once
+        we compact/split that text we cannot call the configured tokenizer
+        locally without adding a heavyweight dependency. Use three independent
+        signals and keep the highest: proportional density from Docling's exact
+        parent count with an 8% margin, a conservative 2.5 chars/token bound,
+        and a lexical/punctuation piece count. This intentionally errs high for
+        dense identifiers/tables instead of reporting an over-budget child as
+        compliant.
+        """
+        text = str(candidate_text or "")
+        parent = str(parent_text or "")
+        try:
+            parent_count = max(1, int(parent_tokens))
+        except (TypeError, ValueError):
+            parent_count = 1
+        proportional = math.ceil(len(text) * (parent_count / max(1, len(parent))) * 1.08)
+        char_bound = math.ceil(max(1, len(text)) / 2.5)
+        piece_bound = len(re.findall(r"[A-Za-z]+|\d+(?:\.\d+)?|[^\w\s]", text, flags=re.UNICODE))
+        return max(1, proportional, char_bound, piece_bound)
+
+    @staticmethod
     def _is_markdown_separator(line: str) -> bool:
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
         return len(cells) >= 2 and all(re.fullmatch(r":?-{3,}:?", cell or "") for cell in cells)
@@ -393,9 +444,8 @@ class Stage3ChunkBuilder:
             headings = [str(value) for value in (chunk.get("headings") or []) if str(value).strip()]
             prefix = ("\n".join(headings) + "\n") if headings else ""
 
-        # Derive token density from Docling's exact tokenizer count for the parent.
-        # Add 8% safety to account for repeated table headers and token-boundary drift.
-        tokens_per_char = parent_tokens / max(1, len(full_text))
+        # Child counts are conservative estimates derived from Docling's exact
+        # parent count plus tokenizer-independent density bounds.
 
         def make_raw(rows: list[str]) -> str:
             if repeat_header:
@@ -404,7 +454,7 @@ class Stage3ChunkBuilder:
 
         def estimate(rows: list[str]) -> int:
             candidate_text = prefix + make_raw(rows)
-            return max(1, math.ceil(len(candidate_text) * tokens_per_char * 1.03))
+            return cls._estimate_child_tokens(candidate_text, full_text, parent_tokens)
 
         groups: list[list[str]] = []
         current: list[str] = []
@@ -430,7 +480,7 @@ class Stage3ChunkBuilder:
             child["text"] = child_text
             child["num_tokens"] = estimated
             child["num_tokens_estimated"] = True
-            child["num_tokens_source"] = "parent_docling_count_proportional_estimate"
+            child["num_tokens_source"] = "conservative_multi_signal_estimate_v2"
             child["stage3_postprocess"] = {
                 "action": "split_oversized_markdown_table",
                 "parent_num_tokens": parent_tokens,
@@ -472,8 +522,6 @@ class Stage3ChunkBuilder:
         # in metadata. This avoids spending a large fraction of a 256-token
         # budget repeating long ancestor headings in every child.
         prefix = (headings[-1] + "\n") if headings else full_prefix
-        density = parent_tokens / max(1, len(full_text))
-
         lines = [line.rstrip() for line in raw_text.splitlines() if line.strip()]
         table_like = len(lines) >= 2 and sum(1 for line in lines if "|" in line) / len(lines) >= 0.70
         boundary = "table_row" if table_like else "paragraph_or_sentence"
@@ -500,8 +548,7 @@ class Stage3ChunkBuilder:
 
         def estimate(group: list[str]) -> int:
             candidate = prefix + make_raw(group)
-            # Small safety margin; this count is explicitly marked estimated.
-            return max(1, math.ceil(len(candidate) * density * 1.03))
+            return cls._estimate_child_tokens(candidate, full_text, parent_tokens)
 
         groups: list[list[str]] = []
         current: list[str] = []
@@ -526,7 +573,7 @@ class Stage3ChunkBuilder:
             child["text"] = child_text
             child["num_tokens"] = estimate(group)
             child["num_tokens_estimated"] = True
-            child["num_tokens_source"] = "parent_docling_count_logical_boundary_estimate"
+            child["num_tokens_source"] = "conservative_multi_signal_estimate_v2"
             child["stage3_postprocess"] = {
                 "action": "split_oversized_logical_blocks",
                 "parent_num_tokens": parent_tokens,
@@ -555,13 +602,12 @@ class Stage3ChunkBuilder:
             return None
         headings = [str(v).strip() for v in (chunk.get("headings") or []) if str(v).strip()]
         candidate = (headings[-1] + "\n") if headings else ""
-        density = parent_tokens / max(1, len(full_text))
-        estimate = max(1, math.ceil(max(1, len(candidate)) * density * 1.03))
+        estimate = cls._estimate_child_tokens(candidate, full_text, parent_tokens)
         child = copy.deepcopy(chunk)
         child["text"] = candidate
         child["num_tokens"] = estimate
         child["num_tokens_estimated"] = True
-        child["num_tokens_source"] = "separator_only_markup_compaction_estimate"
+        child["num_tokens_source"] = "conservative_multi_signal_estimate_v2"
         child["stage3_postprocess"] = {
             "action": "compact_separator_only_markup",
             "parent_num_tokens": parent_tokens,
@@ -612,13 +658,12 @@ class Stage3ChunkBuilder:
         candidate = prefix + "\n".join(line for line in compact_lines if line).strip() + "\n"
         if len(candidate) >= len(full_text):
             return None
-        density = parent_tokens / max(1, len(full_text))
-        estimate = max(1, math.ceil(len(candidate) * density * 1.03))
+        estimate = cls._estimate_child_tokens(candidate, full_text, parent_tokens)
         child = copy.deepcopy(chunk)
         child["text"] = candidate
         child["num_tokens"] = estimate
         child["num_tokens_estimated"] = True
-        child["num_tokens_source"] = "parent_docling_count_table_fragment_compaction_estimate"
+        child["num_tokens_source"] = "conservative_multi_signal_estimate_v2"
         child["stage3_postprocess"] = {
             "action": "compact_oversized_table_fragment",
             "parent_num_tokens": parent_tokens,
@@ -666,13 +711,12 @@ class Stage3ChunkBuilder:
         candidate = prefix + "\n".join(compact_lines).strip() + "\n"
         if len(candidate) >= len(full_text):
             return None
-        density = parent_tokens / max(1, len(full_text))
-        estimate = max(1, math.ceil(len(candidate) * density * 1.03))
+        estimate = cls._estimate_child_tokens(candidate, full_text, parent_tokens)
         child = copy.deepcopy(chunk)
         child["text"] = candidate
         child["num_tokens"] = estimate
         child["num_tokens_estimated"] = True
-        child["num_tokens_source"] = "parent_docling_count_markdown_compaction_estimate"
+        child["num_tokens_source"] = "conservative_multi_signal_estimate_v2"
         child["stage3_postprocess"] = {
             "action": "compact_oversized_markdown_text",
             "parent_num_tokens": parent_tokens,
@@ -702,21 +746,20 @@ class Stage3ChunkBuilder:
             return None
         if parent_tokens <= max_tokens or not raw_text.strip() or not full_text.endswith(raw_text):
             return None
-        density = parent_tokens / max(1, len(full_text))
         headings = [str(v).strip() for v in (chunk.get("headings") or []) if str(v).strip()]
         candidates: list[tuple[str, str]] = []
         if headings:
             candidates.append(("deepest_heading", headings[-1] + "\n" + raw_text))
         candidates.append(("raw_only", raw_text))
         for mode, candidate in candidates:
-            estimate = max(1, math.ceil(len(candidate) * density * 1.03))
+            estimate = cls._estimate_child_tokens(candidate, full_text, parent_tokens)
             if estimate > max_tokens:
                 continue
             child = copy.deepcopy(chunk)
             child["text"] = candidate
             child["num_tokens"] = estimate
             child["num_tokens_estimated"] = True
-            child["num_tokens_source"] = "parent_docling_count_heading_compaction_estimate"
+            child["num_tokens_source"] = "conservative_multi_signal_estimate_v2"
             child["stage3_postprocess"] = {
                 "action": "compact_oversized_heading_context",
                 "parent_num_tokens": parent_tokens,

@@ -421,3 +421,84 @@ def test_stage3_retrieval_artifacts_write_table_evidence_file(tmp_path):
     evidence = (result_dir / "table_evidence.jsonl").read_text(encoding="utf-8")
     assert "TBL-000011-P0057-001" in evidence
     assert summary["stitched_table_evidence"] == 1
+
+
+class _TableDocling(_Docling):
+    async def result(self, task_id):
+        return ResultPayload(
+            content=b"",
+            content_type="application/json",
+            json_data={
+                "chunks": [{
+                    "filename": "book",
+                    "chunk_index": 0,
+                    "text": "| Hook No.2 | 5 t |",
+                    "raw_text": "| Hook No.2 | 5 t |",
+                    "num_tokens": 12,
+                    "headings": ["SWL"],
+                    "captions": [],
+                    "doc_items": ["#/tables/0"],
+                    "page_numbers": [4],
+                    "metadata": {},
+                }]
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_stage3_preserves_table_cell_correction_provenance_in_referenced_table_chunk(tmp_path: Path):
+    output = tmp_path / "output"; processed = tmp_path / "processed"
+    output.mkdir(); processed.mkdir()
+    result_dir = processed / "book__job2__run0"; result_dir.mkdir()
+    raw_doc = {
+        "name": "book", "texts": [],
+        "tables": [{
+            "self_ref": "#/tables/0", "prov": [{"page_no": 4}],
+            "data": {"table_cells": [
+                {"text": "Hook No.2", "start_row_offset_idx": 5, "end_row_offset_idx": 6, "start_col_offset_idx": 0, "end_col_offset_idx": 1},
+                {"text": "5 l", "start_row_offset_idx": 5, "end_row_offset_idx": 6, "start_col_offset_idx": 1, "end_col_offset_idx": 2},
+            ]},
+        }],
+        "body": {"children": [{"$ref": "#/tables/0"}]},
+    }
+    with zipfile.ZipFile(output / "book.zip", "w") as archive:
+        archive.writestr("book.json", json.dumps(raw_doc))
+    (result_dir / "source_manifest.json").write_text(json.dumps({"converted_zip": "book.zip", "converted_zip_sha256": "abc123"}))
+    (result_dir / "stage2c_backfill.json").write_text(json.dumps({"status": "completed"}))
+    # Stage 3 readiness requires the Stage 2C overlay artifact to exist. It is
+    # rebuilt from the authoritative ledger when the run starts.
+    (result_dir / "chunk_overlays.jsonl").write_text("")
+    (result_dir / "correction_ledger.json").write_text(json.dumps({"entries": [{
+        "entry_id": "g:text:T1", "entry_type": "text_correction", "route_id": "T1",
+        "status": "applied", "status_reason": "HUMAN_VERIFIED", "human_verified": True,
+        "source_type": "table_cell", "table_index": 0, "cell_index": 1, "page": 4,
+        "row_start": 5, "row_end": 6, "col_start": 1, "col_end": 2,
+        "original_text": "5 l", "proposed_text": "5 t",
+    }]}))
+
+    cfg = AppConfig(docling_url="http://192.168.68.63:5001", output_dir=str(output), processed_dir=str(processed), database_path=str(tmp_path / "jobs.db"))
+    cfg.validate()
+    docling = _TableDocling()
+    builder = Stage3ChunkBuilder(lambda: cfg, _Store({"id": 2, "status": "completed", "result_dir": str(result_dir), "output_filename": "book.zip"}), docling, EventBroker())
+    started = await builder.start(2)
+    assert started["accepted"] is True
+    await builder._tasks[2]
+
+    assert docling.uploaded["tables"][0]["data"]["table_cells"][1]["text"] == "5 t"
+    rows = [json.loads(line) for line in (result_dir / "chunks.jsonl").read_text().splitlines()]
+    correction = rows[0]["stage2c"]["text_corrections"][0]
+    assert correction["source_type"] == "table_cell"
+    assert correction["table_index"] == 0
+    assert correction["cell_index"] == 1
+    assert (correction["row_start"], correction["row_end"], correction["col_start"], correction["col_end"]) == (5, 6, 1, 2)
+    assert correction["original_text"] == "5 l"
+    assert correction["corrected_text"] == "5 t"
+
+
+def test_stage3_conservative_token_estimator_uses_dense_text_safety_bound():
+    dense = "SW1=24V;F12=2A;K1/K2=ON;" * 20
+    estimate = Stage3ChunkBuilder._estimate_child_tokens(dense, dense * 4, 40)
+    # Parent-proportional estimation alone would be tiny here; the independent
+    # dense-character bound must keep the reported estimate conservative.
+    import math
+    assert estimate >= math.ceil(len(dense) / 2.5)

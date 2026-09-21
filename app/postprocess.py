@@ -885,28 +885,44 @@ def _resolve_ref(doc: dict[str, Any], ref: str) -> tuple[str, int, dict[str, Any
 
 
 def _flatten_body_items(doc: dict[str, Any]) -> list[tuple[str, int, dict[str, Any]]]:
-    """Flatten body/group references while preserving Docling reading order."""
+    """Flatten body/group references while preserving Docling reading order.
+
+    Use an explicit stack rather than Python recursion. Malformed or adversarial
+    Docling graphs can contain hundreds of nested groups; a recursive walker can
+    hit ``RecursionError`` before the integrity checker gets a chance to report
+    the document. The depth ceiling mirrors the integrity walker's 200-level
+    guard and prevents unbounded traversal without changing normal documents.
+    """
     result: list[tuple[str, int, dict[str, Any]]] = []
     seen_groups: set[int] = set()
-
-    def walk(ref: str) -> None:
+    max_depth = 200
+    roots = [
+        str(child.get("$ref") or "")
+        for child in ((doc.get("body") or {}).get("children") or [])
+        if isinstance(child, dict)
+    ]
+    stack: list[tuple[str, int]] = [(ref, 0) for ref in reversed(roots)]
+    while stack:
+        ref, depth = stack.pop()
         resolved = _resolve_ref(doc, ref)
         if not resolved:
-            return
+            continue
         collection, index, item = resolved
         if collection == "groups":
             if index in seen_groups:
-                return
+                continue
             seen_groups.add(index)
-            for child in item.get("children") or []:
-                if isinstance(child, dict):
-                    walk(child.get("$ref", ""))
-            return
+            if depth >= max_depth:
+                continue
+            children = [
+                str(child.get("$ref") or "")
+                for child in (item.get("children") or [])
+                if isinstance(child, dict)
+            ]
+            for child_ref in reversed(children):
+                stack.append((child_ref, depth + 1))
+            continue
         result.append((collection, index, item))
-
-    for child in ((doc.get("body") or {}).get("children") or []):
-        if isinstance(child, dict):
-            walk(child.get("$ref", ""))
     return result
 
 

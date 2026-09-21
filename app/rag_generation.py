@@ -154,14 +154,41 @@ def prepare_generation_sources(
     that same equipment and nowhere else. Visual evidence is normalized .37
     output, not a new model call.
     """
+    results = list(results or [])
     visuals = list(visual_results or [])
+    equipment_scoped = allowed_job_ids is not None
+    allowed_ids = {int(value) for value in (allowed_job_ids or set()) if int(value) > 0}
+
+    def in_equipment_scope(row: dict[str, Any]) -> bool:
+        if not equipment_scoped:
+            return True
+        try:
+            return int(row.get("postprocess_job_id") or 0) in allowed_ids
+        except (TypeError, ValueError):
+            return False
+
+    # Scope is a hard boundary, not a ranking hint. Filter before choosing the
+    # anchor so an unscoped top result can never sneak into the generation
+    # packet merely because it happened to be results[0].
+    if equipment_scoped:
+        results = [row for row in results if in_equipment_scope(row)]
+        visuals = [row for row in visuals if in_equipment_scope(row)]
     if not results and not visuals:
+        if equipment_scoped:
+            return [], {
+                "mode": "equipment",
+                "equipment": equipment_name or "Selected equipment",
+                "allowed_postprocess_job_ids": sorted(allowed_ids),
+                "book": None,
+                "postprocess_job_id": None,
+                "includes_adjacent_context": False,
+                "text_evidence_count": 0,
+                "visual_evidence_count": 0,
+            }
         return [], {"mode": "none"}
     limit = max(1, int(max_sources))
     anchor = results[0] if results else visuals[0]
     cross_book = is_cross_book_query(question)
-    equipment_scoped = allowed_job_ids is not None
-    allowed_ids = {int(value) for value in (allowed_job_ids or set()) if int(value) > 0}
     visual_limit = min(2, len(visuals), max(0, limit - 1)) if results else min(limit, len(visuals))
     text_limit = max(1, limit - visual_limit) if results else 0
     candidates: list[dict[str, Any]] = []
@@ -169,6 +196,8 @@ def prepare_generation_sources(
 
     def add(row: dict[str, Any], role: str) -> None:
         if len(candidates) >= text_limit:
+            return
+        if not in_equipment_scope(row):
             return
         text = str(row.get("text") or row.get("snippet") or "").strip()
         if not text:
@@ -519,23 +548,165 @@ async def _generate_groq(
     )
 
 
+
+_CITATION_RE = re.compile(r"\[([SV]\d+)\]", re.IGNORECASE)
+_GROUNDING_WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9_/-]{2,}")
+_CRITICAL_TOKEN_RE = re.compile(
+    r"(?<!\w)(?:[<>≤≥]=?\s*)?\d+(?:\.\d+)?\s*(?:%|°\s*[CF]|V|mV|A|mA|bar|psi|Hz|rpm|kW|W|N\s*[·.-]?\s*m|Nm|mm|cm|kg|tonnes?|tons?|t|s|sec(?:onds?)?|min(?:utes?)?|h|hours?|Ω|ohms?)\b"
+    r"|\b(?=[A-Za-z0-9_./-]*[A-Za-z])(?=[A-Za-z0-9_./-]*\d)[A-Za-z0-9][A-Za-z0-9_./-]{2,}\b",
+    re.IGNORECASE,
+)
+_GROUNDING_STOPWORDS = {
+    "the","and","for","with","from","that","this","into","onto","your","their","then","than","are","was","were","is","be","to","of","in","on","at","by","or","as","it","its","a","an","if","when","while","before","after","must","should","may","can","will","not","only","source","manual","system","equipment",
+}
+
+
+def _grounding_words(text: str) -> set[str]:
+    return {
+        token.casefold()
+        for token in _GROUNDING_WORD_RE.findall(str(text or ""))
+        if token.casefold() not in _GROUNDING_STOPWORDS
+    }
+
+
+def _critical_tokens(text: str) -> list[str]:
+    values: list[str] = []
+    for match in _CRITICAL_TOKEN_RE.finditer(str(text or "")):
+        token = re.sub(r"\s+", "", match.group(0)).casefold()
+        if token and token not in values:
+            values.append(token)
+    return values
+
+
+def _source_support_text(source: dict[str, Any], *, exact: bool) -> str:
+    if source.get("source_kind") == "visual" or str(source.get("label") or "").upper().startswith("V"):
+        visible = " ".join(str(v) for v in (source.get("visible_text") or []) if str(v).strip())
+        if exact:
+            # Exact technical values/identifiers from visual evidence must be
+            # visibly read from the image, not merely inferred in the summary.
+            return visible
+        objects = " ".join(str(v) for v in (source.get("visible_objects") or []) if str(v).strip())
+        return " ".join((visible, objects, str(source.get("summary") or ""), str(source.get("text") or "")))
+    headings = " ".join(str(v) for v in (source.get("headings") or []) if str(v).strip())
+    return headings + " " + str(source.get("text") or "")
+
+
+def _claim_segments(answer: str) -> list[str]:
+    text = str(answer or "").strip()
+    if not text:
+        return []
+    # Preserve bullet/list rows while splitting ordinary prose at sentence
+    # boundaries. Citations at the end of a sentence stay attached to the claim.
+    pieces = re.split(r"\n+|(?<=[.!?])\s+(?=(?:[-*]\s*)?[A-Z0-9])", text)
+    return [piece.strip() for piece in pieces if piece.strip()]
+
+
+def claim_support_audit(answer: str, sources: list[dict[str, Any]]) -> dict[str, Any]:
+    """Deterministically bind each factual claim to the evidence it cites.
+
+    This is deliberately conservative and dependency-free. It is not an NLI
+    model and does not pretend to prove semantic entailment. It *does* close the
+    previous structural gap by requiring citations per claim, validating exact
+    technical tokens against cited source text, and requiring meaningful lexical
+    overlap with those same sources. Unsupported claims are marked unusable for
+    technical reliance even when their citation label happens to exist.
+    """
+    source_by_label = {str(row.get("label") or "").upper(): row for row in sources}
+    insufficient = _NOT_ENOUGH.casefold() in str(answer or "").casefold()
+    claims: list[dict[str, Any]] = []
+    for segment in _claim_segments(answer):
+        labels = [label.upper() for label in _CITATION_RE.findall(segment)]
+        clean = _CITATION_RE.sub("", segment)
+        clean = re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", clean).strip()
+        if not clean:
+            continue
+        # Headings and tiny connective fragments are not technical claims.
+        claim_words = _grounding_words(clean)
+        critical = _critical_tokens(clean)
+        if not critical and len(claim_words) < 3:
+            continue
+        if insufficient and _NOT_ENOUGH.casefold() in clean.casefold():
+            claims.append({
+                "claim": clean, "citations": labels, "supported": True,
+                "reason": "insufficient_evidence_statement", "critical_tokens": [],
+            })
+            continue
+        invalid = [label for label in labels if label not in source_by_label]
+        if invalid:
+            claims.append({
+                "claim": clean, "citations": labels, "supported": False,
+                "reason": "invalid_citation", "invalid_citations": invalid,
+                "critical_tokens": critical,
+            })
+            continue
+        if not labels:
+            claims.append({
+                "claim": clean, "citations": [], "supported": False,
+                "reason": "missing_claim_citation", "critical_tokens": critical,
+            })
+            continue
+        cited = [source_by_label[label] for label in labels]
+        exact_evidence = " ".join(_source_support_text(row, exact=True) for row in cited)
+        exact_norm = re.sub(r"\s+", "", exact_evidence).casefold()
+        missing_critical = [token for token in critical if token not in exact_norm]
+        general_evidence = " ".join(_source_support_text(row, exact=False) for row in cited)
+        source_words = _grounding_words(general_evidence)
+        overlap = sorted(claim_words & source_words)
+        coverage = (len(overlap) / len(claim_words)) if claim_words else 1.0
+        if len(claim_words) <= 4:
+            lexical_ok = len(overlap) >= 1
+        else:
+            lexical_ok = len(overlap) >= 2 and coverage >= 0.25
+        supported = not missing_critical and lexical_ok
+        reason = "supported" if supported else ("critical_token_not_in_cited_source" if missing_critical else "weak_claim_source_overlap")
+        claims.append({
+            "claim": clean,
+            "citations": labels,
+            "supported": supported,
+            "reason": reason,
+            "critical_tokens": critical,
+            "missing_critical_tokens": missing_critical,
+            "lexical_overlap": overlap[:20],
+            "lexical_coverage": round(coverage, 3),
+        })
+    unsupported = [row for row in claims if not row.get("supported")]
+    return {
+        "claims_checked": len(claims),
+        "claims_supported": len(claims) - len(unsupported),
+        "unsupported_claim_count": len(unsupported),
+        "unsupported_claims": unsupported,
+        "claim_support": claims,
+        "grounding_passed": len(unsupported) == 0,
+    }
+
+
 def citation_audit(answer: str, sources: list[dict[str, Any]]) -> dict[str, Any]:
-    allowed = {str(source.get("label") or "") for source in sources}
-    seen = list(dict.fromkeys(re.findall(r"\[([SV]\d+)\]", answer or "", flags=re.IGNORECASE)))
+    allowed = {str(source.get("label") or "").upper() for source in sources}
+    seen = list(dict.fromkeys(_CITATION_RE.findall(answer or "")))
     normalized = [label.upper() for label in seen]
     invalid = [label for label in normalized if label not in allowed]
     valid = [label for label in normalized if label in allowed]
+    insufficient = _NOT_ENOUGH.casefold() in str(answer or "").casefold()
+    support = claim_support_audit(answer, sources)
     warning = None
-    insufficient = _NOT_ENOUGH.lower() in str(answer or "").lower()
     if invalid:
         warning = "The model cited source labels that were not supplied: " + ", ".join(invalid)
     elif not valid and not insufficient:
         warning = "The model did not include a valid [S#] or [V#] source citation. Verify the answer against the evidence before using it."
+    elif support["unsupported_claim_count"] and not insufficient:
+        warning = (
+            f"Deterministic claim-to-source grounding rejected {support['unsupported_claim_count']} "
+            "technical claim(s). Open the cited source before relying on this answer."
+        )
+    grounding_passed = not invalid and (insufficient or bool(support.get("grounding_passed")))
     return {
         "citation_labels": valid,
         "invalid_citation_labels": invalid,
         "grounding_warning": warning,
         "insufficient_evidence": insufficient,
+        **support,
+        "grounding_passed": grounding_passed,
+        "answer_usable": grounding_passed,
     }
 
 

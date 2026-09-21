@@ -259,8 +259,57 @@ async def test_groq_vision_crosscheck_uses_direct_transcription_schema(monkeypat
     monkeypatch.setattr("app.verifier_clients.httpx.AsyncClient", Client)
     verifier = GroqVisionVerifier("https://api.groq.test/openai/v1", "secret", "qwen/qwen3.8-27b")
     prompt = "Return ONLY one compact JSON object with exactly two keys: status and corrected_text. Read the printed text exactly."
-    await verifier.inspect_image_stream(b"image", prompt)
+    await verifier.inspect_image_stream(b"image", prompt, schema_mode="direct_transcription")
     schema = captured["payload"]["response_format"]["json_schema"]["schema"]
     assert schema["properties"]["status"]["enum"] == ["READABLE", "UNREADABLE"]
     assert schema["required"] == ["status", "corrected_text"]
     assert captured["payload"]["response_format"]["json_schema"]["name"] == "vision_direct_transcription"
+
+
+@pytest.mark.asyncio
+async def test_groq_vision_schema_selection_is_explicit_not_prompt_substring(monkeypatch):
+    captured = []
+    class Response:
+        status_code = 200; headers = {}; content = b"yes"; is_success = True
+        def json(self):
+            return {"choices": [{"message": {"content": '{}'}, "finish_reason": "stop"}], "usage": {}}
+        def raise_for_status(self): return None
+    class Client:
+        def __init__(self, *args, **kwargs): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): return None
+        async def post(self, url, json=None): captured.append(json); return Response()
+    monkeypatch.setattr("app.verifier_clients.httpx.AsyncClient", Client)
+    verifier = GroqVisionVerifier("https://api.groq.test/openai/v1", "secret", "qwen/qwen3.8-27b")
+
+    # The old magic phrase must NOT switch schemas when the explicit mode is vision.
+    magic = "Return ONLY one compact JSON object with exactly two keys: status and corrected_text."
+    await verifier.inspect_image_stream(b"image", magic, schema_mode="vision")
+    assert captured[-1]["response_format"]["json_schema"]["name"] == "vision_verification"
+
+    # Prompt wording may change freely; explicit mode remains authoritative.
+    await verifier.inspect_image_stream(b"image", "Transcribe this crop.", schema_mode="direct_transcription")
+    assert captured[-1]["response_format"]["json_schema"]["name"] == "vision_direct_transcription"
+
+    await verifier.inspect_image_stream(b"image", "Compare the evidence.", schema_mode="crosscheck")
+    assert captured[-1]["response_format"]["json_schema"]["name"] == "vision_text_crosscheck"
+
+    with pytest.raises(ValueError, match="schema_mode"):
+        await verifier.inspect_image_stream(b"image", "anything", schema_mode="unknown")
+
+
+@pytest.mark.asyncio
+async def test_local_verifier_http_client_is_context_managed_per_call(monkeypatch):
+    state = {"entered": 0, "exited": 0}
+    class Response:
+        def raise_for_status(self): return None
+        def json(self): return {"choices": [{"message": {"content": "ok"}}]}
+    class Client:
+        def __init__(self, *args, **kwargs): pass
+        async def __aenter__(self): state["entered"] += 1; return self
+        async def __aexit__(self, *args): state["exited"] += 1
+        async def post(self, *args, **kwargs): return Response()
+    monkeypatch.setattr("app.verifier_clients.httpx.AsyncClient", Client)
+    verifier = OpenAICompatibleVerifier("http://pi5.test:8080")
+    await verifier.chat_text("system", "user")
+    assert state == {"entered": 1, "exited": 1}

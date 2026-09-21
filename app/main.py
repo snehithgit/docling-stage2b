@@ -56,7 +56,7 @@ from .groq_quota import CloudQuotaPausedError
 from .stage2b import Stage2BWorker
 from .stage2c import STAGE2C_RULE_VERSION, apply_human_correction_to_entry, human_review_summary, upsert_ledger_entry, verifier_audit_summary, apply_human_visual_decision, set_audit_gate_bypass
 from .visual_evidence import ensure_visual_evidence_fresh, normalize_visual_entry, search_visual_indices
-from .stage3 import Stage3ChunkBuilder
+from .stage3 import STAGE3_RULE_VERSION, Stage3ChunkBuilder
 from .telegram_bot import TelegramBotService
 from .stage2b_store import Stage2BStore
 from .worker import ConversionWorker
@@ -75,6 +75,39 @@ def _load_json_file(path: Path) -> dict:
         return data if isinstance(data, dict) else {}
     except (OSError, json.JSONDecodeError, TypeError):
         return {}
+
+
+def _render_pdf_page_png(
+    pdf_path: Path,
+    page: int,
+    *,
+    highlight_refs: list[str] | None = None,
+    converted_zip: Path | None = None,
+) -> bytes:
+    """Synchronous PDF rendering helper intended for ``asyncio.to_thread``."""
+    with fitz.open(pdf_path) as pdf:
+        if page > len(pdf):
+            raise IndexError("PDF page not found")
+        pdf_page = pdf[page - 1]
+        refs = [value for value in (highlight_refs or []) if value.strip()]
+        if refs and converted_zip is not None and converted_zip.is_file():
+            try:
+                rects = docling_highlight_rects(converted_zip, refs, page, pdf_page.rect.height)
+            except (OSError, ValueError, zipfile.BadZipFile):
+                rects = []
+            for rect in rects:
+                clipped = rect & pdf_page.rect
+                if clipped.width > 0.5 and clipped.height > 0.5:
+                    pdf_page.draw_rect(clipped, color=(0.86, 0.18, 0.12), width=2.2, overlay=True)
+        pix = pdf_page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
+        return pix.tobytes("png")
+
+
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(path)
 
 
 def _picture_top_class(picture: dict) -> tuple[str | None, float | None]:
@@ -773,12 +806,15 @@ class Runtime:
                             except ValueError:
                                 pass
                     else:
-                        audit_gate = verifier_audit_summary(result_dir, text_require_human=bool(self.config.stage2c_require_human_review))
+                        audit_gate = await asyncio.to_thread(
+                            verifier_audit_summary, result_dir,
+                            text_require_human=bool(self.config.stage2c_require_human_review),
+                        )
                         if audit_gate.get("blocking_review_required", 0):
                             book_catalog.append({"postprocess_job_id": job_id, "result_dir": result_dir, "stage3_current": False, "audit_waiting": audit_gate.get("review_required", 0)})
                             self.pipeline_sequence_state.update({"current_book": job_id, "current_stage": "verifier_audit"})
                             continue
-                        stage3 = stage3_freshness(result_dir, stage2c, retrieval_rule_version=RETRIEVAL_RULE_VERSION)
+                        stage3 = stage3_freshness(result_dir, stage2c, stage3_rule_version=STAGE3_RULE_VERSION, retrieval_rule_version=RETRIEVAL_RULE_VERSION)
                         current_stage3 = bool(stage3.get("ready"))
                         if not current_stage3:
                             # Retrieval-rule upgrades do not require Docling or Stage 3
@@ -908,13 +944,14 @@ class Runtime:
             ])
 
         books = await self.stage2b_store.list_books()
-        jobs = enrich_postprocess_jobs(await self.postprocess_store.list_jobs(limit=-1))
+        jobs = await asyncio.to_thread(enrich_postprocess_jobs, await self.postprocess_store.list_jobs(limit=-1))
         audits: dict[int, dict] = {}
         for job in jobs:
             if job.get("status") != "completed" or not job.get("result_dir"):
                 continue
             jid = int(job.get("id") or job.get("job_id") or job.get("postprocess_job_id") or 0)
-            audits[jid] = verifier_audit_summary(
+            audits[jid] = await asyncio.to_thread(
+                verifier_audit_summary,
                 Path(self.config.processed_dir) / Path(str(job["result_dir"])).name,
                 text_require_human=bool(self.config.stage2c_require_human_review),
             )
@@ -1350,7 +1387,7 @@ async def postprocess_status() -> dict:
     return {
         "enabled": runtime.config.postprocess_enabled,
         "counts": await runtime.postprocess_store.counts(),
-        "jobs": enrich_postprocess_jobs(await runtime.postprocess_store.list_jobs(limit=50)),
+        "jobs": await asyncio.to_thread(enrich_postprocess_jobs, await runtime.postprocess_store.list_jobs(limit=50)),
         "processed_dir": runtime.config.processed_dir,
         "external_verifiers_enabled": runtime.config.external_verifiers_enabled,
         "verifiers": runtime.postprocess_worker.verifier_status,
@@ -1360,12 +1397,12 @@ async def postprocess_status() -> dict:
 @app.get("/api/documents")
 async def documents() -> dict:
     """Unified document library with strict sequential-pipeline readiness."""
-    rows = enrich_postprocess_jobs(await runtime.postprocess_store.list_jobs(limit=500))
+    rows = await asyncio.to_thread(enrich_postprocess_jobs, await runtime.postprocess_store.list_jobs(limit=500))
     verification_books = {
         int(item["postprocess_job_id"]): item
         for item in await runtime.stage2b_store.list_books()
     }
-    registry = load_registry(Path(runtime.config.processed_dir))
+    registry = await asyncio.to_thread(load_registry, Path(runtime.config.processed_dir))
     owner_by_job: dict[int, dict] = {}
     for equipment in registry.get("equipment") or []:
         for manual in equipment.get("manuals") or []:
@@ -1409,7 +1446,7 @@ async def documents() -> dict:
             result_dir = Path(runtime.config.processed_dir) / Path(str(row.get("result_dir"))).name
             verification_rows = await runtime.stage2b_store.list_book_jobs_raw(job_id) if total else []
             s2c = stage2c_freshness(result_dir, verification_rows, rule_version=STAGE2C_RULE_VERSION, artifact_sweep_required=bool(getattr(runtime.config, "stage2b_artifact_sweep_required_for_finalize", True)))
-            s3 = stage3_freshness(result_dir, s2c)
+            s3 = stage3_freshness(result_dir, s2c, stage3_rule_version=STAGE3_RULE_VERSION, retrieval_rule_version=RETRIEVAL_RULE_VERSION)
             pipeline["stage2c_ready"] = bool(s2c.get("ready"))
             pipeline["stage3_ready"] = bool(s3.get("ready"))
             row["stage2c_status"] = s2c.get("status") or row.get("stage2c_status")
@@ -1570,7 +1607,7 @@ async def stage2c_book_status(postprocess_job_id: int) -> dict:
         status_path = result_dir / "stage2c_backfill.json"
         if status_path.is_file():
             try:
-                state = json.loads(status_path.read_text(encoding="utf-8"))
+                state = await asyncio.to_thread(_load_json_file, status_path)
             except (OSError, json.JSONDecodeError):
                 state = None
     return {
@@ -1711,7 +1748,7 @@ async def stage2b_text_audit(postprocess_job_id: int | None = None, limit: int =
             if result_dir_name not in ledger_cache:
                 ledger_path = Path(runtime.config.processed_dir) / result_dir_name / "correction_ledger.json"
                 try:
-                    ledger_cache[result_dir_name] = json.loads(ledger_path.read_text(encoding="utf-8")) if ledger_path.is_file() else {}
+                    ledger_cache[result_dir_name] = await asyncio.to_thread(_load_json_file, ledger_path)
                 except (OSError, json.JSONDecodeError):
                     ledger_cache[result_dir_name] = {}
             entry_id = f"{row.get('generation')}:text:{row.get('route_id')}"
@@ -1826,7 +1863,7 @@ async def stage2b_vision_audit(postprocess_job_id: int | None = None, limit: int
             if result_dir_name not in ledger_cache:
                 ledger_path = Path(runtime.config.processed_dir) / result_dir_name / "correction_ledger.json"
                 try:
-                    ledger_cache[result_dir_name] = json.loads(ledger_path.read_text(encoding="utf-8")) if ledger_path.is_file() else {}
+                    ledger_cache[result_dir_name] = await asyncio.to_thread(_load_json_file, ledger_path)
                 except (OSError, json.JSONDecodeError):
                     ledger_cache[result_dir_name] = {}
             entry_id = f"{row.get('generation')}:vision:{row.get('route_id')}"
@@ -1933,7 +1970,10 @@ async def vision_audit_human_decision(job_id: int, entry_id: str, request: Visua
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     runtime.events.notify("verifier_audit_decision")
-    return {"ok": True, "entry": entry, "audit": verifier_audit_summary(result_dir, text_require_human=bool(runtime.config.stage2c_require_human_review))}
+    audit = await asyncio.to_thread(
+        verifier_audit_summary, result_dir, text_require_human=bool(runtime.config.stage2c_require_human_review)
+    )
+    return {"ok": True, "entry": entry, "audit": audit}
 
 
 @app.get("/api/postprocess/jobs/{job_id}/verifier-audit")
@@ -1942,7 +1982,9 @@ async def verifier_audit_gate_status(job_id: int) -> dict:
     if not job or not job.get("result_dir"):
         raise HTTPException(status_code=404, detail="Post-process job not found.")
     result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
-    return verifier_audit_summary(result_dir, text_require_human=bool(runtime.config.stage2c_require_human_review))
+    return await asyncio.to_thread(
+        verifier_audit_summary, result_dir, text_require_human=bool(runtime.config.stage2c_require_human_review)
+    )
 
 
 @app.post("/api/postprocess/jobs/{job_id}/verifier-audit/bypass")
@@ -1967,7 +2009,9 @@ async def verifier_audit_bypass(job_id: int, request: AuditBypassRequest) -> dic
     result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
     await asyncio.to_thread(set_audit_gate_bypass, result_dir, request.enabled, request.reason)
     runtime.events.notify("verifier_audit_bypass_updated")
-    return verifier_audit_summary(result_dir, text_require_human=bool(runtime.config.stage2c_require_human_review))
+    return await asyncio.to_thread(
+        verifier_audit_summary, result_dir, text_require_human=bool(runtime.config.stage2c_require_human_review)
+    )
 
 
 @app.get("/api/stage2b/jobs/{job_id}/vision-image")
@@ -2222,7 +2266,7 @@ async def _retrieval_books() -> list[dict]:
         quality = None
         if quality_path.is_file():
             try:
-                quality = json.loads(quality_path.read_text(encoding="utf-8"))
+                quality = await asyncio.to_thread(_load_json_file, quality_path)
             except (OSError, json.JSONDecodeError, TypeError):
                 quality = None
         source_name = str(job.get("source_filename") or Path(str(job.get("output_filename") or result_dir.name)).stem)
@@ -2230,7 +2274,7 @@ async def _retrieval_books() -> list[dict]:
             source_name = str(quality.get("source_filename"))
         verification_rows = await runtime.stage2b_store.list_book_jobs_raw(int(job.get("id") or 0))
         stage2c_info = stage2c_freshness(result_dir, verification_rows, rule_version=STAGE2C_RULE_VERSION, artifact_sweep_required=bool(getattr(runtime.config, "stage2b_artifact_sweep_required_for_finalize", True)))
-        stage3_info = stage3_freshness(result_dir, stage2c_info, retrieval_rule_version=RETRIEVAL_RULE_VERSION)
+        stage3_info = stage3_freshness(result_dir, stage2c_info, stage3_rule_version=STAGE3_RULE_VERSION, retrieval_rule_version=RETRIEVAL_RULE_VERSION)
         verification_lookup: dict[int, dict] = {}
         for verification_row in verification_rows:
             source_meta = _audit_json(verification_row.get("source_json"))
@@ -3199,9 +3243,7 @@ async def retrieval_benchmark_run_hybrid() -> dict:
         "model":runtime.config.retrieval_embedding_model, "generated_at_epoch":time.time(), "details":details,
     }
     out = Path(runtime.config.processed_dir) / "retrieval_benchmark_hybrid_result.json"
-    tmp = out.with_suffix(out.suffix + ".tmp")
-    tmp.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(out)
+    await asyncio.to_thread(_atomic_write_json, out, result)
     return result
 
 
@@ -3225,7 +3267,7 @@ async def stage3_book_status(postprocess_job_id: int) -> dict:
     status_path = result_dir / "stage3_chunking.json"
     if status_path.is_file():
         try:
-            payload = json.loads(status_path.read_text(encoding="utf-8"))
+            payload = await asyncio.to_thread(_load_json_file, status_path)
             payload["chunks_available"] = (result_dir / "chunks.jsonl").is_file()
             return payload
         except (OSError, json.JSONDecodeError):
@@ -3258,10 +3300,12 @@ async def human_review_status(job_id: int) -> dict:
     if not job or not job.get("result_dir"):
         raise HTTPException(status_code=404, detail="Post-process job not found.")
     result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
-    summary = human_review_summary(result_dir, require_human=bool(runtime.config.stage2c_require_human_review))
+    summary = await asyncio.to_thread(
+        human_review_summary, result_dir, require_human=bool(runtime.config.stage2c_require_human_review)
+    )
     ledger_path = result_dir / "correction_ledger.json"
     try:
-        ledger = json.loads(ledger_path.read_text(encoding="utf-8")) if ledger_path.is_file() else {}
+        ledger = await asyncio.to_thread(_load_json_file, ledger_path)
     except (OSError, json.JSONDecodeError):
         ledger = {}
     entries = []
@@ -3299,10 +3343,11 @@ async def human_correction_docling_context(job_id: int, entry_id: str):
     result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
     ledger_path = result_dir / "correction_ledger.json"
     manifest_path = result_dir / "source_manifest.json"
-    try:
-        ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    ledger, manifest = await asyncio.gather(
+        asyncio.to_thread(_load_json_file, ledger_path),
+        asyncio.to_thread(_load_json_file, manifest_path),
+    )
+    if not ledger or not manifest:
         raise HTTPException(status_code=404, detail="Review source metadata is not available.")
 
     entry = next((item for item in ledger.get("entries", []) if str(item.get("entry_id")) == entry_id), None)
@@ -3341,15 +3386,14 @@ async def update_human_correction(job_id: int, entry_id: str, update: HumanCorre
         raise HTTPException(status_code=404, detail="Post-process job not found.")
     result_dir = Path(runtime.config.processed_dir) / Path(job["result_dir"]).name
     ledger_path = result_dir / "correction_ledger.json"
-    try:
-        ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    ledger = await asyncio.to_thread(_load_json_file, ledger_path)
+    if not ledger:
         raise HTTPException(status_code=404, detail="Correction ledger not found.")
     entry = next((item for item in ledger.get("entries", []) if str(item.get("entry_id")) == entry_id), None)
     if not entry:
         raise HTTPException(status_code=404, detail="Correction entry not found.")
     apply_human_correction_to_entry(entry, text=update.text, action=update.action)
-    upsert_ledger_entry(result_dir, str(ledger.get("source_zip_sha256") or ""), entry)
+    await asyncio.to_thread(upsert_ledger_entry, result_dir, str(ledger.get("source_zip_sha256") or ""), entry)
     runtime.events.notify("stage2c_human_correction")
     return {"saved": True, "entry_id": entry_id, "status": entry["status"]}
 
@@ -3367,32 +3411,21 @@ async def source_page(job_id: int, page: int, highlight: str | None = None):
     pdf_path = Path(runtime.config.input_dir) / Path(filename).name
     if pdf_path.suffix.lower() != ".pdf" or not pdf_path.is_file():
         raise HTTPException(status_code=404, detail="Original PDF page is not available.")
+    refs = [value for value in (highlight or "").split(",") if value.strip()]
+    converted_zip: Path | None = None
+    if refs and job.get("result_dir"):
+        result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+        manifest = await asyncio.to_thread(_load_json_file, result_dir / "source_manifest.json")
+        converted_name = Path(str(manifest.get("converted_zip") or job.get("output_filename") or "")).name
+        if converted_name:
+            converted_zip = Path(runtime.config.output_dir) / converted_name
     try:
-        with fitz.open(pdf_path) as pdf:
-            if page > len(pdf):
-                raise HTTPException(status_code=404, detail="PDF page not found.")
-            pdf_page = pdf[page - 1]
-            refs = [value for value in (highlight or "").split(",") if value.strip()]
-            if refs and job.get("result_dir"):
-                result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
-                try:
-                    manifest = json.loads((result_dir / "source_manifest.json").read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError, TypeError):
-                    manifest = {}
-                converted_name = Path(str(manifest.get("converted_zip") or job.get("output_filename") or "")).name
-                converted_zip = Path(runtime.config.output_dir) / converted_name
-                try:
-                    rects = await asyncio.to_thread(docling_highlight_rects, converted_zip, refs, page, pdf_page.rect.height)
-                except (OSError, ValueError, zipfile.BadZipFile):
-                    rects = []
-                for rect in rects:
-                    clipped = rect & pdf_page.rect
-                    if clipped.width > 0.5 and clipped.height > 0.5:
-                        pdf_page.draw_rect(clipped, color=(0.86, 0.18, 0.12), width=2.2, overlay=True)
-            pix = pdf_page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
-            return Response(content=pix.tobytes("png"), media_type="image/png", headers={"Cache-Control": "no-store"})
-    except HTTPException:
-        raise
+        image = await asyncio.to_thread(
+            _render_pdf_page_png, pdf_path, page, highlight_refs=refs, converted_zip=converted_zip
+        )
+        return Response(content=image, media_type="image/png", headers={"Cache-Control": "no-store"})
+    except IndexError as exc:
+        raise HTTPException(status_code=404, detail="PDF page not found.") from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Could not render the PDF page.") from exc
 
@@ -3444,7 +3477,7 @@ async def postprocess_picture(job_id: int, picture_index: int):
     if not job or not job.get("result_dir"):
         raise HTTPException(status_code=404, detail="Post-process job not found.")
     result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
-    manifest = _load_json_file(result_dir / "source_manifest.json")
+    manifest = await asyncio.to_thread(_load_json_file, result_dir / "source_manifest.json")
     converted_name = Path(str(manifest.get("converted_zip") or job.get("output_filename") or "")).name
     zip_path = Path(runtime.config.output_dir) / converted_name
     if not converted_name or not zip_path.is_file():
@@ -3476,7 +3509,7 @@ async def _prepare_full_artifact_sweep(postprocess_job_id: int | None = None) ->
     books = []
     for job in selected:
         result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
-        manifest = _load_json_file(result_dir / "source_manifest.json")
+        manifest = await asyncio.to_thread(_load_json_file, result_dir / "source_manifest.json")
         converted_name = Path(str(manifest.get("converted_zip") or job.get("output_filename") or "")).name
         zip_path = Path(runtime.config.output_dir) / converted_name
         if not converted_name or not zip_path.is_file():

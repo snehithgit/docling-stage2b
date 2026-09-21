@@ -1,3 +1,20 @@
+## 2026.09.21.40.9.1 — GitHub publisher `.env.example` hotfix
+
+- Keeps the Git publisher secret/runtime safety guard enabled.
+- Allows the intentionally tracked `.env.example` template so normal source publishing is not falsely blocked.
+- Real `.env*` secret files (except `.env.example`) remain refused.
+- See `docs/RELEASE_VALIDATION_2026.09.21.40.9.1.md`.
+
+## 2026.09.21.40.9 — Audit backlog closure + grounded-claim validation
+
+- Closes the remaining September 21 backlog items: type-aware config validation, Stage 3 table-cell correction provenance, hard equipment allow-listing, identified async blocking paths, conservative token-budget accounting, recursion/schema hardening, Telegram tests, and deterministic claim-to-cited-evidence support checks.
+- The reported verifier HTTP-client leak was source-verified as a false positive: per-call clients are context-managed and Telegram closes its persistent client; regression coverage locks this behavior.
+- Adds `stage3-canonical-integrity-v2` so older canonical Stage 3 output becomes stale after these Stage 3 semantic changes and is rebuilt rather than silently reused.
+- Exact visual values/IDs are accepted as grounded only when present in `visible_text` (or corroborated by text evidence), not merely in model-generated visual summaries.
+- SQLite/SMB remains intentionally omitted because it was an artifact of the review/share environment, not the real container deployment.
+- No new dependency/model/runtime is introduced. Raw Docling artifacts remain immutable and human decisions remain authoritative.
+- Validation: **481/481 tests pass** before packaging; the final ZIP is separately revalidated. See `docs/RELEASE_VALIDATION_2026.09.21.40.9.md`.
+
 ## 2026.09.20.40.6.3 — Evidence arbitration & endpoint circuit breaker
 
 - Fixes legacy normal-vs-sweep vision overlap arbitration: **applied evidence wins; the normal route wins only on an equal-status tie**. This preserves the 11 applied legacy sweep enrichments in the current processed snapshot that would otherwise be lost.

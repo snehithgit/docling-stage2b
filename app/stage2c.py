@@ -1269,6 +1269,10 @@ def rebuild_chunk_overlays(result_dir: Path, entries: list[dict[str, Any]]) -> N
                 "source_type": entry.get("source_type") or "text",
                 "table_index": entry.get("table_index"),
                 "cell_index": entry.get("cell_index"),
+                "row_start": entry.get("row_start"),
+                "row_end": entry.get("row_end"),
+                "col_start": entry.get("col_start"),
+                "col_end": entry.get("col_end"),
                 "text": entry.get("proposed_text"),
                 "provenance": (
                     "human_verified_manual_correction" if entry.get("human_verified")

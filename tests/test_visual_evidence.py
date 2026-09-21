@@ -141,8 +141,8 @@ def test_generation_packet_combines_s_and_v_evidence_with_stable_labels():
 
 def test_citation_audit_accepts_visual_labels():
     sources = [
-        {"label": "S1", "source_kind": "text"},
-        {"label": "V1", "source_kind": "visual"},
+        {"label": "S1", "source_kind": "text", "text": "Use the documented zero-setting section for adjustment."},
+        {"label": "V1", "source_kind": "visual", "visible_text": ["SW1"], "summary": "SW1 adjustment control."},
     ]
     result = citation_audit("Use the documented zero-setting section [S1] and inspect SW1 [V1].", sources)
     assert result["citation_labels"] == ["S1", "V1"]
@@ -204,3 +204,28 @@ def test_rag_visual_ui_exposes_visual_evidence_and_artifact_eligibility():
     assert "visual_results" in retrieval_js
     assert "RAG [V#] eligible" in artifact_js
     assert "visual_evidence_id" in artifact_js
+
+
+def test_visual_grounding_requires_exact_technical_value_in_visible_text_not_summary():
+    sources = [{
+        "label": "V1",
+        "source_kind": "visual",
+        "visible_text": ["SW1"],
+        "summary": "Adjustment diagram showing a 12 V setting.",
+        "text": "Adjustment diagram showing a 12 V setting.",
+    }]
+    result = citation_audit("Set the control to 12 V [V1].", sources)
+    assert result["grounding_passed"] is False
+    assert result["unsupported_claims"][0]["reason"] == "critical_token_not_in_cited_source"
+
+
+def test_visual_grounding_accepts_exact_technical_value_when_visible_in_image_text():
+    sources = [{
+        "label": "V1",
+        "source_kind": "visual",
+        "visible_text": ["SW1", "12 V"],
+        "summary": "Adjustment diagram.",
+    }]
+    result = citation_audit("Set SW1 to 12 V [V1].", sources)
+    assert result["grounding_passed"] is True
+    assert result["grounding_warning"] is None

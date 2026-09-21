@@ -201,7 +201,13 @@ def stage2c_freshness(result_dir: Path, verification_rows: list[dict[str, Any]],
     }
 
 
-def stage3_freshness(result_dir: Path, stage2c_info: dict[str, Any], *, retrieval_rule_version: str | None = None) -> dict[str, Any]:
+def stage3_freshness(
+    result_dir: Path,
+    stage2c_info: dict[str, Any],
+    *,
+    stage3_rule_version: str | None = None,
+    retrieval_rule_version: str | None = None,
+) -> dict[str, Any]:
     result_dir = Path(result_dir)
     state = load_json(result_dir / "stage3_chunking.json")
     expected = str(stage2c_info.get("output_signature") or "")
@@ -210,9 +216,10 @@ def stage3_freshness(result_dir: Path, stage2c_info: dict[str, Any], *, retrieva
     outputs = chunks_output and retrieval_output
     ready_status = str(state.get("status") or "") == "completed"
     signature_match = bool(expected) and bool(state.get("stage2c_signature")) and str(state.get("stage2c_signature")) == expected
+    stage3_rule_match = (not stage3_rule_version) or str(state.get("rule_version") or "") == str(stage3_rule_version)
     quality = load_json(result_dir / "retrieval_quality.json")
     retrieval_rule_match = (not retrieval_rule_version) or str(quality.get("retrieval_rule_version") or "") == str(retrieval_rule_version)
-    canonical_ready = bool(stage2c_info.get("ready") and ready_status and signature_match and chunks_output)
+    canonical_ready = bool(stage2c_info.get("ready") and ready_status and signature_match and stage3_rule_match and chunks_output)
     ready = bool(canonical_ready and retrieval_output and retrieval_rule_match)
     reason = None
     if not stage2c_info.get("ready"):
@@ -223,6 +230,8 @@ def stage3_freshness(result_dir: Path, stage2c_info: dict[str, Any], *, retrieva
         reason = f"stage3_{str(state.get('status') or 'not_ready')}"
     elif not signature_match:
         reason = "stage3_stale_after_stage2c"
+    elif not stage3_rule_match:
+        reason = "stage3_rule_version_stale"
     elif not chunks_output:
         reason = "stage3_chunks_missing"
     elif not retrieval_output:
@@ -235,6 +244,8 @@ def stage3_freshness(result_dir: Path, stage2c_info: dict[str, Any], *, retrieva
         "status": str(state.get("status") or "not_built"),
         "stage2c_signature": expected or None,
         "recorded_stage2c_signature": state.get("stage2c_signature"),
+        "stage3_rule_version": stage3_rule_version,
+        "recorded_stage3_rule_version": state.get("rule_version"),
         "state": state,
         "canonical_ready": canonical_ready,
         "retrieval_rule_version": retrieval_rule_version,

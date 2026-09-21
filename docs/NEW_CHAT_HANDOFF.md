@@ -1,39 +1,45 @@
-# `.40.8B` handoff
+# `.40.9` handoff
 
-`.40.8B` is the current implementation baseline. It closes the user-selected safety/concurrency backlog while retaining `.40.8A.2` route coverage and `.40.8A` trusted-decision guarantees.
+`2026.09.21.40.9` is the current implementation baseline.
 
-## Closed in this release
+## What is closed
 
-- Git publishing: root `.gitignore`, no `.git` deletion, no force-push, and refusal if secret/runtime/manual/database paths are tracked or staged.
-- Local verifier outages: transport/timeouts propagate to the existing Pi5/OnePlus endpoint circuit breaker instead of becoming fake completed `UNREADABLE` evidence.
-- Rerun reconciliation: one active automatic correction/enrichment per logical Docling source item; older generations remain superseded audit history; human-verified decisions stay authoritative.
-- Watcher race: same `(filename, source_sha256)` discovery is atomically get-or-created under a SQLite write transaction.
-- Manual cross-check: read/modify/upsert now uses the shared Stage 2C ledger lock.
-- Groq free-tier guard: request/token estimates are reserved in-flight before HTTP so concurrent calls cannot all pass the same reserve snapshot.
-- Book workflow: **Bypass audit for testing** is visible for every book, requires explicit confirmation, is disabled until required verification work completes, and never accepts unresolved evidence.
+The September 21 audit list is closed across `.40.8A.2`, `.40.8B`, and `.40.9`:
 
-## Explicitly omitted
+- safe Git publishing;
+- local verifier outage/circuit-breaker correctness;
+- correction-generation reconciliation;
+- duplicate conversion submission race;
+- shared correction-ledger locking;
+- global Stage 2A candidate ordering with a loud 5000-route safety valve;
+- config list-type validation;
+- Groq in-flight quota reservation;
+- Stage 3 table-cell correction provenance;
+- equipment-scope hard boundary;
+- identified blocking async endpoint work;
+- conservative Stage 3 token accounting;
+- verifier HTTP lifetime verified context-managed;
+- recursion guard;
+- explicit verifier schema modes;
+- Telegram tests;
+- stronger deterministic claim ↔ cited-source support audit.
 
-The SQLite-on-SMB finding from the external review is not treated as a runtime defect because the inspected share was only a review/export path; the actual application runs in the container deployment.
+SQLite/SMB was intentionally omitted because the inspected network share was only the review/export environment; the real application runs in its container deployment.
 
-## Already closed before this release
+## `.40.9` important behavior
 
-- `.40.8A.2`: Stage 2A collects/sorts the complete candidate set before its 5000-route runaway safety ceiling; deferred overflow is retained/reported instead of silently lost.
-- `.40.8A`: human-authority preservation, cross-check safety, counted troubleshooting-action obligations, and table row/column provenance.
-- `.40.7.1`: monitoring-first Telegram dashboard.
+- `STAGE3_RULE_VERSION = stage3-canonical-integrity-v2`; older Stage 3 canonical output is stale and must rebuild.
+- Table-cell corrections keep table/cell + row/column spans in final chunk provenance.
+- Equipment-scoped answer generation filters text/visual results before choosing an anchor.
+- Exact visual values/identifiers count as grounded only if they occur in `visible_text` or are corroborated by text evidence.
+- Telegram remains monitoring-only.
+- Canonical OnePlus script remains CPU `4,5,6,7`, nice `10`, `-t 4 -tb 4` with the user-specified Qwen model/mmproj.
 
-## Still open
+## Still separate before final production benchmark
 
-- Atomic immutable retrieval/index generations with a single current pointer.
-- Explicit Stage 3 / retrieval / embedding freshness versions/fingerprints.
-- Persisted table structural-binding enforcement when overlays are consumed.
-- Docling forgotten-task (404) resubmission.
-- Config list-type validation.
-- Stage 3 table-cell correction provenance.
-- Equipment-scope allow-list enforcement on anchor/neighbors.
-- Blocking async endpoint cleanup, more exact token budgeting, HTTP-client lifetime, recursion guard, verifier schema robustness, Telegram tests.
-- Stronger claim ↔ cited-evidence support checking.
+- immutable/transactional machine index generations;
+- explicit embedding-rule fingerprint/version;
+- Docling forgotten-task (404) resubmission;
+- table structural-binding validation when an overlay is consumed.
 
-Do not publish the final production benchmark until the remaining correctness/freshness work is closed, then run **Revalidate all + rebuild** and the fresh N150 machine-scoped BGE benchmark/holdout.
-
-Current release target: `2026.09.21.40.8B`
+After those are done: **Revalidate all + rebuild**, rebuild stale machine embeddings, then run the fresh N150 machine-hybrid benchmark and electrical holdout.

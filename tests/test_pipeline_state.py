@@ -183,3 +183,21 @@ def test_optional_artifact_sweep_excludes_unfinished_rows_from_stage2c_signature
     assert info["ready"] is True
     assert info["signature_route_count"] == 1
     assert info["artifact_sweep_required"] is False
+
+
+def test_stage3_rule_version_change_marks_canonical_chunks_stale(tmp_path: Path):
+    result_dir = tmp_path / "book"
+    rows = [_verification_row()]
+    _write_current_stage2c(result_dir, rows)
+    s2c = stage2c_freshness(result_dir, rows)
+    (result_dir / "chunks.jsonl").write_text('{"chunk_id":"A"}\n', encoding="utf-8")
+    (result_dir / "retrieval_index.jsonl").write_text('{"chunk_id":"A"}\n', encoding="utf-8")
+    (result_dir / "stage3_chunking.json").write_text(json.dumps({
+        "status": "completed",
+        "stage2c_signature": s2c["output_signature"],
+        "rule_version": "old-stage3-rule",
+    }), encoding="utf-8")
+    state = stage3_freshness(result_dir, s2c, stage3_rule_version="new-stage3-rule")
+    assert state["ready"] is False
+    assert state["canonical_ready"] is False
+    assert state["reason"] == "stage3_rule_version_stale"

@@ -961,3 +961,24 @@ def test_route_safety_ceiling_reports_deferred_breakdown(tmp_path):
     assert sum(summary["deferred_by_code"].values()) == 2
     assert sum(summary["deferred_by_target"].values()) == 2
     assert result["policy"]["deferred_candidates_retained"] is True
+
+
+def test_body_flattener_handles_adversarial_deep_group_tree_without_recursion_error():
+    from app.postprocess import _flatten_body_items
+
+    groups = []
+    for index in range(250):
+        children = []
+        if index == 199:
+            children.append({"$ref": "#/texts/0"})
+        if index < 249:
+            children.append({"$ref": f"#/groups/{index + 1}"})
+        groups.append({"children": children})
+    doc = {
+        "body": {"children": [{"$ref": "#/groups/0"}]},
+        "groups": groups,
+        "texts": [{"text": "reachable before depth ceiling", "label": "text"}],
+        "tables": [], "pictures": [], "key_value_items": [], "form_items": [],
+    }
+    flat = _flatten_body_items(doc)
+    assert [(kind, idx) for kind, idx, _ in flat] == [("texts", 0)]

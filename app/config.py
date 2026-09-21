@@ -284,6 +284,22 @@ class AppConfig:
     oneplus_control_script_path: str = "$HOME/bin/oneplus-llama-control"
 
     def validate(self) -> None:
+        # YAML happily accepts a scalar where the application expects a list.
+        # Reject those mistakes at startup instead of iterating characters later
+        # (for example ``supported_extensions: .pdf`` becoming '.', 'p', 'd', 'f').
+        if not isinstance(self.to_formats, list) or not all(isinstance(item, str) for item in self.to_formats):
+            raise ValueError("to_formats must be a YAML list of strings")
+        if not isinstance(self.supported_extensions, list) or not all(isinstance(item, str) for item in self.supported_extensions):
+            raise ValueError("supported_extensions must be a YAML list of strings")
+        if not isinstance(self.telegram_allowed_chat_ids, list) or not all(type(item) is int for item in self.telegram_allowed_chat_ids):
+            raise ValueError("telegram_allowed_chat_ids must be a YAML list of integer chat IDs")
+        self.supported_extensions = list(dict.fromkeys(
+            str(item).strip().lower() for item in self.supported_extensions if str(item).strip()
+        ))
+        if not self.supported_extensions or any(not item.startswith(".") or len(item) < 2 for item in self.supported_extensions):
+            raise ValueError("supported_extensions entries must be non-empty extensions such as .pdf")
+        self.telegram_allowed_chat_ids = list(dict.fromkeys(self.telegram_allowed_chat_ids))
+
         self.docling_url = self.docling_url.rstrip("/")
         if not self.docling_url.startswith(("http://", "https://")):
             raise ValueError("Docling Serve URL must begin with http:// or https://")

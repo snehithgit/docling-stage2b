@@ -1,3 +1,13 @@
+## .40.9 acquired state
+
+- No new model, NLP package, tokenizer runtime or database engine was added.
+- Stage 3 canonical semantics are versioned as `stage3-canonical-integrity-v2`.
+- Final chunk provenance now includes applied table-cell corrections and structural spans.
+- Equipment-scoped generation is hard-filtered before anchor/neighbor selection.
+- RAG answer auditing now exposes per-claim support and rejects unsupported exact technical values/identifiers.
+- Telegram remains monitoring-only and now has direct regression coverage.
+- Verifier HTTP calls remain context-managed; no extra persistent verifier client was introduced.
+
 ## .40.8B acquired state
 
 - No new model, cloud service, NLP dependency or database engine was added.
@@ -32,7 +42,7 @@
 # Project acquired state
 
 Last updated: 2026-09-21
-Current code release: `2026.09.21.40.8B`
+Current code release: `2026.09.21.40.9`
 
 ## Already acquired — do not rebuild unnecessarily
 

@@ -72,16 +72,15 @@ Assert-LastExitCode "Failed to read GitHub user ID"
 Assert-LastExitCode "git add failed"
 
 $Forbidden = '(^|/)(\.env($|\.)|data/|input/|converted/|processed/|embedding-cache/|[^/]+\.(db|sqlite|sqlite3)($|-))'
-$Allowed = @(".env.example")
 $Tracked = @(& git ls-files)
 Assert-LastExitCode "Failed to inspect tracked files"
-$TrackedUnsafe = @($Tracked | Where-Object { $_ -match $Forbidden -and $Allowed -notcontains $_ })
+$TrackedUnsafe = @($Tracked | Where-Object { $_ -notmatch '(^|/)\.env\.example$' -and $_ -match $Forbidden })
 if ($TrackedUnsafe.Count -gt 0) {
     Write-Error ("Refusing to publish because sensitive/runtime files are already tracked:`n" + ($TrackedUnsafe -join "`n"))
 }
 $Staged = @(& git diff --cached --name-only)
 Assert-LastExitCode "Failed to inspect staged files"
-$Unsafe = @($Staged | Where-Object { $_ -match $Forbidden -and $Allowed -notcontains $_ })
+$Unsafe = @($Staged | Where-Object { $_ -notmatch '(^|/)\.env\.example$' -and $_ -match $Forbidden })
 if ($Unsafe.Count -gt 0) {
     Write-Error ("Refusing to publish because sensitive/runtime files are staged:`n" + ($Unsafe -join "`n"))
 }

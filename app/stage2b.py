@@ -1195,6 +1195,7 @@ async def _oneplus_text_crosscheck(
             max_tokens=_source_transcription_token_budget(original_for_scope),
             first_token_timeout_seconds=int(first_token_timeout_seconds),
             idle_timeout_seconds=int(idle_timeout_seconds),
+            schema_mode="direct_transcription",
         )
     except (httpx.TransportError, TimeoutError, ConnectionError):
         # Transport/liveness failures are not evidence about the source image.
@@ -1808,9 +1809,11 @@ async def _inspect_vision_region(
                 first_token_timeout_seconds=int(first_token_timeout_seconds),
                 idle_timeout_seconds=int(stream_idle_timeout_seconds),
                 on_progress=on_progress,
+                schema_mode="vision",
             )
         return await client.inspect_image(
-            image_bytes, current_prompt, mime_type=mime, model=model, max_tokens=max_tokens
+            image_bytes, current_prompt, mime_type=mime, model=model, max_tokens=max_tokens,
+            schema_mode="vision",
         )
 
     def parse(raw_response: dict[str, Any]) -> dict[str, Any]:

@@ -1,61 +1,31 @@
-# Required before the next retrieval phase
+# Required before the final retrieval benchmark phase
 
-1. Deploy `.40.8B` without deleting `processed/`, `converted/`, `input/`, `data/`, equipment registry state, or human audit decisions.
-2. Verify Book workflow audit bypass state on one test book; bypass must not accept unresolved evidence.
-3. Complete the still-open transactional retrieval/index freshness + Docling dead-task recovery work before final benchmark publication.
-4. Implement only measured robustness items that improve real project behavior; do not add heavyweight NLP dependencies.
-5. Run **Revalidate all + rebuild** after the remaining correctness/freshness rules are deployed.
-6. Only then run the fresh N150 machine-hybrid benchmark and electrical holdout.
+Current baseline: `2026.09.21.40.9`
 
-# Required for next phase
+The September 21 application-audit list is closed except for the explicitly omitted SQLite/SMB item, which is not applicable to the real container deployment.
 
-Current baseline: `2026.09.21.40.8B`
+Before calling the full project correctness/freshness work complete, finish the separately tracked items below:
 
-## No new model acquisition required
+1. **Atomic machine-index generations** — build vectors/rows/metadata as one immutable generation and switch one current pointer only after validation.
+2. **Embedding-rule freshness** — persist an explicit embedding input/model/index-format fingerprint/version and invalidate stale machine indexes when it changes.
+3. **Docling dead-task recovery** — a forgotten/404 task must clear the stored task ID and safely resubmit instead of retrying the dead ID forever.
+4. **Table structural-binding enforcement** — when a table-cell correction overlay is consumed, verify the persisted table/cell row/column span still identifies the same source structure; do not use table-wide repeated-value guessing.
 
-Use the existing N150 TEI CPU 1.9 + `BAAI/bge-small-en-v1.5` unless a later controlled benchmark justifies a change.
+Then:
 
-## Deployment acceptance required before stronger ranking tuning
+5. deploy without deleting `processed/`, `converted/`, `input/`, `data/`, equipment registry state or human audit decisions;
+6. run **Revalidate all + rebuild** so `.40.9` Stage 3 rule-version changes are applied;
+7. confirm TEI health and 384-dimensional `BAAI/bge-small-en-v1.5` output;
+8. rebuild affected complete physical-machine embedding indexes;
+9. run **Run fresh machine hybrid** and the electrical holdout;
+10. inspect individual misses before adding new ranking heuristics.
 
-After completing and deploying the remaining correctness/robustness work:
+## Invariants to preserve
 
-1. confirm TEI health and 384-dimensional BGE output;
-2. allow the strict pipeline to refresh any stale downstream artifacts;
-3. rebuild affected physical-machine embedding indexes;
-4. verify incremental build metadata (`reused_vectors`, `embedded_vectors`);
-5. run **Run fresh machine hybrid** from Machine RAG;
-6. record Top-1/Top-3/Top-5/Top-10/MRR and skipped cases;
-7. inspect individual misses before adding manual-type or cross-reference boosts.
-
-The old 83.46% Top-1 guarded BGE result is a deterministic candidate replay, **not** a `.40.4` fresh production result.
-
-## Acceptance invariants
-
-Any next-phase change must preserve:
-
-- one physical-machine RAG boundary;
-- one complete authoritative machine vector corpus;
-- strict stage sequencing/freshness;
-- current/manual revision authority rules;
-- structured-ID protection;
-- source provenance including reconstructed table source chunks;
-- immutable raw Docling artifacts;
-- human correction precedence;
-- no automatic generator/provider fallback.
-
-## Benchmark evolution
-
-- Keep the original 133 cases frozen for regression continuity.
-- New saved cases should record the expected machine when created in machine scope.
-- Derive legacy case machine scope only from the operator-maintained registry when the expected manual has exactly one unambiguous current machine owner.
-- Create a separate holdout set before aggressive ranking tuning.
-- Keep specification/value, cross-page table, exact identifier, procedure, troubleshooting and cross-reference cases represented.
-
-## Ranking candidates after fresh measurement
-
-Only if real misses justify them:
-
-1. manual-type boosts;
-2. cross-reference-specific ranking;
-3. remaining table/spec preference rules;
-4. ranking explanation/audit output.
+- Raw Docling ZIP/JSON is immutable.
+- Human decisions have highest authority.
+- No automatic provider fallback.
+- One physical machine/equipment is the normal RAG boundary.
+- Current manuals form one complete machine corpus; Historical/Draft manuals remain audit-only.
+- `[S#]` text and `[V#]` visual evidence retain original manual/page/chunk/artifact provenance.
+- No new model/dependency should be acquired unless a controlled benchmark demonstrates a need.

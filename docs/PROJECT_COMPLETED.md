@@ -1,3 +1,19 @@
+## .40.9 completed — September 21 audit backlog closure
+
+- [x] Type-aware config validation.
+- [x] Table-cell correction provenance survives Stage 3 chunking.
+- [x] Equipment-scoped generation filters before anchor selection.
+- [x] Reported blocking async endpoint paths moved to worker threads.
+- [x] Conservative multi-signal token budgeting.
+- [x] HTTP verifier client lifetime source-verified safe + regression tested.
+- [x] Deep Docling group traversal made iterative/depth-bounded.
+- [x] Groq vision JSON schema chosen by explicit mode, never magic prompt text.
+- [x] Telegram service regression coverage added.
+- [x] Claim/citation audit validates technical tokens and source overlap, with strict visual `visible_text` handling.
+- [x] Stage 3 canonical rule version/freshness gate added for these Stage 3 changes.
+- [-] SQLite/SMB item omitted by deployment reality/user instruction.
+- [x] Regression suite: 481/481 tests pass before packaging.
+
 ## .40.8B completed — Safety/concurrency closure
 
 - [x] Safe Git publishing with `.gitignore`, no `.git` deletion and no force-push.
@@ -93,7 +109,7 @@
 # Project completed implementation
 
 Last updated: 2026-09-21  
-Current release: `2026.09.21.40.8B`
+Current release: `2026.09.21.40.9`
 
 Do not redesign/reacquire these items without a specific regression or requirement.
 

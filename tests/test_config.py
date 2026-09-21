@@ -207,3 +207,22 @@ def test_hybrid_retrieval_defaults_match_n150_benchmark_winner():
     assert config.retrieval_embedding_url == "http://embeddings:80"
     assert config.retrieval_hybrid_candidate_depth == 60
     assert config.retrieval_hybrid_rrf_k == 60
+
+
+def test_config_rejects_scalar_supported_extensions_instead_of_iterating_characters():
+    with pytest.raises(ValueError, match="supported_extensions must be a YAML list"):
+        AppConfig(supported_extensions=".pdf").validate()
+
+
+def test_config_rejects_scalar_or_string_telegram_chat_ids():
+    with pytest.raises(ValueError, match="telegram_allowed_chat_ids must be a YAML list"):
+        AppConfig(telegram_allowed_chat_ids="12345").validate()
+    with pytest.raises(ValueError, match="telegram_allowed_chat_ids must be a YAML list"):
+        AppConfig(telegram_allowed_chat_ids=["12345"]).validate()
+
+
+def test_config_normalizes_and_deduplicates_extension_and_chat_id_lists():
+    config = AppConfig(supported_extensions=[".PDF", ".pdf", ".Zip"], telegram_allowed_chat_ids=[123, 123, -99])
+    config.validate()
+    assert config.supported_extensions == [".pdf", ".zip"]
+    assert config.telegram_allowed_chat_ids == [123, -99]

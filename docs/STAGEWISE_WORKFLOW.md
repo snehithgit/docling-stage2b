@@ -15,7 +15,7 @@
 
 # Stage-wise book and Machine RAG workflow
 
-Version: `2026.09.21.40.8B`
+Version: `2026.09.21.40.9`
 
 ## Hard sequence
 
@@ -71,3 +71,11 @@ This is intentionally separate from normal Vision verification. Normal Vision ro
 ## `.40.8B` gate visibility
 
 Book workflow exposes the testing audit bypass on every book. It becomes actionable only after current Stage 2B normal + required artifact work completes. The bypass changes gate readiness only; it never marks unresolved evidence accepted.
+
+## `.40.9` evidence/provenance hardening
+
+- Stage 3 canonical semantics are versioned as `stage3-canonical-integrity-v2`; older canonical chunks become stale after upgrade.
+- Applied table-cell correction provenance is attached to chunks that reference the corrected table.
+- Equipment-scoped generation filters every text/visual source before anchor selection.
+- Grounded-answer audit validates each technical claim against its cited evidence; exact visual values/IDs must appear in `visible_text`.
+- Telegram remains a monitoring surface only.

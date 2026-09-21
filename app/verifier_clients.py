@@ -208,6 +208,24 @@ class GroqVisionVerifier:
         },
         "required": ["verdict", "confidence", "visible_text", "visible_objects", "diagram_category", "summary", "unresolved", "unresolved_reason"],
     }
+    DIRECT_TRANSCRIPTION_SCHEMA = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "status": {"type": "string", "enum": ["READABLE", "UNREADABLE"]},
+            "corrected_text": {"type": "string"},
+        },
+        "required": ["status", "corrected_text"],
+    }
+    CROSSCHECK_SCHEMA = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "verdict": {"type": "string", "enum": ["AGREES", "DISAGREES", "UNREADABLE"]},
+            "corrected_text": {"type": "string"},
+        },
+        "required": ["verdict", "corrected_text"],
+    }
 
     def __init__(
         self, base_url: str, api_key: str, default_model: str, timeout_seconds: int = 120,
@@ -235,37 +253,25 @@ class GroqVisionVerifier:
     async def inspect_image_stream(
         self, image_bytes: bytes, prompt: str, mime_type: str = "image/png", model: str | None = None,
         max_tokens: int = 220, *, first_token_timeout_seconds: int = 120, idle_timeout_seconds: int = 120,
-        on_progress: ProgressCallback | None = None,
+        on_progress: ProgressCallback | None = None, schema_mode: str = "vision",
     ) -> dict[str, Any]:
         del first_token_timeout_seconds, idle_timeout_seconds
         if not self.api_key:
             raise ValueError("Groq API key is not configured")
         selected_model = str(model or self.default_model)
         b64 = base64.b64encode(image_bytes).decode("ascii")
-        direct_transcription_mode = "exactly two keys: status and corrected_text" in prompt
-        crosscheck_mode = "exactly two keys: verdict and corrected_text" in prompt
-        if direct_transcription_mode:
-            response_schema = {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "status": {"type": "string", "enum": ["READABLE", "UNREADABLE"]},
-                    "corrected_text": {"type": "string"},
-                },
-                "required": ["status", "corrected_text"],
-            }
-        elif crosscheck_mode:
-            response_schema = {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "verdict": {"type": "string", "enum": ["AGREES", "DISAGREES", "UNREADABLE"]},
-                    "corrected_text": {"type": "string"},
-                },
-                "required": ["verdict", "corrected_text"],
-            }
-        else:
+        schema_mode = str(schema_mode or "vision").strip().lower()
+        if schema_mode == "direct_transcription":
+            response_schema = self.DIRECT_TRANSCRIPTION_SCHEMA
+            schema_name = "vision_direct_transcription"
+        elif schema_mode == "crosscheck":
+            response_schema = self.CROSSCHECK_SCHEMA
+            schema_name = "vision_text_crosscheck"
+        elif schema_mode == "vision":
             response_schema = self.VISION_SCHEMA
+            schema_name = "vision_verification"
+        else:
+            raise ValueError("schema_mode must be vision, direct_transcription, or crosscheck")
         payload = {
             "model": selected_model,
             "temperature": 0,
@@ -281,7 +287,7 @@ class GroqVisionVerifier:
             "response_format": {
                 "type": "json_schema",
                 "json_schema": {
-                    "name": "vision_direct_transcription" if direct_transcription_mode else ("vision_text_crosscheck" if crosscheck_mode else "vision_verification"),
+                    "name": schema_name,
                     "strict": True, "schema": response_schema,
                 },
             },
@@ -334,7 +340,7 @@ class GroqVisionVerifier:
                 purpose = str((self.usage_context or {}).get("purpose") or "")
                 if purpose == "text_source_reconstruction":
                     call_kind = "text_reconstruction"
-                elif crosscheck_mode:
+                elif schema_mode == "crosscheck":
                     call_kind = "vision_crosscheck"
                 else:
                     call_kind = "vision"
@@ -487,12 +493,15 @@ class OpenAICompatibleVerifier:
         mime_type: str = "image/png",
         model: str | None = None,
         max_tokens: int = 220,
+        *,
+        schema_mode: str = "vision",
     ) -> dict[str, Any]:
         """Compatibility non-streaming image call.
 
         Stage 2B OnePlus production calls use ``inspect_image_stream`` below.
         Keeping this method makes the client useful for tests and other callers.
         """
+        del schema_mode  # local llama.cpp is prompt-constrained rather than JSON-schema constrained
         payload = self._vision_payload(image_bytes, prompt, mime_type, model, max_tokens, stream=False)
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.post(f"{self.base_url}/v1/chat/completions", json=payload)
@@ -517,6 +526,7 @@ class OpenAICompatibleVerifier:
         first_token_timeout_seconds: int = 1200,
         idle_timeout_seconds: int = 300,
         on_progress: ProgressCallback | None = None,
+        schema_mode: str = "vision",
     ) -> dict[str, Any]:
         """Stream an OpenAI-compatible llama.cpp vision response.
 
@@ -531,6 +541,7 @@ class OpenAICompatibleVerifier:
         """
         first_token_timeout_seconds = max(30, int(first_token_timeout_seconds))
         idle_timeout_seconds = max(30, int(idle_timeout_seconds))
+        del schema_mode  # accepted for a uniform verifier interface
         payload = self._vision_payload(image_bytes, prompt, mime_type, model, max_tokens, stream=True)
         started = time.monotonic()
         content_parts: list[str] = []

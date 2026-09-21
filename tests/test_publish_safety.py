@@ -28,3 +28,20 @@ def test_publish_scripts_refuse_sensitive_staged_files():
         assert "sensitive/runtime files are already tracked" in text
         assert "processed" in text
         assert ".env" in text
+
+
+def test_publish_scripts_allow_safe_env_example_template():
+    """The tracked .env.example template is source, not a local secret."""
+    sh = (ROOT / "upload-github.sh").read_text(encoding="utf-8")
+    assert "grep -vE '(^|/)\\.env\\.example$'" in sh
+
+    for name in ["upload-github.ps1", "upload-github-stage2c.ps1"]:
+        text = (ROOT / name).read_text(encoding="utf-8")
+        assert "-notmatch '(^|/)\\.env\\.example$'" in text
+        # The general guard remains in place for real secret variants such as .env.local.
+        assert "\\.env($|\\.)" in text
+
+
+def test_gitignore_explicitly_keeps_env_example():
+    text = (ROOT / ".gitignore").read_text(encoding="utf-8")
+    assert "!.env.example" in text
