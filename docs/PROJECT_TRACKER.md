@@ -1,4 +1,24 @@
-# Current release — 2026.09.22.40.11E
+# Current release — 2026.09.22.40.11G
+
+## `.40.11G` complete — review focus + Telegram mobile UX
+
+- [x] Text/Vision/Artifact Human review-only decision queues.
+- [x] Immediate queue removal after a saved human decision.
+- [x] Phone-first Telegram monitoring/review command layout.
+
+# Current release — 2026.09.22.40.11F
+
+## `.40.11F` complete — focused review queues + queue cleanup
+
+- [x] Text Decision filter includes Human review / Human reviewed.
+- [x] Vision Decision filter includes Human review / Human reviewed and keeps position after a decision.
+- [x] Artifact Decision filter includes Human review / Human reviewed and uses authoritative Stage 2C decisions.
+- [x] Telegram messages condensed into mobile-first cards/lines instead of console-like reports.
+- [x] Queue terminal rows expose safe delete; stale rename/FileMissing failures can be cleared.
+- [x] Active conversion work cannot be deleted.
+- [x] Source regression suite: 541 passed, 1 optional external dependency integration test skipped.
+
+# Previous release — 2026.09.22.40.11E
 
 ## `.40.11E` complete — Telegram actionable context & native menus
 

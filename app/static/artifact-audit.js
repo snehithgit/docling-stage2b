@@ -43,6 +43,17 @@ function artifactState(job) {
   return job.verification?.status || "not_routed";
 }
 
+function artifactNeedsHumanReview(job) {
+  const verification = job.verification || {};
+  const downstream = job.downstream || {};
+  if (!downstream.entry_id || downstream.human_visual_decision) return false;
+  return String(verification.verdict || "").toUpperCase() === "UNCERTAIN" || downstream.unresolved === true || String(downstream.status || "").toLowerCase() === "pending";
+}
+
+function humanDecisionLabel(value) {
+  return ({technical:"Technical", decorative:"Decorative", useful:"Useful", not_useful:"Not useful"})[String(value || "").toLowerCase()] || String(value || "").replaceAll("_", " ");
+}
+
 function renderArtifact(job) {
   const state = artifactState(job);
   const verification = job.verification || {};
@@ -50,6 +61,13 @@ function renderArtifact(job) {
   const visibleText = downstream.visible_text || verification.visible_text || [];
   const summary = downstream.generated_summary || verification.summary || "No verifier output recorded yet.";
   const downstreamText = downstream.status ? `${downstream.status}${downstream.status_reason ? ` · ${downstream.status_reason}` : ""}` : "No Stage 2C entry yet";
+  const needsHuman = artifactNeedsHumanReview(job);
+  const humanDecision = downstream.human_visual_decision || "";
+  const decisionPanel = needsHuman
+    ? `<div class="vision-audit-primary-actions"><strong>Human decision required</strong><div class="document-actions"><button class="primary-button artifact-decision" data-job="${esc(job.postprocess_job_id)}" data-entry="${esc(downstream.entry_id)}" data-decision="technical">Technical</button><button class="secondary-button artifact-decision" data-job="${esc(job.postprocess_job_id)}" data-entry="${esc(downstream.entry_id)}" data-decision="decorative">Decorative</button></div></div>`
+    : humanDecision
+      ? `<div class="vision-audit-human-state"><strong>Human decision: ${esc(humanDecisionLabel(humanDecision))}</strong><span>Authoritative</span></div>`
+      : "";
   return `<article class="panel artifact-card">
     <div class="artifact-card-grid">
       <div class="artifact-thumb-wrap">
@@ -83,6 +101,7 @@ function renderArtifact(job) {
 
         <section><div class="vision-audit-section-label">Output summary</div><p>${esc(summary)}</p></section>
         <section><div class="vision-audit-section-label">Pipeline state</div><p>${esc(downstreamText)}</p></section>
+        ${decisionPanel}
         <div class="vision-audit-evidence-counts">${visibleText.length} visible label${visibleText.length === 1 ? "" : "s"} · ${verification.crops?.length || 0} crop${(verification.crops?.length || 0) === 1 ? "" : "s"}</div>
         <details class="vision-audit-details extracted-detail"><summary>Show extracted detail</summary><section><div class="vision-audit-section-label">Visible text</div>${tagList(visibleText, "No visible text recorded")}</section></details>
 
@@ -115,12 +134,16 @@ function fillBookFilter() {
 
 function applyFilters(resetPage = true) {
   const book = $("aa-book").value;
+  const decision = $("aa-decision").value;
   const status = $("aa-status").value;
   const technicalOnly = $("aa-technical-only").checked;
   const query = $("aa-search").value.trim().toLowerCase();
   filteredArtifacts = artifactJobs.filter(job => {
     if (requestedBookJob && String(job.postprocess_job_id) !== String(requestedBookJob)) return false;
     if (book && `${job.postprocess_job_id}|${job.book}` !== book) return false;
+    if (decision === "human_review" && !artifactNeedsHumanReview(job)) return false;
+    if (decision === "human_reviewed" && !job.downstream?.human_visual_decision) return false;
+    if (["technical", "decorative"].includes(decision) && String(job.downstream?.human_visual_decision || "") !== decision) return false;
     if (status && artifactState(job) !== status) return false;
     if (technicalOnly && !job.technical_candidate) return false;
     if (query) {
@@ -156,6 +179,8 @@ function renderSummary(data) {
   $("aa-unrouted").textContent = Number(s.not_routed || 0).toLocaleString();
   $("aa-downstream").textContent = `${Number(s.stage2c_applied || 0).toLocaleString()} / ${Number(s.stage2c_excluded || 0).toLocaleString()}`;
   $("aa-rag").textContent = `${Number(s.rag_eligible_visuals || 0).toLocaleString()} / ${Number(s.rag_excluded_visuals || 0).toLocaleString()}`;
+  $("aa-review-required").textContent = Number(s.human_review_required || 0).toLocaleString();
+  $("aa-reviewed").textContent = Number(s.human_reviewed || 0).toLocaleString();
 }
 
 async function queueAction(url, buttonId, label) {
@@ -212,8 +237,34 @@ async function loadAudit() {
   }
 }
 
+document.addEventListener("click", async event => {
+  const button = event.target.closest(".artifact-decision");
+  if (!button) return;
+  button.disabled = true;
+  feedback(`Saving human decision: ${button.dataset.decision}…`);
+  try {
+    const response = await fetch(`/api/postprocess/jobs/${encodeURIComponent(button.dataset.job)}/vision-audit/${encodeURIComponent(button.dataset.entry)}/decision`, {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({decision:button.dataset.decision}),
+    });
+    if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
+    const humanQueue = $("aa-decision").value === "human_review";
+    const previousPosition = artifactPage;
+    await loadAudit();
+    if (!humanQueue && filteredArtifacts.length > previousPosition) artifactPage = previousPosition + 1;
+    renderPage();
+    feedback("Human artifact decision saved. The next matching item is ready.", "completed");
+    window.scrollTo({top:0, behavior:"smooth"});
+  } catch (error) {
+    feedback(`Could not save decision: ${error.message}`, "warning");
+    button.disabled = false;
+  }
+});
+
 $("aa-refresh").addEventListener("click", loadAudit);
 $("aa-book").addEventListener("change", () => applyFilters());
+$("aa-decision").addEventListener("change", () => applyFilters());
 $("aa-status").addEventListener("change", () => applyFilters());
 $("aa-technical-only").addEventListener("change", () => applyFilters());
 $("aa-search").addEventListener("input", () => applyFilters());

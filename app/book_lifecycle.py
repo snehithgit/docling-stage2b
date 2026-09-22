@@ -97,6 +97,60 @@ def quarantine_book_artifacts(config: Any, book: dict[str, Any]) -> dict[str, An
     return {"moves": moves, "manifest": str(manifest_path)}
 
 
+def quarantine_conversion_job(config: Any, job: dict[str, Any]) -> dict[str, Any]:
+    """Quarantine terminal conversion artifacts before removing a queue-only row.
+
+    This is used when a conversion failed (for example after its source file was
+    renamed) before Stage 2A created a managed book. Missing files are expected
+    and are simply recorded as no-op moves so the stale queue/error row can be
+    cleared safely.
+    """
+    job_id = int(job.get("id") or 0)
+    stamp = _timestamp_slug()
+    prefix = f"{stamp}__conversion{job_id}"
+    moves: list[dict[str, str]] = []
+
+    source_kind = str(job.get("source_kind") or "watcher")
+    source_name = str(job.get("filename") or "").strip()
+    if source_kind != "converted_folder" and source_name:
+        moved = _move(
+            Path(config.input_dir) / Path(source_name).name,
+            Path(config.input_dir) / "_deleted_books",
+            prefix=prefix,
+        )
+        if moved:
+            moves.append(moved)
+
+    output_name = str(job.get("output_filename") or "").strip()
+    if output_name:
+        moved = _move(
+            Path(config.output_dir) / Path(output_name).name,
+            Path(config.output_dir) / "_deleted_books",
+            prefix=prefix,
+        )
+        if moved:
+            moves.append(moved)
+
+    manifest_dir = Path(config.processed_dir) / "_deleted_books"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "schema": "docling-deleted-conversion/v1",
+        "deleted_at": datetime.now(UTC).isoformat(),
+        "conversion_job_id": job_id,
+        "source_filename": source_name,
+        "source_kind": source_kind,
+        "output_filename": output_name,
+        "status": job.get("status"),
+        "error_type": job.get("error_type"),
+        "error_message": job.get("error_message"),
+        "moves": moves,
+        "note": "Terminal conversion queue item removed. Existing files were quarantined, not destroyed.",
+    }
+    manifest_path = _unique_target(manifest_dir, f"{prefix}__deletion.json")
+    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return {"moves": moves, "manifest": str(manifest_path)}
+
+
 def restore_quarantined_artifacts(quarantine: dict[str, Any]) -> list[str]:
     """Best-effort rollback used only when database deletion fails."""
     errors: list[str] = []

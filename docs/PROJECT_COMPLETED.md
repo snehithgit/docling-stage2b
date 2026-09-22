@@ -1,4 +1,30 @@
-# Current release — 2026.09.22.40.11E
+# Current release — 2026.09.22.40.11G
+
+## `.40.11G` complete — focused human review + phone-first Telegram layout
+
+- [x] Human-review Decision filter for Text, Vision and Artifact.
+- [x] Decided items leave the active Human review queue immediately.
+- [x] Telegram routine status no longer renders giant code cards / COPY CODE blocks.
+- [x] Compact `/status`, `/books`, `/audit`, `/workers`, `/errors`.
+- [x] Compact `/start` and `/help`, with native Menu as the primary command surface.
+- [x] Routine messages no longer repeat redundant timestamp/build metadata at the top.
+
+# Current release — 2026.09.22.40.11F
+
+## `.40.11F` complete — focused human-review queues, mobile Telegram UX & queue cleanup
+
+- [x] Decision → Human review filter on Text, Vision and Artifact audit.
+- [x] Human-review queues contain only unresolved human decisions.
+- [x] Decided Vision/Artifact entries disappear without skipping the next unresolved item.
+- [x] Existing authoritative Text review queue reused for Apply/Keep Original.
+- [x] Telegram status/books/workers/audit/errors and audit captions condensed for mobile scanning.
+- [x] Audit decision buttons grouped side-by-side; Stop review remains separate.
+- [x] Queue exposes safe 🗑 Delete for terminal rows.
+- [x] Stale FileMissing rows from manual renames can be cleared even when the old file is already absent.
+- [x] Managed books still use the canonical quarantine/delete lifecycle; active work is protected from deletion.
+- [x] Regression suite: 541 passed; 1 optional real-dependency formatter integration test skipped in the network-isolated validation environment.
+
+# Previous release — 2026.09.22.40.11E
 
 ## `.40.11E` complete — Telegram actionable context & native menus
 

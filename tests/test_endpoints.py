@@ -278,6 +278,19 @@ class VerificationEndpointTests(unittest.TestCase):
             {"text_provider": "pi5", "parsed": {"verdict": "LIKELY_CORRUPT", "source_image_reconstruction": "Transmitter Terminal"}, "correction": {"status": "applied", "reason": "SOURCE_IMAGE_TARGET_RECONSTRUCTION", "proposed_text": "Transmitter Terminal", "scope_guard": {"accepted": True, "sequence_similarity": 0.9, "target_token_recall": 0.5}}, "source_reconstruction": {"status": "READABLE", "corrected_text": "Transmitter Terminal"}, "raw_response": {"choices": []}},
             "book__job9012/verification/stage2b_job.json"
         ))
+        result_dir = Path(self.main.runtime.config.processed_dir) / "book__job9012"
+        result_dir.mkdir(parents=True, exist_ok=True)
+        (result_dir / "correction_ledger.json").write_text(json.dumps({
+            "schema": "docling-correction-ledger/v2",
+            "entries": [{
+                "entry_id": f"{rows[0]['generation']}:text:TA1",
+                "entry_type": "text_correction",
+                "route_id": "TA1",
+                "status": "applied",
+                "verification_verdict": "LIKELY_CORRUPT",
+                "human_verified": False,
+            }],
+        }), encoding="utf-8")
         self.main.runtime.stage2b_worker.sync_routes_once.reset_mock()
         with TestClient(self.main.app) as client:
             page = client.get("/text-audit")
@@ -292,6 +305,11 @@ class VerificationEndpointTests(unittest.TestCase):
             self.assertEqual(body["jobs"][0]["request"]["suspect_text"], "Transmilter Terminal")
             self.assertEqual(body["jobs"][0]["correction"]["proposed_text"], "Transmitter Terminal")
             self.assertTrue(body["jobs"][0]["raw_docling_immutable"])
+            self.assertTrue(body["jobs"][0]["human_review_required"])
+            human = client.get("/api/stage2b/text-audit?postprocess_job_id=9012&outcome=human_review")
+            self.assertEqual(human.status_code, 200)
+            self.assertEqual(human.json()["total_filtered"], 1)
+            self.assertEqual(human.json()["jobs"][0]["route_id"], "TA1")
         self.main.runtime.stage2b_worker.sync_routes_once.assert_not_awaited()
 
     def test_retry_all_failed_requeues_text_and_vision_only(self):

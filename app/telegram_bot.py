@@ -319,8 +319,12 @@ class TelegramBotService:
 
     @staticmethod
     def _audit_keyboard(options: list[dict[str, str]]) -> dict:
-        rows = [[{"text": str(option["label"]), "callback_data": f"aud:d:{option['value']}"}] for option in options]
-        rows.append([{"text": "⏹ Stop verify audit", "callback_data": "aud:s"}])
+        decision_row = [
+            {"text": str(option["label"]), "callback_data": f"aud:d:{option['value']}"}
+            for option in options
+        ]
+        rows = [decision_row] if decision_row else []
+        rows.append([{"text": "⏹ Stop review", "callback_data": "aud:s"}])
         return {"inline_keyboard": rows}
 
     async def _poll_loop(self) -> None:
@@ -392,9 +396,9 @@ class TelegramBotService:
             name = str((session or {}).get("type") or "verify").capitalize()
             reviewed = int((session or {}).get("reviewed") or 0)
             await self.send(
-                f"⏹ **{name} audit stopped**\n\n"
-                f"✅ Reviewed this session: `{reviewed}`\n\n"
-                "No more audit images will be sent. Start again whenever you want.",
+                f"⏹ **{name} review stopped**\n"
+                f"Reviewed this session: `{reviewed}`\n\n"
+                "Use the Menu button when you want to continue.",
                 chat_id,
             )
 
@@ -416,9 +420,8 @@ class TelegramBotService:
             self._audit_sessions.pop(chat_id, None)
             title = {"text": "Text", "vision": "Vision", "artifact": "Artifact"}.get(audit_type, "Verifier")
             await self.send(
-                f"✅ **{title} audit complete**\n\n"
-                f"Reviewed this session: `{reviewed}`\n"
-                f"Remaining: `{remaining}`",
+                f"✅ **{title} review complete**\n"
+                f"Reviewed this session: `{reviewed}` · Remaining: `{remaining}`",
                 chat_id,
             )
             return
@@ -519,30 +522,30 @@ class TelegramBotService:
         if not self._event_stream_factory:
             return
         critical = {
-            "processing_failed": "📥 Conversion failed",
-            "postprocess_failed": "🧭 Stage 2A post-process failed",
-            "postprocess_error": "🧭 Stage 2A worker error",
-            "stage3_chunking_failed": "🧩 Stage 3 chunking failed",
-            "stage2b_pi5_failed": "🧠 Text verifier job failed",
-            "stage2b_oneplus_failed": "📱 Vision verifier job failed",
-            "stage2b_pi5_worker_error": "🧠 Text verifier worker error",
-            "stage2b_oneplus_worker_error": "📱 Vision verifier worker error",
-            "worker_error": "📥 Conversion worker error",
-            "stage2c_ledger_error": "🧾 Correction ledger error",
-            "pipeline_sequence_error": "🔗 Pipeline sequence error",
-            "stage2b_cloud_quota_paused": "☁️ Cloud verifier quota paused",
-            "stage2b_pi5_endpoint_circuit_open": "🔌 Pi5 verifier circuit open",
-            "stage2b_oneplus_endpoint_circuit_open": "🔌 OnePlus verifier circuit open",
+            "processing_failed": "Conversion failed",
+            "postprocess_failed": "Stage 2A post-process failed",
+            "postprocess_error": "Stage 2A worker error",
+            "stage3_chunking_failed": "Stage 3 chunking failed",
+            "stage2b_pi5_failed": "Text verifier job failed",
+            "stage2b_oneplus_failed": "Vision verifier job failed",
+            "stage2b_pi5_worker_error": "Text verifier worker error",
+            "stage2b_oneplus_worker_error": "Vision verifier worker error",
+            "worker_error": "Conversion worker error",
+            "stage2c_ledger_error": "Correction ledger error",
+            "pipeline_sequence_error": "Pipeline sequence error",
+            "stage2b_cloud_quota_paused": "Cloud verifier quota paused",
+            "stage2b_pi5_endpoint_circuit_open": "Pi5 verifier circuit open",
+            "stage2b_oneplus_endpoint_circuit_open": "OnePlus verifier circuit open",
         }
         routine = {
-            "stage2b_pi5_endpoint_circuit_closed": "🔌 Pi5 verifier circuit recovered",
-            "stage2b_oneplus_endpoint_circuit_closed": "🔌 OnePlus verifier circuit recovered",
-            "stage2b_artifact_sweep_released": "🖼 Artifact verification sweep released",
-            "stage3_chunking_completed": "🧩 Stage 3 chunking completed",
-            "verifier_audit_decision": "🔎 Human verifier decision saved",
-            "verifier_audit_bypass_updated": "🧪 Audit testing bypass updated",
-            "pipeline_retrieval_refresh_completed": "🔍 Retrieval index refreshed",
-            "stage2c_human_correction": "✍️ Human correction saved",
+            "stage2b_pi5_endpoint_circuit_closed": "Pi5 verifier circuit recovered",
+            "stage2b_oneplus_endpoint_circuit_closed": "OnePlus verifier circuit recovered",
+            "stage2b_artifact_sweep_released": "Artifact verification sweep released",
+            "stage3_chunking_completed": "Stage 3 chunking completed",
+            "verifier_audit_decision": "Human verifier decision saved",
+            "verifier_audit_bypass_updated": "Audit testing bypass updated",
+            "pipeline_retrieval_refresh_completed": "Retrieval index refreshed",
+            "stage2c_human_correction": "Human correction saved",
         }
         known = set(critical) | set(routine)
         async for frame in self._event_stream_factory():
@@ -550,21 +553,17 @@ class TelegramBotService:
             reason = str(payload.get("reason") or "")
             if reason not in known:
                 continue
-            timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")
+            timestamp = datetime.now().astimezone().strftime("%d %b · %H:%M %Z")
             context = _event_context_markdown(payload)
-            context_block = f"\n{context}\n" if context else "\n"
             if reason in critical:
-                await self.send(
-                    "🔴 **ALERT**\n"
-                    f"_{timestamp}_\n\n"
-                    f"{critical[reason]}\n"
-                    f"{context_block}\n"
-                    "🚨 `/errors` for details · 📊 `/status` for pipeline state"
-                )
+                lines = [f"🔴 **{critical[reason]}**", f"_{timestamp}_"]
+                if context:
+                    lines += ["", context]
+                lines += ["", "🚨 `/errors` · 📊 `/status`"]
+                await self.send("\n".join(lines))
             else:
-                await self.send(
-                    f"🟢 _{timestamp}_\n"
-                    f"{routine[reason]}\n"
-                    f"{context_block}\n"
-                    "📊 `/status` for the current pipeline state"
-                )
+                lines = [f"🟢 **{routine[reason]}**", f"_{timestamp}_"]
+                if context:
+                    lines += ["", context]
+                lines += ["", "📊 `/status`"]
+                await self.send("\n".join(lines))

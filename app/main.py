@@ -22,7 +22,7 @@ import fitz
 import httpx
 
 from .archive import select_docling_document
-from .book_lifecycle import quarantine_book_artifacts, restore_quarantined_artifacts
+from .book_lifecycle import quarantine_book_artifacts, quarantine_conversion_job, restore_quarantined_artifacts
 from .config import AppConfig, config_path, load_config, save_config
 from .database import JobStore
 from .docling_client import DoclingApiError, DoclingClient
@@ -597,6 +597,10 @@ def _artifact_inventory_for_book(job: dict, verification_rows: list[dict], proce
                 "unresolved": downstream.get("unresolved") if downstream else None,
                 "visible_text": downstream.get("visible_text") if downstream else None,
                 "visible_objects": downstream.get("visible_objects") if downstream else None,
+                "entry_id": downstream.get("entry_id") if downstream else None,
+                "human_visual_decision": downstream.get("human_visual_decision") if downstream else None,
+                "human_verified": bool(downstream.get("human_verified")) if downstream else False,
+                "human_evidence_recovery_required": bool(downstream.get("human_evidence_recovery_required")) if downstream else False,
                 "rag_eligible": visual_rag.get("rag_eligible") if visual_rag else False,
                 "rag_eligibility_reason": visual_rag.get("rag_eligibility_reason") if visual_rag else None,
                 "visual_evidence_id": visual_rag.get("visual_evidence_id") if visual_rag else None,
@@ -1082,22 +1086,20 @@ class Runtime:
         proposed = item["proposed"]
         options = []
         if proposed and proposed != item["original"]:
-            options.append({"label": "✅ Apply verifier correction", "value": "apply"})
+            options.append({"label": "✅ Apply", "value": "apply"})
         options.append({"label": "🛡 Keep original", "value": "keep_original"})
         caption = (
-            "🔎 **TEXT VERIFIER AUDIT**\n"
-            f"📘 {self._telegram_code(item['book'], 90)}\n"
-            f"📄 Page {self._telegram_code(item['page'] or '—', 20)} · Route {self._telegram_code(row.get('route_id') or 'route', 45)}\n\n"
-            "🟡 **Human decision required**\n\n"
-            f"🤖 Verdict: {self._telegram_code(item['verdict'], 30)}\n"
-            f"🧭 Reason: {self._telegram_code(item['reason'] or '—', 100)}\n\n"
-            f"📝 **Original**\n{self._telegram_code(item['original'], 260)}\n"
+            "📝 **Text review**\n"
+            f"📘 {self._telegram_code(item['book'], 90)} · 📄 page {self._telegram_code(item['page'] or '—', 20)}\n\n"
+            "🟡 **Decision needed**\n"
+            f"🧭 {self._telegram_code(item['reason'] or item['verdict'] or 'Needs review', 110)}\n\n"
+            f"**Original**\n{self._telegram_code(item['original'], 260)}\n"
         )
         if proposed:
-            caption += f"\n✍️ **Verifier correction**\n{self._telegram_code(proposed, 260)}\n"
+            caption += f"\n**Suggested correction**\n{self._telegram_code(proposed, 260)}\n"
         caption += (
-            f"\n⏳ Remaining: {self._telegram_code(len(candidates), 20)}\n"
-            "👇 Choose one decision. The next item will be sent automatically."
+            f"\n🔎 Remaining `{len(candidates)}`\n"
+            "Choose a decision below — the next review opens automatically."
         )
         return {
             "done": False,
@@ -1164,24 +1166,25 @@ class Runtime:
         confidence = item["confidence"]
         confidence_text = f"{float(confidence) * 100:.0f}%" if isinstance(confidence, (int, float)) else "—"
         labels = [self._telegram_trim(value, 55) for value in item["labels"][:6] if str(value).strip()]
-        title = "ARTIFACT VERIFIER AUDIT" if audit_type == "artifact" else "VISION VERIFIER AUDIT"
+        title = "🔬 **Artifact review**" if audit_type == "artifact" else "🖼 **Vision review**"
         caption = (
-            f"🔎 **{title}**\n"
-            f"📘 {self._telegram_code(item['book'], 90)}\n"
-            f"📄 Page {self._telegram_code(item['page'] or '—', 20)} · Route {self._telegram_code(row.get('route_id') or 'route', 45)}\n\n"
-            "🟡 **Human decision required**\n\n"
-            f"🤖 Verdict: {self._telegram_code(item['verdict'], 30)}\n"
-            f"🎯 Confidence: {self._telegram_code(confidence_text, 20)}\n"
-            f"🧭 Category: {self._telegram_code(item['category'], 45)}\n"
-            f"ℹ️ Reason: {self._telegram_code(item['reason'] or '—', 90)}\n"
+            f"{title}\n"
+            f"📘 {self._telegram_code(item['book'], 90)} · 📄 page {self._telegram_code(item['page'] or '—', 20)}\n\n"
+            "🟡 **Decision needed**\n"
         )
         if item["summary"]:
-            caption += f"\n📝 **Summary**\n{self._telegram_code(item['summary'], 180)}\n"
-        if labels:
-            caption += "\n🏷 **Visible text**\n" + "\n".join(f"• {self._telegram_code(value, 55)}" for value in labels) + "\n"
+            caption += f"{self._telegram_code(item['summary'], 200)}\n\n"
         caption += (
-            f"\n⏳ Remaining: {self._telegram_code(len(candidates), 20)}\n"
-            "👇 Choose one decision. The next image will be sent automatically."
+            f"🧭 Category {self._telegram_code(item['category'], 45)} · 🎯 {self._telegram_code(confidence_text, 20)}\n"
+            f"ℹ️ {self._telegram_code(item['reason'] or item['verdict'] or 'Needs review', 100)}\n"
+        )
+        if labels:
+            preview = " · ".join(labels[:3])
+            extra = max(0, len(item["labels"]) - len(labels[:3]))
+            caption += f"🏷 {self._telegram_code(preview, 130)}" + (f" · +{extra} more" if extra else "") + "\n"
+        caption += (
+            f"\n🔎 Remaining `{len(candidates)}`\n"
+            "Choose a decision below — the next image opens automatically."
         )
         options = (
             [{"label": "✅ Technical", "value": "technical"}, {"label": "🚫 Decorative", "value": "decorative"}]
@@ -1287,11 +1290,18 @@ class Runtime:
         values are kept in code spans and aligned data lives in fenced blocks.
         """
 
-        def stamp() -> str:
-            return datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")
-
         def header(title: str = "⚓ **Docling Auto-Convert**") -> list[str]:
-            return [title, f"_{stamp()}_", f"`v{APP_VERSION}`", ""]
+            # Telegram already timestamps every message. Repeating wall-clock time
+            # and build metadata at the top wastes the most valuable mobile space.
+            return [title, ""]
+
+        def footer(commands: str = "", *, show_version: bool = False) -> list[str]:
+            lines: list[str] = []
+            if commands:
+                lines += ["", commands]
+            if show_version:
+                lines.append(f"`v{APP_VERSION}`")
+            return lines
 
         def row(label: str, value: object, width: int = 18) -> str:
             return f"{label:<{width}}{value}"
@@ -1328,25 +1338,29 @@ class Runtime:
             except (TypeError, ValueError):
                 return 1
 
-        help_lines = header() + [
-            "📊 **Monitoring**",
-            "`/status` — pipeline overview",
-            "`/books [page]` — per-book progress",
-            "`/workers` — Pi5 / OnePlus health",
-            "`/audit [page]` — human audit workload",
+        start_lines = header("⚓ **Docling Auto-Convert**") + [
+            "Monitor the pipeline and clear human-review work from your phone.",
+            "",
+            "📊 `/status`  Current state",
+            "🔎 `/audit`  Human-review backlog",
+            "🚨 `/errors`  Problems needing action",
+            "⚙️ `/workers`  Pi5 + OnePlus",
+            "",
+            "Use **Menu** for all commands.",
+            *footer("ℹ️ `/help` shows the full command list.", show_version=True),
+        ]
+        help_lines = header("ℹ️ **Bot commands**") + [
+            "📊 **Monitor**",
+            "`/status` · `/books` · `/workers` · `/errors`",
             "",
             "🔎 **Human review**",
-            "`/textaudit` — review text crops one by one",
-            "`/visionaudit` — review normal vision images one by one",
-            "`/artifactaudit` — review artifact-sweep images one by one",
-            "`/stopaudit` — stop the current Telegram audit",
-            "",
-            "🚨 `/errors` — current failures and blockers",
-            "ℹ️ `/help` — show this message",
-            "",
-            "Pipeline start/stop controls remain in the web app.",
+            "`/audit` · `/textaudit` · `/visionaudit` · `/artifactaudit`",
+            "`/stopaudit` stops the current review session.",
+            *footer("Use **Menu** instead of typing commands.", show_version=True),
         ]
-        if command in {"/start", "/help"}:
+        if command == "/start":
+            return "\n".join(start_lines)
+        if command == "/help":
             return "\n".join(help_lines)
 
         legacy_controls = {
@@ -1426,12 +1440,28 @@ class Runtime:
         def attention_block() -> list[str]:
             lines: list[str] = []
             if critical_items:
-                lines += ["🔴 **NEEDS ATTENTION**", *[f"• {item}" for item in critical_items], ""]
+                lines += ["🔴 **Action needed**", *[f"↳ {item}" for item in critical_items], ""]
             if attention_items:
-                lines += ["🟡 **ATTENTION**", *[f"• {item}" for item in attention_items], ""]
+                lines += ["🟡 **Review needed**", *[f"↳ {item}" for item in attention_items], ""]
             if not lines:
-                lines += ["🟢 **All clear — nothing needs attention**", ""]
+                lines += ["🟢 **All clear**", ""]
             return lines
+
+        def worker_status(target: str) -> tuple[str, str]:
+            state = worker_states.get(target) or {}
+            circuit = state.get("endpoint_circuit") or {}
+            workload = state.get("workload") or {}
+            paused = bool(getattr(self.config, f"stage2b_{target}_paused", False))
+            active = state.get("active_job_id")
+            if circuit.get("open"):
+                return "🔴", "Circuit open"
+            if paused:
+                return "🟡", "Paused"
+            if target == "oneplus" and workload.get("cooldown_active"):
+                return "🟡", f"Cooling · {seconds_label(workload.get('cooldown_remaining_seconds'))}"
+            if active:
+                return "🔵", f"Working · #{active}"
+            return "🟢", "Ready"
 
         if command == "/status":
             keys = (
@@ -1457,39 +1487,27 @@ class Runtime:
                 elif unresolved:
                     ready_audit += 1
             artifact_total = sum(totals[key] for key in ("artifact_completed", "artifact_pending", "artifact_processing", "artifact_failed"))
+            text_total = sum(totals[key] for key in ("text_completed", "text_pending", "text_processing", "text_failed"))
+            vision_total = sum(totals[key] for key in ("vision_completed", "vision_pending", "vision_processing", "vision_failed"))
             route_created = sum(int(job.get("route_count") or 0) for job in jobs if job.get("status") == "completed")
             route_candidates = sum(int(job.get("route_candidates_detected") or job.get("route_count") or 0) for job in jobs if job.get("status") == "completed")
-            lines = header() + attention_block()
-            lines += code_block("PIPELINE", [
-                ("Books", len(books)),
-                ("2A Routes", f"{route_created} / {route_candidates}"),
-                ("Deferred", route_deferred_total),
-                ("Text", f"{totals['text_completed']} / {totals['text_completed'] + totals['text_pending'] + totals['text_processing'] + totals['text_failed']}"),
-                ("Vision", f"{totals['vision_completed']} / {totals['vision_completed'] + totals['vision_pending'] + totals['vision_processing'] + totals['vision_failed']}"),
-                ("Artifact", f"{totals['artifact_completed']} / {artifact_total}"),
-                ("Failed", verification_failed),
-            ])
-            lines += code_block("AUDIT", [
-                ("Unresolved", audit_required),
-                ("Ready", ready_audit),
-                ("Verifying", still_verifying),
-                ("Bypassed", bypassed),
-            ])
-            worker_rows: list[tuple[str, object]] = []
-            for target, label in (("pi5", "Pi5"), ("oneplus", "OnePlus")):
-                state = worker_states.get(target) or {}
-                circuit = state.get("endpoint_circuit") or {}
-                workload = state.get("workload") or {}
-                paused = bool(getattr(self.config, f"stage2b_{target}_paused", False))
-                active = state.get("active_job_id")
-                status = (
-                    "Paused" if paused else
-                    ("Cooling" if target == "oneplus" and workload.get("cooldown_active") else
-                     ("Circuit open" if circuit.get("open") else ("Working" if active else "Ready")))
-                )
-                worker_rows.append((label, f"{status}{' #' + str(active) if active else ''}"))
-            lines += code_block("WORKERS", worker_rows, width=10)
-            lines += ["🚨 `/errors` for details · 🔎 `/audit` for the review queue"]
+            failure_total = len(conversion_failed_rows) + len(stage2a_failed) + verification_failed + len(stage2c_failed) + len(stage3_failed)
+            lines = header("📊 **Status**") + attention_block()
+            lines += [
+                f"📚 `{len(books)}` books  ·  🔄 `{still_verifying}` active  ·  🔎 `{audit_required}` review  ·  🔴 `{failure_total}` failed",
+                "",
+                f"🧭 2A `{route_created}/{route_candidates}`" + (f" · ⚠️ `{route_deferred_total}` deferred" if route_deferred_total else ""),
+                f"📝 Text `{totals['text_completed']}/{text_total}`  ·  🖼 Vision `{totals['vision_completed']}/{vision_total}`",
+                f"🔬 Artifacts `{totals['artifact_completed']}/{artifact_total}`",
+                "",
+                "**Workers**",
+            ]
+            for target, label, icon in (("pi5", "Pi5", "🧠"), ("oneplus", "OnePlus", "📱")):
+                state_icon, state_text = worker_status(target)
+                lines.append(f"{icon} {label}  {state_icon} **{state_text}**")
+            if ready_audit:
+                lines += ["", f"🟡 `{ready_audit}` book(s) are ready for human review."]
+            lines += ["", *footer("📚 `/books` · 🔎 `/audit` · 🚨 `/errors`")]
             return "\n".join(lines).rstrip()
 
         if command == "/books":
@@ -1509,29 +1527,19 @@ class Runtime:
                 if failed:
                     rank, state, icon = 0, "Failed", "🔴"
                 elif unresolved or audit.get("bypassed_for_testing"):
-                    rank, state, icon = 1, ("Audit bypassed" if audit.get("bypassed_for_testing") else "Ready for audit"), "🟡"
+                    rank, state, icon = 1, ("Audit bypassed" if audit.get("bypassed_for_testing") else "Human review"), "🟡"
                 elif pending:
-                    rank, state, icon = 2, "Verifying", "🔄"
+                    rank, state, icon = 2, "Verifying", "🔵"
                 else:
                     rank, state, icon = 3, "Complete", "🟢"
-                entries.append({
-                    "rank": rank,
-                    "name": name,
-                    "jid": jid,
-                    "audit": audit,
-                    "unresolved": unresolved,
-                    "post_job": post_job,
-                    "state": state,
-                    "icon": icon,
-                    "book": book,
-                })
+                entries.append({"rank": rank, "name": name, "jid": jid, "audit": audit, "unresolved": unresolved, "post_job": post_job, "state": state, "icon": icon, "book": book})
             entries.sort(key=lambda item: (item["rank"], str(item["name"]).casefold()))
-            per_page = 20
+            per_page = 8
             max_page = max(1, (len(entries) + per_page - 1) // per_page)
             page = min(requested_page(), max_page)
             start = (page - 1) * per_page
             shown_entries = entries[start:start + per_page]
-            lines = header("📚 **Books**") + [f"Page `{page}` of `{max_page}` · worst-first", ""]
+            lines = header("📚 **Books**") + [f"Page `{page}/{max_page}` · problems first", ""]
             for item in shown_entries:
                 book = item["book"]
                 post_job = item["post_job"]
@@ -1539,59 +1547,53 @@ class Runtime:
                 route_candidates = int(post_job.get("route_candidates_detected") or route_created)
                 art_done = int(book.get("artifact_completed") or 0)
                 art_total = art_done + sum(int(book.get(key) or 0) for key in ("artifact_pending", "artifact_processing", "artifact_failed"))
-                lines += [f"{item['icon']} **{item['state']}** · {self._telegram_code(item['name'], 120)}"]
-                lines += code_block("BOOK", [
-                    ("2A Routes", f"{route_created} / {route_candidates}"),
-                    ("Deferred", int(post_job.get("route_deferred") or 0)),
-                    ("Sweep", "Complete" if art_total and art_done == art_total else f"{art_done} / {art_total}"),
-                    ("Audit", "Complete" if item["unresolved"] == 0 else item["unresolved"]),
-                ], width=12)
+                deferred = int(post_job.get("route_deferred") or 0)
+                lines += [
+                    f"{item['icon']} {self._telegram_code(item['name'], 120)}",
+                    f"**{item['state']}** · 🧭 `{route_created}/{route_candidates}` · 🔬 `{art_done}/{art_total}` · 🔎 `{item['unresolved']}`" + (f" · ⚠️ `{deferred}` deferred" if deferred else ""),
+                    "",
+                ]
             remaining = max(0, len(entries) - (start + len(shown_entries)))
             if remaining:
-                lines += [f"📚 **{remaining} more book(s) not shown** — use `/books {page + 1}`"]
+                lines += [f"➡️ `{remaining}` more · `/books {page + 1}`", ""]
             if not entries:
-                lines += ["🟢 No books are currently registered."]
+                lines += ["🟢 No books are currently registered.", ""]
+            lines += footer("🔎 `/audit` human review · 📊 `/status` overview")
             return "\n".join(lines).rstrip()
 
         if command == "/workers":
-            lines = header("⚙️ **Workers**") + attention_block()
+            lines = header("⚙️ **Worker health**") + attention_block()
             oneplus_control = await self.oneplus_controller.status()
             for target, label, icon in (("pi5", "Pi5", "🧠"), ("oneplus", "OnePlus", "📱")):
                 state = worker_states.get(target) or {}
                 circuit = state.get("endpoint_circuit") or {}
                 workload = state.get("workload") or {}
-                paused = bool(getattr(self.config, f"stage2b_{target}_paused", False))
                 active = state.get("active_job_id")
                 task = str(state.get("active_label") or state.get("active_task") or ("Artifact sweep" if active else "Idle"))
-                status = (
-                    "Paused" if paused else
-                    ("Cooling" if target == "oneplus" and workload.get("cooldown_active") else
-                     ("Offline" if circuit.get("open") else ("Working" if active else "Ready")))
-                )
-                worker_rows: list[tuple[str, object]] = [
-                    ("Status", status),
-                    ("Job", f"#{active}" if active else "—"),
-                    ("Task", task[:55]),
-                    ("Circuit", "Open" if circuit.get("open") else "Closed"),
-                    ("Failures", int(circuit.get("failure_count") or 0)),
-                    ("Outage", age_from_epoch(circuit.get("opened_at_epoch")) if circuit.get("open") else "—"),
-                    ("Last error", self._telegram_trim(circuit.get("last_error") or "—", 65)),
-                ]
+                state_icon, state_text = worker_status(target)
+                lines += [f"{icon} **{label}**  {state_icon} {state_text}"]
+                if active:
+                    lines.append(f"└ Job `#{active}` · {self._telegram_code(task, 70)}")
+                else:
+                    lines.append(f"└ {self._telegram_code(task, 70)}")
+                if circuit.get("open") or int(circuit.get("failure_count") or 0):
+                    lines.append(f"🔌 Circuit: **{'Open' if circuit.get('open') else 'Closed'}** · failures `{int(circuit.get('failure_count') or 0)}`")
+                if circuit.get("open"):
+                    lines.append(f"⏱ Outage: `{age_from_epoch(circuit.get('opened_at_epoch'))}`")
+                if circuit.get("last_error"):
+                    lines.append(f"⚠️ {self._telegram_code(self._telegram_trim(circuit.get('last_error'), 110), 110)}")
                 if target == "oneplus":
-                    worker_rows += [
-                        ("Active work", f"{float(workload.get('busy_minutes') or 0):.1f} / {float(workload.get('budget_minutes') or 90):.0f} min"),
-                        ("Last speed", f"{float(workload.get('last_speed_tps')):.2f} tok/s" if workload.get("last_speed_tps") is not None else "—"),
-                        ("Cooldown", seconds_label(workload.get("cooldown_remaining_seconds")) if workload.get("cooldown_active") else "—"),
-                    ]
-                lines += [f"{icon} **{label} verifier**"] + code_block("VERIFIER", worker_rows, width=12)
-                if target == "oneplus":
+                    speed = f"{float(workload.get('last_speed_tps')):.2f} tok/s" if workload.get("last_speed_tps") is not None else "—"
+                    lines.append(f"⚡ `{speed}` · work `{float(workload.get('busy_minutes') or 0):.1f}/{float(workload.get('budget_minutes') or 90):.0f} min`")
                     ssh = oneplus_control.get("ssh") or {}
                     llama = oneplus_control.get("llama") or {}
-                    lines += code_block("ONEPLUS SSH / SERVER", [
-                        ("SSH", "Reachable" if ssh.get("reachable") else "Unavailable"),
-                        ("llama.cpp", "Running" if llama.get("running") else "Stopped / unavailable"),
-                        ("SSH error", self._telegram_trim(ssh.get("error") or "—", 65)),
-                    ], width=12)
+                    ssh_icon = "🟢" if ssh.get("reachable") else "🔴"
+                    llama_icon = "🟢" if llama.get("running") else "🔴"
+                    lines.append(f"🔌 SSH {ssh_icon} · llama.cpp {llama_icon}")
+                    if ssh.get("error"):
+                        lines.append(f"⚠️ SSH: {self._telegram_code(self._telegram_trim(ssh.get('error'), 100), 100)}")
+                lines.append("")
+            lines += footer("🚨 `/errors` details · 📊 `/status` overview")
             return "\n".join(lines).rstrip()
 
         if command == "/audit":
@@ -1604,54 +1606,67 @@ class Runtime:
                 name = str(job.get("output_filename") or job.get("source_filename") or job.get("result_dir") or jid)
                 name = name[:-4] if name.lower().endswith(".zip") else name
                 unresolved = int(audit.get("review_required") or 0)
+                text_required = int((audit.get("text") or {}).get("review_required") or 0)
+                vision_required = int(audit.get("vision_review_required") or 0)
+                recovery_required = int(audit.get("vision_evidence_recovery_required") or 0)
                 entries.append({
-                    "rank": 0 if unresolved else 1,
-                    "name": name,
-                    "unresolved": unresolved,
+                    "rank": 0 if unresolved else 1, "name": name, "unresolved": unresolved,
+                    "text": text_required, "vision": vision_required, "recovery": recovery_required,
                     "bypassed": bool(audit.get("bypassed_for_testing")),
                 })
             entries.sort(key=lambda item: (item["rank"], -item["unresolved"], str(item["name"]).casefold()))
-            per_page = 20
+            per_page = 10
             max_page = max(1, (len(entries) + per_page - 1) // per_page)
             page = min(requested_page(), max_page)
             start = (page - 1) * per_page
             shown_entries = entries[start:start + per_page]
-            lines = header("🔎 **Verifier audit**") + [f"Page `{page}` of `{max_page}` · highest workload first", ""]
+            lines = header("🔎 **Human review**") + [f"Page `{page}/{max_page}` · largest backlog first", ""]
             if not shown_entries:
-                lines += ["🟢 **No unresolved blocking audit items.**"]
+                lines += ["🟢 **No unresolved human-review items.**", ""]
             for item in shown_entries:
                 icon = "🟡" if item["unresolved"] else "🧪"
-                state = "Human decision required" if item["unresolved"] else "Testing bypass active"
-                lines += [f"{icon} **{state}** · {self._telegram_code(item['name'], 120)}"]
-                lines += code_block("AUDIT", [
-                    ("Unresolved", item["unresolved"]),
-                    ("Bypassed", "Yes" if item["bypassed"] else "No"),
-                ], width=12)
+                lines += [
+                    f"{icon} {self._telegram_code(item['name'], 120)}",
+                    f"📝 Text `{item['text']}` · 🖼 Vision `{item['vision']}` · 🧩 Recovery `{item['recovery']}`" + (" · 🧪 bypass" if item["bypassed"] else ""),
+                    "",
+                ]
             remaining = max(0, len(entries) - (start + len(shown_entries)))
             if remaining:
-                lines += [f"🔎 **{remaining} more audit book(s) not shown** — use `/audit {page + 1}`"]
+                lines += [f"➡️ `{remaining}` more · `/audit {page + 1}`", ""]
+            lines += footer("📝 `/textaudit` · 🖼 `/visionaudit` · 🔬 `/artifactaudit`")
             return "\n".join(lines).rstrip()
 
         if command == "/errors":
-            lines = header("🚨 **Errors & diagnostics**") + attention_block()
-            lines += code_block("FAILURES", [
-                ("Conversion", len(conversion_failed_rows)),
-                ("Stage 2A", len(stage2a_failed)),
-                ("Verification", verification_failed),
-                ("Stage 2C", len(stage2c_failed)),
-                ("Stage 3", len(stage3_failed)),
-                ("Audit backlog", audit_required),
-            ])
-            for target, label in (("pi5", "Pi5"), ("oneplus", "OnePlus")):
+            lines = header("🚨 **Errors & blockers**") + attention_block()
+            failures = [
+                ("📥", "Conversion", len(conversion_failed_rows)),
+                ("🧭", "Stage 2A", len(stage2a_failed)),
+                ("🤖", "Verification", verification_failed),
+                ("🧾", "Stage 2C", len(stage2c_failed)),
+                ("🧩", "Stage 3", len(stage3_failed)),
+                ("🔎", "Human review", audit_required),
+            ]
+            nonzero = [(icon, label, count) for icon, label, count in failures if count]
+            if nonzero:
+                lines += ["**Current blockers**"]
+                lines += [f"{icon} {label}: `{count}`" for icon, label, count in nonzero]
+                lines.append("")
+            else:
+                lines += ["🟢 No pipeline failures or audit blockers are currently recorded.", ""]
+            for target, label, icon in (("pi5", "Pi5", "🧠"), ("oneplus", "OnePlus", "📱")):
                 circuit = (worker_states.get(target) or {}).get("endpoint_circuit") or {}
-                lines += code_block(f"{label.upper()} VERIFIER", [
-                    ("Circuit", "Open" if circuit.get("open") else "Closed"),
-                    ("Failures", int(circuit.get("failure_count") or 0)),
-                    ("Outage", age_from_epoch(circuit.get("opened_at_epoch")) if circuit.get("open") else "—"),
-                    ("Last error", self._telegram_trim(circuit.get("last_error") or "—", 80)),
-                ], width=12)
-            lines += ["🌐 Open the web **Errors & diagnostics** page for row-level details and retry actions."]
+                if not circuit.get("open") and not int(circuit.get("failure_count") or 0) and not circuit.get("last_error"):
+                    continue
+                lines += [f"{icon} **{label} verifier**"]
+                lines.append(f"🔌 Circuit **{'Open' if circuit.get('open') else 'Closed'}** · failures `{int(circuit.get('failure_count') or 0)}`")
+                if circuit.get("open"):
+                    lines.append(f"⏱ Outage `{age_from_epoch(circuit.get('opened_at_epoch'))}`")
+                if circuit.get("last_error"):
+                    lines.append(f"⚠️ {self._telegram_code(self._telegram_trim(circuit.get('last_error'), 120), 120)}")
+                lines.append("")
+            lines += footer("🌐 Use the web **Errors & diagnostics** page for row-level retry actions.")
             return "\n".join(lines).rstrip()
+
 
         return "\n".join(help_lines)
 
@@ -2449,6 +2464,55 @@ async def rerun_postprocess_job(job_id: int) -> dict:
     return {"accepted": True, "stage": "quality_routing", "docling_reconversion": False}
 
 
+@app.post("/api/jobs/{job_id}/delete")
+async def delete_conversion_queue_item(job_id: int, request: DeleteBookRequest) -> dict:
+    """Remove a terminal conversion row that never became a managed book.
+
+    Typical use: an input manual was renamed after discovery, leaving a failed
+    FileMissing queue row. Existing source/output files are quarantined when
+    present, while already-missing files do not block cleanup.
+    """
+    if not request.confirm:
+        raise HTTPException(status_code=422, detail="Explicit delete confirmation is required.")
+    job = await runtime.store.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Queue item not found.")
+    if str(job.get("status") or "") not in {"failed", "completed"}:
+        raise HTTPException(status_code=409, detail="Only failed or completed queue items can be removed. Wait for active conversion work to finish first.")
+
+    try:
+        quarantine = await asyncio.to_thread(quarantine_conversion_job, runtime.config, job)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not quarantine the queue item files: {exc}") from exc
+
+    try:
+        deleted = await runtime.store.delete_terminal_job(job_id)
+    except RuntimeError as exc:
+        rollback_errors = await asyncio.to_thread(restore_quarantined_artifacts, quarantine)
+        detail = str(exc)
+        if rollback_errors:
+            detail += " File rollback also reported: " + "; ".join(rollback_errors)
+        raise HTTPException(status_code=409, detail=detail) from exc
+    except Exception as exc:
+        rollback_errors = await asyncio.to_thread(restore_quarantined_artifacts, quarantine)
+        detail = f"Queue deletion failed: {exc}"
+        if rollback_errors:
+            detail += " File rollback also reported: " + "; ".join(rollback_errors)
+        raise HTTPException(status_code=500, detail=detail) from exc
+    if deleted is None:
+        await asyncio.to_thread(restore_quarantined_artifacts, quarantine)
+        raise HTTPException(status_code=404, detail="Queue item disappeared before it could be deleted.")
+
+    runtime.events.notify("queue_item_deleted", filename=job.get("filename"), job_id=job_id)
+    return {
+        "deleted": True,
+        "conversion_job_id": job_id,
+        "filename": job.get("filename"),
+        "quarantine": quarantine,
+        "message": "Queue item removed. Existing source/output files were quarantined; already-missing files were simply cleared from history.",
+    }
+
+
 @app.post("/api/postprocess/jobs/{job_id}/delete")
 async def delete_book(job_id: int, request: DeleteBookRequest) -> dict:
     """Remove one book from the active pipeline without destroying source files.
@@ -2611,7 +2675,7 @@ async def stage2b_text_audit(
     verification_job_id: int | None = None,
 ) -> dict:
     """Read-only audit of completed/failed Text verifier source transcriptions."""
-    rows = await runtime.stage2b_store.list_results_raw("pi5", limit=max(1, min(int(limit), 5000)))
+    rows = await runtime.stage2b_store.list_results_raw("pi5", limit=5000)
     rows = [row for row in rows if str(_audit_json(row.get("source_json")).get("type") or "") != "picture"]
     if postprocess_job_id is not None:
         rows = [row for row in rows if int(row.get("postprocess_job_id") or 0) == int(postprocess_job_id)]
@@ -2651,9 +2715,15 @@ async def stage2b_text_audit(
                     "entry_id": entry.get("entry_id"),
                     "human_visual_decision": entry.get("human_visual_decision"),
                     "human_verified": bool(entry.get("human_verified")),
+                    "verification_verdict": entry.get("verification_verdict"),
                 }
 
         disposition = "failed" if row.get("status") == "failed" else str(correction.get("status") or "verified_original")
+        human_review_required = bool(
+            downstream
+            and not downstream.get("human_verified")
+            and str(downstream.get("verification_verdict") or "").upper() in {"LIKELY_CORRUPT", "UNCERTAIN"}
+        )
         jobs.append({
             "id": int(row.get("id") or 0),
             "postprocess_job_id": int(row.get("postprocess_job_id") or 0),
@@ -2694,6 +2764,7 @@ async def stage2b_text_audit(
             "disposition": disposition,
             "crop_image_url": f"/api/stage2b/jobs/{int(row.get('id') or 0)}/text-image",
             "downstream": downstream,
+            "human_review_required": human_review_required,
             "raw_docling_immutable": True,
         })
 
@@ -2705,6 +2776,8 @@ async def stage2b_text_audit(
         "pending": sum(1 for j in jobs if j.get("disposition") == "pending"),
         "safety_rejected": sum(1 for j in jobs if j.get("scope_guard") and j.get("scope_guard", {}).get("accepted") is False),
         "stage2c_applied": sum(1 for j in jobs if (j.get("downstream") or {}).get("status") == "applied"),
+        "human_review_required": sum(1 for j in jobs if j.get("human_review_required")),
+        "human_reviewed": sum(1 for j in jobs if (j.get("downstream") or {}).get("human_verified")),
     }
     books = sorted({str(job.get("book") or "") for job in jobs if str(job.get("book") or "")})
     wanted_book = str(book or "").strip()
@@ -2717,7 +2790,13 @@ async def stage2b_text_audit(
         if wanted_book and str(item.get("book") or "") != wanted_book:
             continue
         actual = "failed" if item.get("status") == "failed" else str(item.get("disposition") or "")
-        if wanted_outcome and actual != wanted_outcome:
+        if wanted_outcome == "human_review":
+            if not item.get("human_review_required"):
+                continue
+        elif wanted_outcome == "human_reviewed":
+            if not (item.get("downstream") or {}).get("human_verified"):
+                continue
+        elif wanted_outcome and actual != wanted_outcome:
             continue
         if wanted_query:
             request = item.get("request") or {}
@@ -4734,6 +4813,16 @@ async def stage2b_artifact_audit(postprocess_job_id: int | None = None, limit: i
         "stage2c_excluded": sum(1 for item in items if (item.get("downstream") or {}).get("status") == "excluded"),
         "rag_eligible_visuals": sum(1 for item in items if (item.get("downstream") or {}).get("rag_eligible") is True),
         "rag_excluded_visuals": sum(1 for item in items if item.get("downstream") and not (item.get("downstream") or {}).get("rag_eligible")),
+        "human_review_required": sum(1 for item in items if (
+            item.get("downstream")
+            and not (item.get("downstream") or {}).get("human_visual_decision")
+            and (
+                str((item.get("verification") or {}).get("verdict") or "").upper() == "UNCERTAIN"
+                or bool((item.get("downstream") or {}).get("unresolved"))
+                or str((item.get("downstream") or {}).get("status") or "").lower() == "pending"
+            )
+        )),
+        "human_reviewed": sum(1 for item in items if (item.get("downstream") or {}).get("human_visual_decision")),
     }
     if technical_only:
         items = [item for item in items if item.get("technical_candidate")]

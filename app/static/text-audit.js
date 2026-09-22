@@ -50,6 +50,18 @@ function outcomeLabel(job) {
   return "Pending / unresolved";
 }
 
+
+function reviewDecisionUrl(job, page) {
+  const params = new URLSearchParams({
+    job: String(job.postprocess_job_id),
+    entry: String(job.downstream?.entry_id || ""),
+    page: String(page ?? ""),
+  });
+  if ($("ta-outcome")?.value === "human_review") params.set("filter_state", "needs_review");
+  if ($("ta-book")?.value) params.set("filter_book", String(job.postprocess_job_id));
+  return `/review?${params}`;
+}
+
 function renderJob(job) {
   const request = job.request || {};
   const reconstruction = job.reconstruction || {};
@@ -97,7 +109,7 @@ function renderJob(job) {
         <div>${rawBlock("BEFORE anchors", request.before_anchors)}${rawBlock("AFTER anchors", request.after_anchors)}${rawBlock("Saved crop metadata", request.target_crop)}${rawBlock("Raw verifier response", job.raw_response)}</div>
         <div>${rawBlock("Source reconstruction", reconstruction)}${rawBlock("Scope / alignment guard", scope)}${rawBlock("Parsed verdict", job.parsed)}${rawBlock("Correction decision", correction)}${rawBlock("Critical-token safety", alignment)}</div>
       </div>
-      <div class="document-actions"><a class="mini-action" href="/api/stage2b/jobs/${job.id}/result" target="_blank" rel="noopener">Technical details JSON</a>${job.downstream?.entry_id && page !== "—" ? `<a class="mini-action primary-mini" href="/review?job=${encodeURIComponent(job.postprocess_job_id)}&entry=${encodeURIComponent(job.downstream.entry_id)}&page=${encodeURIComponent(page)}">Review / decide</a>` : ""}</div>
+      <div class="document-actions"><a class="mini-action" href="/api/stage2b/jobs/${job.id}/result" target="_blank" rel="noopener">Technical details JSON</a>${job.downstream?.entry_id && page !== "—" ? `<a class="mini-action primary-mini" href="${esc(reviewDecisionUrl(job, page))}">${job.human_review_required ? "Human review" : "Review / decide"}</a>` : ""}</div>
     </details>
   </article>`;
 }

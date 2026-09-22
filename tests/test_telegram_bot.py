@@ -124,7 +124,8 @@ async def test_telegram_text_audit_sends_one_card_then_next_after_decision(monke
     service._api = fake_api
     await service._handle(123, "/text audit")
     assert len(sent_photos) == 1
-    assert "Stop verify audit" in str(sent_photos[0][2])
+    assert "Stop review" in str(sent_photos[0][2])
+    assert len(sent_photos[0][2]["inline_keyboard"][0]) == 2  # decisions stay side-by-side on mobile
     assert service._audit_sessions[123]["current_message_id"] == 77
 
     await service._handle_callback({
@@ -205,7 +206,7 @@ async def test_telegram_stop_verify_audit_stops_future_cards(monkeypatch):
         "message": {"message_id": 88, "chat": {"id": 123}},
     })
     assert 123 not in service._audit_sessions
-    assert any("audit stopped" in text.lower() for text, _ in messages)
+    assert any("review stopped" in text.lower() for text, _ in messages)
 
 
 class _NoControlsConfig(_Config):
@@ -356,7 +357,7 @@ async def test_event_loop_marks_failure_as_critical_and_recovery_as_routine(monk
 
     service.send = fake_send
     await service._event_loop()
-    assert any("🔴 **ALERT**" in text and "Conversion failed" in text for text in sent)
+    assert any("🔴 **Conversion failed**" in text for text in sent)
     assert any("🟢" in text and "Pi5 verifier circuit recovered" in text for text in sent)
     assert all("Marine Pipeline Studio" not in text for text in sent)
 

@@ -4,8 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Artifact Audit · Docling Auto-Convert</title>
-<link rel="stylesheet" href="/assets/styles.css?v=2026.09.22.40.11E" />
-<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.22.40.11E" />
+<link rel="stylesheet" href="/assets/styles.css?v=2026.09.22.40.11G" />
+<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.22.40.11G" />
 </head>
 <body class="ui29">
 <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -69,11 +69,14 @@
       <div class="vision-audit-stat"><span>Not queued</span><strong id="aa-unrouted">0</strong></div>
       <div class="vision-audit-stat"><span>Stage 2C applied / excluded</span><strong id="aa-downstream">0 / 0</strong></div>
       <div class="vision-audit-stat"><span>RAG visual eligible / excluded</span><strong id="aa-rag">0 / 0</strong></div>
+      <div class="vision-audit-stat"><span>Human review required</span><strong id="aa-review-required">0</strong></div>
+      <div class="vision-audit-stat"><span>Human reviewed</span><strong id="aa-reviewed">0</strong></div>
     </section>
 
     <section class="panel vision-audit-filter-panel">
       <div class="vision-audit-filters">
         <label>Book<select id="aa-book"><option value="">All books</option></select></label>
+        <label>Decision<select id="aa-decision"><option value="">All decisions</option><option value="human_review">Human review</option><option value="human_reviewed">Human reviewed</option><option value="technical">Technical</option><option value="decorative">Decorative</option></select></label>
         <label>Status<select id="aa-status"><option value="">All statuses</option><option value="completed">Completed</option><option value="pending">Pending</option><option value="processing">Processing</option><option value="failed">Failed</option><option value="not_routed">Not queued</option></select></label>
         <label><input id="aa-technical-only" type="checkbox" /> Technical candidates only</label>
         <label>Search<input id="aa-search" type="search" placeholder="book, class, page, route, summary, visible text…" /></label>
@@ -86,7 +89,7 @@
     <nav class="vision-audit-pager" aria-label="Artifact audit pagination"><button class="secondary-button" id="aa-prev" type="button">Previous</button><span id="aa-page">Page 1</span><button class="secondary-button" id="aa-next" type="button">Next</button></nav>
   </main>
 </div>
-<script src="/assets/nav.js?v=2026.09.22.40.11E"></script>
-<script src="/assets/artifact-audit.js?v=2026.09.22.40.11E"></script>
+<script src="/assets/nav.js?v=2026.09.22.40.11G"></script>
+<script src="/assets/artifact-audit.js?v=2026.09.22.40.11G"></script>
 </body>
 </html>

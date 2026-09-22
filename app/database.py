@@ -307,6 +307,44 @@ class JobStore:
                 ).fetchall()
             ]
 
+    async def get_job(self, job_id: int) -> dict[str, Any] | None:
+        return await self._run(self._get_job_sync, job_id)
+
+    def _get_job_sync(self, job_id: int) -> dict[str, Any] | None:
+        with self._connection() as connection:
+            row = connection.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            return dict(row) if row else None
+
+    async def delete_terminal_job(self, job_id: int) -> dict[str, Any] | None:
+        """Delete a queue-only failed/completed conversion atomically.
+
+        Managed books must go through the book lifecycle endpoint so their
+        Stage 2/3/RAG state is removed consistently. Pending/processing rows are
+        intentionally rejected to avoid racing the conversion worker.
+        """
+        return await self._run(self._delete_terminal_job_sync, job_id)
+
+    def _delete_terminal_job_sync(self, job_id: int) -> dict[str, Any] | None:
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            if row is None:
+                return None
+            status = str(row["status"] or "")
+            if status not in {"failed", "completed"}:
+                raise RuntimeError("Only failed or completed queue items can be removed. Wait for active conversion work to finish first.")
+            try:
+                managed = connection.execute(
+                    "SELECT id FROM postprocess_jobs WHERE conversion_job_id = ? LIMIT 1",
+                    (job_id,),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                managed = None
+            if managed is not None:
+                raise RuntimeError("This conversion already belongs to a managed book. Delete the book through the book lifecycle instead.")
+            connection.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
+            return dict(row)
+
     async def counts(self) -> dict[str, int]:
         return await self._run(self._counts_sync)
 

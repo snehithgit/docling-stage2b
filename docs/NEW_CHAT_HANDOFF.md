@@ -1,6 +1,31 @@
+# `.40.11G` handoff
+
+`2026.09.22.40.11G` is the current implementation baseline.
+
+## `.40.11G` human-review + Telegram mobile behavior
+
+- Text, Vision and Artifact audit pages expose `Decision = Human review`; that view contains only unresolved items that still need a human decision.
+- Saving a human Vision/Artifact decision removes the item immediately from the Human review queue so the next unresolved item occupies the current slot.
+- Telegram `/status`, `/books`, `/workers`, `/audit`, `/errors`, `/start` and `/help` are phone-first plain-message layouts: no large preformatted `COPY CODE` cards for routine status.
+- Telegram removes redundant top-of-message timestamps/build strings; the Telegram message timestamp is the clock, and the build is shown only in start/help diagnostics.
+- `/start` is a short landing message; the native Telegram Menu is the command discovery surface.
+
+# `.40.11F` handoff
+
+`2026.09.22.40.11F` is the current implementation baseline.
+
+## `.40.11F` review / Telegram / queue behavior
+
+- Text, Vision and Artifact audit pages expose a **Decision → Human review** filter that contains only unresolved entries still requiring a human decision.
+- Under Human review, saving a decision removes the decided item and keeps the next unresolved item in the current slot; users no longer page through already-reviewed evidence.
+- Text Human review opens the existing authoritative one-by-one correction queue; Vision/Artifact decisions still use the existing Stage 2C visual-decision endpoint.
+- Telegram command output is condensed for phones: short headers, attention-first status, compact progress lines, abnormal worker diagnostics only, and side-by-side decision buttons.
+- Queue rows for terminal failed/completed conversions expose a 🗑 Delete action. Managed books reuse the canonical book-delete lifecycle; queue-only stale failures (including FileMissing after a manual rename) can be cleared even when the old file no longer exists.
+- Active pending/processing conversions remain undeletable to avoid racing the conversion worker.
+
 # `.40.11E` handoff
 
-`2026.09.22.40.11E` is the current implementation baseline.
+`2026.09.22.40.11E` was the previous implementation baseline.
 
 ## `.40.11E` Telegram behavior
 

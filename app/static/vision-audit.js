@@ -116,6 +116,13 @@ function fillBookFilter() {
   if (books.includes(previous)) select.value = previous;
 }
 
+function needsHumanReview(job) {
+  const c = job.classification || {};
+  const downstream = job.downstream || {};
+  if (job.status === "failed" || downstream.human_visual_decision) return false;
+  return (c.verdict || job.verdict) === "UNCERTAIN" || c.unresolved === true || downstream.status === "pending";
+}
+
 function applyFilters(resetPage=true) {
   const book = $("va-book").value;
   const verdict = $("va-verdict").value;
@@ -124,8 +131,10 @@ function applyFilters(resetPage=true) {
     if (requestedBookJob && String(job.postprocess_job_id) !== String(requestedBookJob)) return false;
     if (requestedJobId && !book && !verdict && !query && String(job.id) !== String(requestedJobId)) return false;
     if (book && job.book !== book) return false;
+    if (verdict === "HUMAN_REVIEW" && !needsHumanReview(job)) return false;
+    if (verdict === "HUMAN_REVIEWED" && !job.downstream?.human_visual_decision) return false;
     if (verdict === "FAILED" && job.status !== "failed") return false;
-    if (verdict && verdict !== "FAILED" && (job.classification?.verdict || job.verdict) !== verdict) return false;
+    if (verdict && !["FAILED", "HUMAN_REVIEW", "HUMAN_REVIEWED"].includes(verdict) && (job.classification?.verdict || job.verdict) !== verdict) return false;
     if (query) {
       const blob = [job.book, job.route_id, job.code, job.reason, job.source?.page, job.classification?.diagram_category, job.classification?.summary, ...(job.classification?.visible_text || []), ...(job.classification?.visible_objects || [])].join(" ").toLowerCase();
       if (!blob.includes(query)) return false;
@@ -200,8 +209,13 @@ document.addEventListener("click", async event => {
       ? "Human decision saved. Evidence recovery is running on the visual verifier; the full image and configured crops will be merged without changing your decision."
       : "Human visual decision saved. Downstream Stage 3/retrieval will rebuild from the authoritative audit state.", "completed");
     const previousPosition = auditPage;
+    const humanQueue = $("va-verdict").value === "HUMAN_REVIEW";
     await loadAudit();
-    if (filteredJobs.length > previousPosition) { auditPage = previousPosition + 1; renderPage(); window.scrollTo({top:0, behavior:"smooth"}); }
+    if (!humanQueue && filteredJobs.length > previousPosition) {
+      auditPage = previousPosition + 1;
+      renderPage();
+    }
+    window.scrollTo({top:0, behavior:"smooth"});
   } catch (error) { feedback(`Could not save decision: ${error.message}`, "warning"); button.disabled = false; }
 });
 

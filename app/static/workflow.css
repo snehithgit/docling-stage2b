@@ -152,7 +152,7 @@
 .vision-audit-stat span { display:block; color:var(--muted, #667085); font-size:.78rem; margin-bottom:6px; }
 .vision-audit-stat strong { font-size:1.35rem; }
 .vision-audit-filter-panel { margin-bottom:18px; }
-.vision-audit-filters { display:grid; grid-template-columns:minmax(180px,1fr) minmax(190px,.8fr) minmax(260px,1.5fr); gap:12px; }
+.vision-audit-filters { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; align-items:end; }
 .vision-audit-filters label { display:grid; gap:6px; font-size:.78rem; font-weight:700; color:var(--muted, #667085); }
 .vision-audit-filters input,.vision-audit-filters select { width:100%; min-height:42px; border:1px solid var(--border,#dfe3e8); border-radius:10px; background:var(--surface,#fff); color:inherit; padding:8px 10px; }
 .vision-audit-filter-footer { display:flex; justify-content:space-between; align-items:center; margin-top:12px; color:var(--muted,#667085); font-size:.82rem; }

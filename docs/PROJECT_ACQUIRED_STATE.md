@@ -1,3 +1,14 @@
+## .40.11G acquired state
+
+Current UI baseline includes focused unresolved Human review queues for Text/Vision/Artifact and compact phone-first Telegram monitoring messages. Do not reintroduce routine preformatted status tables that render as Telegram `COPY CODE` cards.
+
+## .40.11F acquired state
+
+- No new service/model/database dependency. Existing Stage 2C ledgers and delete/quarantine lifecycle remain authoritative.
+- Human-review filtering is a view over existing authoritative decision fields; it does not create a second approval state.
+- Queue-only deletion adds a terminal conversion cleanup path for failed/completed rows that never became a managed book; missing renamed files are allowed and recorded in the deletion manifest.
+- Telegram remains raw Bot API + the already-acquired `telegramify-markdown==1.2.0`.
+
 ## .40.11E acquired state
 
 - No new service/framework/database/model dependency beyond the already-acquired `telegramify-markdown==1.2.0`.

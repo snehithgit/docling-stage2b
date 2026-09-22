@@ -659,6 +659,14 @@ def test_4011b_review_queue_is_global_filterable_and_audits_are_one_by_one():
     assert "vision-audit-evidence-counts" in vision_js
     assert "Show extracted detail" in artifact_js
     assert "previousPosition" in vision_js  # human vision decisions auto-advance
+    assert 'value="human_review">Human review</option>' in review_html or "needs_review" in review_html
+    assert 'value="human_review">Human review</option>' in read("text-audit.html")
+    assert 'value="HUMAN_REVIEW">Human review</option>' in read("vision-audit.html")
+    assert 'id="aa-decision"' in read("artifact-audit.html")
+    assert 'value="human_review">Human review</option>' in read("artifact-audit.html")
+    assert "needsHumanReview(job)" in vision_js
+    assert "artifactNeedsHumanReview(job)" in artifact_js
+    assert ".artifact-decision" in artifact_js
     assert 'event.altKey && event.key === "ArrowRight"' in text_js
     assert 'event.altKey && event.key === "ArrowRight"' in vision_js
     assert 'event.altKey && event.key === "ArrowRight"' in artifact_js
@@ -677,3 +685,12 @@ def test_4011c_shared_attention_terminology_and_polling_feedback_are_consistent(
     assert "Vision verifier ·" in verification
     assert "Queue refresh failed" in dashboard
     assert "filtersLoaded ?" in review
+
+
+def test_queue_exposes_safe_delete_for_terminal_documents():
+    js = read("dashboard.js")
+    assert 'class="mini-action danger-action queue-delete"' in js
+    assert '/api/jobs/${conversionId}/delete' in js
+    assert '/api/postprocess/jobs/${stage2Id}/delete' in js
+    assert 'FileMissing after a manual rename' in js
+    assert 'window.confirm(message)' in js

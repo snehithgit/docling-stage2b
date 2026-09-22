@@ -70,6 +70,37 @@ async function rerunStage2(id, button) {
 }
 window.rerunStage2 = rerunStage2;
 
+async function deleteQueueItem(button) {
+  const conversionId = Number(button.dataset.deleteConversion || 0);
+  const stage2Id = Number(button.dataset.deleteBook || 0);
+  const name = button.dataset.deleteName || "this document";
+  const managed = stage2Id > 0;
+  const message = managed
+    ? `Delete "${name}" from the active pipeline?\n\nThis clears its conversion and downstream book state. Existing source/output/processed files are moved to _deleted_books quarantine folders, not permanently destroyed.`
+    : `Remove "${name}" from the conversion queue/history?\n\nUse this for stale failures such as FileMissing after a manual rename. If the old source/output file still exists, it is moved to _deleted_books; already-missing files do not block cleanup.`;
+  if (!window.confirm(message)) return;
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = "Deleting…";
+  try {
+    const endpoint = managed ? `/api/postprocess/jobs/${stage2Id}/delete` : `/api/jobs/${conversionId}/delete`;
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({confirm:true}),
+    });
+    let data = {};
+    try { data = await response.json(); } catch (_) {}
+    if (!response.ok) throw new Error(data.detail || `Delete failed (${response.status})`);
+    showDashboardFeedback(data.message || `Deleted ${name}.`, "success");
+    await refresh();
+  } catch (error) {
+    showDashboardFeedback(error.message, "error");
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
 function resultActions(job) {
   const parts = [];
   if (job.status === "failed") {
@@ -86,6 +117,11 @@ function resultActions(job) {
     } else {
       parts.push(`<span class="quality-muted">Quality analysis ${escapeHtml(job.stage2_status || "queued")}</span>`);
     }
+  }
+  const terminal = ["failed", "completed"].includes(String(job.status || ""));
+  const downstreamActive = job.stage2_job_id && ["pending", "processing"].includes(String(job.stage2_status || ""));
+  if (terminal && !downstreamActive) {
+    parts.push(`<button class="mini-action danger-action queue-delete" type="button" data-delete-conversion="${Number(job.id || 0)}" data-delete-book="${Number(job.stage2_job_id || 0)}" data-delete-name="${escapeHtml(job.filename || "Document")}" title="Remove this document from the active queue/history">🗑 Delete</button>`);
   }
   return parts.length ? `<div class="document-actions align-actions-right">${parts.join("")}</div>` : "—";
 }
@@ -112,6 +148,9 @@ function renderJobs(jobs) {
       <td data-label="Result" class="align-right">${resultActions(job)}</td>
     </tr>
   `).join("");
+  body.querySelectorAll(".queue-delete").forEach(button => {
+    button.addEventListener("click", () => deleteQueueItem(button));
+  });
 }
 
 function renderDocumentLibrary(documents = [], stage2bStatus = null) {
