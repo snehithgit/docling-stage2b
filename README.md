@@ -1,3 +1,27 @@
+## 2026.09.22.40.11C — Global human review queue & UI consistency
+
+- Extends the shared web text-review surface into a **global filtered queue** across books, with book/type/reason/state filters while retaining one-by-one Previous/Next, `N of M`, keyboard navigation and auto-advance.
+- Makes Text, Vision and Artifact audit queues consistently **one item at a time**; Vision decisions auto-advance and Vision/Artifact evidence is summarized first with extracted/raw detail collapsed.
+- Keeps Web and Telegram decisions on the existing authoritative Stage 2C decision functions; no alternate approval state or bulk-approval shortcut was introduced.
+- Uses provider-accurate labels such as **Text verifier · Pi5** / **Vision verifier · OnePlus** (or the configured provider), and standardizes the user-facing **Retrieval-Augmented Generation (RAG)** terminology.
+- Adds a shared **Needs attention** strip sourced from aggregated diagnostics, and surfaces dashboard queue-refresh failures instead of silently discarding them.
+- Preserves every `.40.11A` daily-use/safety behavior: managed Add Book, contextual testing bypass, confirmations, OnePlus circuit visibility, backend RAG cancellation and aggregated Errors & diagnostics.
+- Full details: `docs/RELEASE_VALIDATION_2026.09.22.40.11C.md`.
+- Source-tree regression suite: **529/529 tests pass**.
+
+## 2026.09.22.40.11A — Daily-use UI, managed Add Book, review queue & operator safety
+
+- Adds a real **Add book** flow: upload or URL → managed input → normal pipeline job, with no manual ZIP moving. The old `/convert` page remains an explicit one-off ZIP tool.
+- Moves the testing bypass into the **Stage 2C** book card and shows it only when audit gating is relevant.
+- Adds confirmations for Stage 2A reruns, machine deletion, OnePlus Stop/Restart, and large Artifact Audit queue actions.
+- Adds an evidence-first Vision Audit layout plus a shared-shell text review queue with Previous/Next, `N of M`, auto-advance, keyboard shortcuts, and table-cell row/header context.
+- Shows the actual Stage 2B OnePlus verifier circuit/outage state separately from SSH/server connectivity.
+- Makes grounded answer generation cancellable end-to-end with spinner + elapsed time; benchmark tooling is collapsed below the daily query flow.
+- Expands **Errors & diagnostics** across conversion, Stage 2A/2B/2C/3 and human-audit blockers.
+- Removes the duplicate Queue table and moves Quality raw JSON behind Details.
+- Full details: `docs/RELEASE_VALIDATION_2026.09.22.40.11A.md`.
+- Pre-package regression suite: **526/526 tests pass**.
+
 ## 2026.09.22.40.10.1 — Adaptive OnePlus workload protection
 
 - Uses real OnePlus inference time and measured llama.cpp generation throughput instead of an arbitrary request-count cooldown.

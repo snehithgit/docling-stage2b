@@ -1,4 +1,4 @@
-const PAGE_SIZE = 24;
+const PAGE_SIZE = 1;
 let artifactJobs = [];
 let filteredArtifacts = [];
 let artifactPage = 1;
@@ -82,10 +82,11 @@ function renderArtifact(job) {
         </div>
 
         <section><div class="vision-audit-section-label">Output summary</div><p>${esc(summary)}</p></section>
-        <section><div class="vision-audit-section-label">Visible text</div>${tagList(visibleText, "No visible text recorded")}</section>
         <section><div class="vision-audit-section-label">Pipeline state</div><p>${esc(downstreamText)}</p></section>
+        <div class="vision-audit-evidence-counts">${visibleText.length} visible label${visibleText.length === 1 ? "" : "s"} · ${verification.crops?.length || 0} crop${(verification.crops?.length || 0) === 1 ? "" : "s"}</div>
+        <details class="vision-audit-details extracted-detail"><summary>Show extracted detail</summary><section><div class="vision-audit-section-label">Visible text</div>${tagList(visibleText, "No visible text recorded")}</section></details>
 
-        <details class="vision-audit-details"><summary>More details</summary>
+        <details class="vision-audit-details"><summary>Technical details</summary>
           <div class="vision-audit-detail-grid">
             <div>
               ${rawBlock("Verification record", verification)}
@@ -138,7 +139,7 @@ function renderPage() {
   const start = (artifactPage - 1) * PAGE_SIZE;
   const rows = filteredArtifacts.slice(start, start + PAGE_SIZE);
   $("aa-count").textContent = `${filteredArtifacts.length.toLocaleString()} artifact${filteredArtifacts.length === 1 ? "" : "s"}`;
-  $("aa-page").textContent = `Page ${artifactPage} of ${pages}`;
+  $("aa-page").textContent = filteredArtifacts.length ? `${artifactPage} of ${filteredArtifacts.length}` : "0 of 0";
   $("aa-prev").disabled = artifactPage <= 1;
   $("aa-next").disabled = artifactPage >= pages;
   $("aa-results").innerHTML = rows.length ? rows.map(renderArtifact).join("") : `<div class="panel empty-state">No artifacts match these filters.</div>`;
@@ -219,6 +220,20 @@ $("aa-search").addEventListener("input", () => applyFilters());
 $("aa-clear").addEventListener("click", () => { history.replaceState({}, "", "/artifact-audit"); location.reload(); });
 $("aa-prev").addEventListener("click", () => { artifactPage -= 1; renderPage(); window.scrollTo({top: 0, behavior: "smooth"}); });
 $("aa-next").addEventListener("click", () => { artifactPage += 1; renderPage(); window.scrollTo({top: 0, behavior: "smooth"}); });
-$("aa-start").addEventListener("click", () => queueAction("/api/stage2b/artifact-audit/start-all", "aa-start", "Starting…"));
-$("aa-retry").addEventListener("click", () => queueAction("/api/stage2b/artifact-audit/retry-failed", "aa-retry", "Retrying…"));
+$("aa-start").addEventListener("click", () => {
+  if (window.confirm("Queue verification for all currently eligible technical artifacts?\n\nThis can add a large amount of Pi5/OnePlus work. Existing completed results are not discarded.")) {
+    queueAction("/api/stage2b/artifact-audit/start-all", "aa-start", "Starting…");
+  }
+});
+$("aa-retry").addEventListener("click", () => {
+  if (window.confirm("Retry all currently failed artifact-verification jobs?\n\nOnly failed jobs are re-queued.")) {
+    queueAction("/api/stage2b/artifact-audit/retry-failed", "aa-retry", "Retrying…");
+  }
+});
+document.addEventListener("keydown", event => {
+  const editing = ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName);
+  if (editing) return;
+  if ((event.altKey && event.key === "ArrowLeft") || event.key === "[") { event.preventDefault(); if (artifactPage > 1) { artifactPage -= 1; renderPage(); } }
+  if ((event.altKey && event.key === "ArrowRight") || event.key === "]") { event.preventDefault(); const pages = Math.max(1, Math.ceil(filteredArtifacts.length / PAGE_SIZE)); if (artifactPage < pages) { artifactPage += 1; renderPage(); } }
+});
 loadAudit();

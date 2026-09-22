@@ -12,6 +12,9 @@
   let pageState = null;
   let sourcePageReturnFocus = null;
   let requestedJobId = Number(new URLSearchParams(window.location.search).get('job')) || null;
+  let currentGenerationId = null;
+  let generationStartedAt = 0;
+  let generationElapsedTimer = null;
 
   function feedback(message, tone = '') {
     const el = $('retrieval-feedback');
@@ -204,6 +207,12 @@
   }
 
   async function deleteEquipment(id) {
+    const group = (retrievalStatus.equipment || []).find(item => item.equipment_id === id);
+    const name = group?.name || id;
+    const manuals = Number(group?.manual_count || group?.active_manual_count || 0);
+    if (!window.confirm(`Delete machine “${name}”?
+
+${manuals} manual${manuals === 1 ? '' : 's'} will be unassigned from this machine. The manuals themselves are not deleted.`)) return;
     try {
       const response = await fetch(`/api/retrieval/equipment/${encodeURIComponent(id)}`, {method:'DELETE'});
       const data = await response.json();
@@ -502,24 +511,101 @@
     else answerMessage(`Answer generated from ${sources.length} grounded evidence record${sources.length === 1 ? '' : 's'} using [S#]/[V#] citation labels.`, 'success');
   }
 
-  async function generateAnswer() {
-    if (!currentQuery || (!currentResults.length && !currentVisualResults.length)) return;
+  function generationElapsedText(seconds) {
+    const total = Math.max(0, Math.floor(Number(seconds || 0)));
+    const minutes = Math.floor(total / 60);
+    const secs = total % 60;
+    return `${minutes}:${String(secs).padStart(2, '0')} elapsed`;
+  }
+
+  function setGenerationUi(active, label='Generating answer…') {
     const button = $('generate-answer');
+    const cancel = $('cancel-answer');
+    const progress = $('generation-progress');
+    button.disabled = active;
+    button.textContent = active ? label : 'Generate answer';
+    cancel.hidden = !active;
+    cancel.disabled = false;
+    cancel.textContent = 'Cancel generation';
+    progress.hidden = !active;
+    $('answer-provider').disabled = active;
+    if (!active && generationElapsedTimer) {
+      clearInterval(generationElapsedTimer);
+      generationElapsedTimer = null;
+    }
+  }
+
+  function startElapsedClock() {
+    generationStartedAt = Date.now();
+    const tick = () => { $('generation-elapsed').textContent = generationElapsedText((Date.now() - generationStartedAt) / 1000); };
+    tick();
+    if (generationElapsedTimer) clearInterval(generationElapsedTimer);
+    generationElapsedTimer = setInterval(tick, 1000);
+  }
+
+  async function pollGeneration(requestId) {
+    while (currentGenerationId === requestId) {
+      const response = await fetch(`/api/retrieval/generate/status/${encodeURIComponent(requestId)}`, {cache:'no-store'});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Generation status could not be loaded');
+      if (data.elapsed_seconds != null) $('generation-elapsed').textContent = generationElapsedText(data.elapsed_seconds);
+      if (data.status === 'completed') {
+        renderGeneratedAnswer(data.result || {});
+        return;
+      }
+      if (data.status === 'failed') throw new Error(data.error || 'Answer generation failed');
+      if (data.status === 'cancelled') {
+        answerMessage('Generation cancelled. Retrieved evidence remains available above.', 'warning');
+        return;
+      }
+      $('generation-progress-title').textContent = data.status === 'cancelling' ? 'Stopping generation…' : 'Generating grounded answer…';
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+  }
+
+  async function generateAnswer() {
+    if (!currentQuery || (!currentResults.length && !currentVisualResults.length) || currentGenerationId) return;
     const provider = $('answer-provider').value;
     const label = {pi5:'Pi5', oneplus:'OnePlus', groq:'Groq'}[provider] || provider;
-    button.disabled = true; button.textContent = `Generating on ${label}…`;
     resetGeneratedAnswer();
-    answerMessage(`Sending the question and top retrieved chunks to ${label}. No provider fallback will be used.`);
+    setGenerationUi(true, `Generating on ${label}…`);
+    $('generation-progress-title').textContent = `Generating on ${label}…`;
+    startElapsedClock();
+    answerMessage(`Sending only the grounded evidence above to ${label}. You can cancel without losing the retrieved results.`);
     try {
-      const response = await fetch('/api/retrieval/generate', {
+      const response = await fetch('/api/retrieval/generate/start', {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({query: currentQuery, provider, top_k: Math.min(5, Math.max(1, currentResults.length + currentVisualResults.length)), postprocess_job_id: currentBookFilter, equipment_id: currentEquipmentFilter, retrieval_mode: currentRetrievalMode})
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || 'Answer generation failed');
-      renderGeneratedAnswer(data);
-    } catch (error) { answerMessage(error.message, 'error'); }
-    finally { button.disabled = false; button.textContent = 'Generate answer'; }
+      if (!response.ok) throw new Error(data.detail || 'Answer generation could not be started');
+      currentGenerationId = data.request_id;
+      await pollGeneration(currentGenerationId);
+    } catch (error) {
+      if (currentGenerationId) answerMessage(error.message, 'error');
+      else answerMessage(error.message, 'error');
+    } finally {
+      currentGenerationId = null;
+      setGenerationUi(false);
+    }
+  }
+
+  async function cancelGeneration() {
+    if (!currentGenerationId) return;
+    const button = $('cancel-answer');
+    button.disabled = true;
+    button.textContent = 'Stopping…';
+    $('generation-progress-title').textContent = 'Stopping generation…';
+    try {
+      const response = await fetch(`/api/retrieval/generate/cancel/${encodeURIComponent(currentGenerationId)}`, {method:'POST'});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Could not cancel generation');
+      answerMessage('Cancellation requested. Waiting for the generator connection to close…', 'warning');
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = 'Cancel generation';
+      answerMessage(error.message, 'error');
+    }
   }
 
   async function copyExternalPrompt() {
@@ -644,6 +730,7 @@
   $('retrieval-scope').addEventListener('change', () => { renderResults([], []); updateScopeControls(); });
   $('retrieval-search-form').addEventListener('submit', search);
   $('generate-answer').addEventListener('click', generateAnswer);
+  $('cancel-answer').addEventListener('click', cancelGeneration);
   $('copy-external-prompt').addEventListener('click', copyExternalPrompt);
   $('copy-generated-answer').addEventListener('click', async () => {
     if (!currentGeneratedAnswer) return;

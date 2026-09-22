@@ -1,6 +1,35 @@
+# `.40.11C` handoff
+
+`2026.09.22.40.11C` is the current implementation baseline.
+
+## `.40.11C` human-review/UI behavior
+
+- `/review` can operate as a global authoritative text-review queue across books, with book/type/reason/state filters.
+- Text, Vision and Artifact audit pages present one item at a time with Previous/Next and keyboard navigation; Vision decisions auto-advance.
+- Vision/Artifact decisions and summaries are shown before extracted/raw technical details, which remain collapsed by default.
+- Web and Telegram still commit decisions through the same Stage 2C human-authority functions.
+- Shared navigation can surface an aggregated **Needs attention** strip; dashboard queue-refresh failures are visible instead of silently ignored.
+- Verifier/RAG terminology is provider-accurate and consistent.
+- `.40.11A` safety behavior remains intact.
+
+# Previous handoff — `.40.11A`
+
+`2026.09.22.40.11A` was the previous implementation baseline.
+
+## `.40.11A` operator/UI behavior
+
+- Add books through `/add-book`; files/URLs are registered directly with the normal pipeline. `/convert` is one-off ZIP conversion only.
+- Testing bypass is contextual inside Stage 2C, not a permanent top-of-page control.
+- Web text review supports Previous/Next, progress, auto-advance, keyboard shortcuts and table-cell context; Telegram one-by-one audit remains available.
+- OnePlus page separates SSH/server state from Stage 2B verifier circuit/outage health.
+- RAG answer generation has elapsed progress and true backend cancellation.
+- Errors & diagnostics aggregates failures and audit blockers across the pipeline.
+
+# Previous handoff — `.40.10.1`
+
 # `.40.10.1` handoff
 
-`2026.09.22.40.10.1` is the current implementation baseline.
+`2026.09.22.40.10.1` was the implementation baseline for this previous handoff.
 
 ## `.40.10.1` OnePlus stability behavior
 

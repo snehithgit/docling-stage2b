@@ -4,8 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>My books · Docling Auto-Convert</title>
-<link rel="stylesheet" href="/assets/styles.css?v=2026.09.22.40.10.1" />
-<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.22.40.10.1" />
+<link rel="stylesheet" href="/assets/styles.css?v=2026.09.22.40.11C" />
+<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.22.40.11C" />
 </head>
 <body class="ui29">
 <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -41,14 +41,14 @@
         <h1>Books</h1>
         <p class="subtle">One place to see what is ready, what is running, and what needs attention.</p>
       </div>
-      <a class="primary-button" href="/queue">Add book</a>
+      <a class="primary-button" href="/add-book">Add book</a>
     </header>
 
     <section class="ui29-summary-grid" aria-label="Library summary">
-      <article><span>Books</span><strong id="summary-total">0</strong></article>
-      <article><span>Needs attention</span><strong id="summary-attention">0</strong></article>
-      <article><span>In progress</span><strong id="summary-active">0</strong></article>
-      <article><span>Ready</span><strong id="summary-ready">0</strong></article>
+      <button class="ui29-summary-card" type="button" data-summary-filter="all"><span>Books</span><strong id="summary-total">0</strong></button>
+      <button class="ui29-summary-card" type="button" data-summary-filter="attention"><span>Needs attention</span><strong id="summary-attention">0</strong></button>
+      <button class="ui29-summary-card" type="button" data-summary-filter="active"><span>In progress</span><strong id="summary-active">0</strong></button>
+      <button class="ui29-summary-card" type="button" data-summary-filter="done"><span>Ready</span><strong id="summary-ready">0</strong></button>
     </section>
 
     <div id="workflow-feedback" role="status" aria-live="polite" class="status-message" hidden></div>
@@ -76,6 +76,6 @@
     </details>
   </main>
 </div>
-<script src="/assets/nav.js?v=2026.09.22.40.10.1"></script><script src="/assets/workflow.js?v=2026.09.22.40.10.1"></script>
+<script src="/assets/nav.js?v=2026.09.22.40.11C"></script><script src="/assets/workflow.js?v=2026.09.22.40.11C"></script>
 </body></html>
 

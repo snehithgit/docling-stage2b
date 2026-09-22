@@ -110,3 +110,8 @@
   refresh();
   setInterval(refresh, 4000);
 })();
+
+  document.querySelectorAll('[data-summary-filter]').forEach(card => card.addEventListener('click', () => {
+    $('book-filter').value = card.dataset.summaryFilter || 'all';
+    render();
+  }));

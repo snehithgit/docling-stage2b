@@ -54,7 +54,8 @@
     const entries = review?.entries || [];
     const waiting = entries.filter(e => !e.human_verified && ['pending','proposed'].includes(String(e.status || '').toLowerCase()));
     if (!waiting.length) return `<div class="stage-note success-note">No unresolved text is waiting. Automatic applied corrections are already in the Stage 2C overlay and need no Save click.</div>`;
-    return `<div class="review-queue">${waiting.slice(0,8).map(e => `<div class="review-queue-row"><div><strong>Page ${esc(e.page ?? '—')} · ${esc(e.route_id || '')} · ${esc(e.verification_verdict || 'REVIEW')}</strong><p>${esc((e.original_text || '').slice(0,220))}</p></div><a class="primary-button compact-primary" href="/review?job=${jobId}&entry=${encodeURIComponent(e.entry_id)}&page=${encodeURIComponent(e.page || '')}">Review text</a></div>`).join('')}${waiting.length>8?`<p class="subtle">${waiting.length-8} more item(s) waiting.</p>`:''}</div>`;
+    const firstHref = `/review?job=${jobId}&entry=${encodeURIComponent(waiting[0].entry_id)}&page=${encodeURIComponent(waiting[0].page || '')}`;
+    return `<div class="review-queue"><div class="review-queue-summary"><strong>${waiting.length.toLocaleString()} text item${waiting.length === 1 ? '' : 's'} available for human review</strong><a class="secondary-button" href="${firstHref}">Open review queue</a></div>${waiting.slice(0,8).map(e => `<div class="review-queue-row"><div><strong>Page ${esc(e.page ?? '—')} · ${esc(e.route_id || '')} · ${esc(e.verification_verdict || 'REVIEW')}</strong><p>${esc((e.original_text || '').slice(0,220))}</p></div><a class="primary-button compact-primary" href="/review?job=${jobId}&entry=${encodeURIComponent(e.entry_id)}&page=${encodeURIComponent(e.page || '')}">Review</a></div>`).join('')}${waiting.length>8?`<p class="subtle">${waiting.length-8} additional item(s) are available through Open review queue.</p>`:''}</div>`;
   }
   function renderRail(states) {
     [...$('stage-rail').children].forEach((node, i) => {
@@ -62,29 +63,7 @@
       const st = states[i]; if (st) node.classList.add(st);
     });
   }
-  function renderAuditBypassPanel(stage2bDone, auditAvailable, auditBypassed, reviewRequired) {
-    const panel = $('book-audit-bypass-panel');
-    const title = $('book-audit-bypass-title');
-    const status = $('book-audit-bypass-status');
-    const button = $('book-audit-bypass-button');
-    if (!panel || !title || !status || !button) return;
 
-    const usable = auditAvailable && stage2bDone;
-    title.textContent = auditBypassed ? 'Verifier Audit bypass · ACTIVE' : 'Verifier Audit bypass';
-    button.textContent = auditBypassed ? 'Remove audit bypass' : 'Bypass audit for testing';
-    button.disabled = !usable || busy;
-    button.dataset.action = auditBypassed ? 'audit-enforce' : 'audit-bypass';
-
-    if (auditBypassed) {
-      panel.classList.add('active');
-      status.textContent = `Testing bypass is active. ${reviewRequired} unresolved audit item(s) remain unresolved and are not accepted.`;
-    } else {
-      panel.classList.remove('active');
-      status.textContent = usable
-        ? `${reviewRequired} unresolved audit item(s). Bypass is available for downstream testing only; it does not accept unresolved evidence.`
-        : 'Bypass is visible for every book but becomes usable only after normal verification and the required artifact sweep finish.';
-    }
-  }
 
   function render() {
     if (!book) return;
@@ -95,7 +74,6 @@
     const automationUnresolved = Number(review?.automation_unresolved ?? reviewRequired);
     const auditBypassed = auditGate?.bypassed_for_testing === true;
     const auditAvailable = auditGate?.available !== false && book.status === 'completed';
-    renderAuditBypassPanel(stage2bDone, auditAvailable, auditBypassed, reviewRequired);
     const textVerifier = stage2bStatus?.text_provider?.label || book.text_verifier_label || 'Text verifier';
     const visionVerifier = stage2bStatus?.vision_provider?.label || 'Vision verifier';
     const textCloudPaused = stage2bStatus?.text_provider?.provider === 'groq' && stage2bStatus?.text_provider?.quota?.paused === true;
@@ -148,12 +126,14 @@
       else if (stage2cBuilt) { cState='done'; cLabel='Finalized'; cActions=`<button class="secondary-button" data-action="stage2c">Rebuild Stage 2C</button>`; }
       else { cState='active'; cLabel=book.stage2c_auto_finalize?'Auto finalizing':'Ready'; cActions=`<button class="secondary-button" data-action="stage2c">Finalize now</button>`; }
     }
-    cActions += `<a class="secondary-button" href="/vision-audit">Open verifier audit</a>`;
+    cActions += `<a class="secondary-button" href="/vision-audit?book=${jobId}">Open verifier audit</a>`;
     const auditState = !auditAvailable ? 'Available after extraction' : auditBypassed ? 'BYPASSED FOR TESTING' : reviewRequired > 0 ? `${reviewRequired} unresolved` : 'Complete';
-    const auditNote = auditBypassed
-      ? `<div class="stage-note"><strong>Testing bypass is active.</strong> ${reviewRequired} unresolved audit item(s) remain unresolved; Stage 3 may continue using only accepted evidence. Remove the bypass to enforce the audit gate again.</div>`
-      : `<div class="stage-note">Verifier Audit remains a human gate for unresolved evidence before Stage 3. The testing bypass does not accept or resolve evidence; it only allows downstream testing. The testing bypass is always visible at the top of this Book workflow page and becomes usable once verification is complete.</div>`;
-    cards.push(stageCard('2C','Automatic corrections & enrichment','Apply READABLE source-image target transcriptions directly to the overlay. UNREADABLE targets keep original Docling text and do not block the book. Vision enrichment stays separate from extracted source facts.',cState,cLabel,`<div class="stage-summary-grid"><div><span>Audit unresolved</span><strong>${reviewRequired}</strong></div><div><span>Audit gate</span><strong>${esc(auditState)}</strong></div><div><span>Policy</span><strong>Keep original if unreadable</strong></div><div><span>Final state</span><strong>${esc(book.stage2c_status || 'not built')}</strong></div></div>${auditNote}`,cActions)); rail.push(cState==='done'?'done':cState);
+    const showBypass = stage2bDone && auditAvailable && (reviewRequired > 0 || auditBypassed);
+    const bypassControl = showBypass ? `<div class="stage-note ${auditBypassed ? 'warning-note' : ''}"><div class="stage-note-control"><div><strong>${auditBypassed ? 'Testing bypass is active' : 'Audit is blocking Stage 3'}</strong><p>${auditBypassed ? `${reviewRequired} unresolved audit item(s) remain unresolved and are not accepted.` : `${reviewRequired} unresolved audit item(s) remain. For testing only, you may continue downstream without accepting them.`}</p></div><button class="secondary-button" data-action="${auditBypassed ? 'audit-enforce' : 'audit-bypass'}" ${busy ? 'disabled' : ''}>${auditBypassed ? 'Remove testing bypass' : 'Bypass audit for testing'}</button></div></div>` : '';
+    const auditNote = reviewRequired > 0 && !auditBypassed
+      ? `<div class="stage-note">Review unresolved verifier evidence before building canonical chunks. Human decisions remain authoritative.</div>`
+      : auditBypassed ? '' : `<div class="stage-note success-note">Verifier Audit gate is complete for the current generation.</div>`;
+    cards.push(stageCard('2C','Correction finalization · Stage 2C','Apply safe source-image corrections and accepted visual evidence to the current overlay. Unreadable text keeps the original Docling content.',cState,cLabel,`<div class="stage-summary-grid"><div><span>Audit unresolved</span><strong>${reviewRequired}</strong></div><div><span>Audit gate</span><strong>${esc(auditState)}</strong></div><div><span>Policy</span><strong>Keep original if unreadable</strong></div><div><span>Final state</span><strong>${esc(book.stage2c_status || 'not built')}</strong></div></div>${auditNote}${bypassControl}`,cActions)); rail.push(cState==='done'?'done':cState);
 
     let chState='blocked', chLabel='Waiting', chActions='';
     if (stage2cBuilt) {
@@ -161,15 +141,15 @@
       else if (chunksBuilt) { chState='done'; chLabel='Ready'; chActions=`<a class="secondary-button" href="/api/postprocess/jobs/${jobId}/artifact/chunks.jsonl" target="_blank">Download chunks</a><button class="secondary-button" data-action="chunks">Rebuild chunks</button>`; }
       else { chState='active'; chLabel='Ready'; chActions=`<button class="primary-button" data-action="chunks">Build Hybrid chunks</button>`; }
     }
-    cards.push(stageCard('3','Docling HybridChunker','Build Stage 3 chunks only from the current Stage 2C overlay. Any upstream verification/correction change makes these chunks stale and they are rebuilt before RAG.',chState,chLabel,`<div class="stage-summary-grid"><div><span>Stage 2C</span><strong>${stage2cBuilt?'Current':'Not current'}</strong></div><div><span>Chunks</span><strong>${chunksBuilt?'Current':'Not current'}</strong></div></div>`,chActions)); rail.push(chState==='done'?'done':chState);
+    cards.push(stageCard('3','Canonical chunks · Stage 3','Build searchable technical chunks from the current correction overlay. Any upstream verification/correction change makes these chunks stale and they are rebuilt before RAG.',chState,chLabel,`<div class="stage-summary-grid"><div><span>Stage 2C</span><strong>${stage2cBuilt?'Current':'Not current'}</strong></div><div><span>Chunks</span><strong>${chunksBuilt?'Current':'Not current'}</strong></div></div>`,chActions)); rail.push(chState==='done'?'done':chState);
 
     let mState='blocked', mLabel='Waiting', mActions='';
     if (chunksBuilt) {
-      if (!machineAssigned) { mState='active'; mLabel='Assign machine'; mActions=`<a class="primary-button" href="/retrieval?job=${jobId}">Open Machine RAG setup</a>`; }
+      if (!machineAssigned) { mState='active'; mLabel='Assign machine'; mActions=`<a class="primary-button" href="/retrieval?job=${jobId}">Open RAG setup</a>`; }
       else if (!machineEmbeddingReady) { mState='active'; mLabel='Rebuilding'; mActions=`<a class="secondary-button" href="/retrieval?job=${jobId}">Open ${esc(pipeline.machine_name || 'machine')} RAG</a>`; }
-      else { mState='done'; mLabel='RAG ready'; mActions=`<a class="primary-button" href="/retrieval?job=${jobId}">Test Machine RAG</a><a class="secondary-button" href="/chunks?equipment=${encodeURIComponent(pipeline.machine_id || '')}">Browse chunks</a>`; }
+      else { mState='done'; mLabel='RAG ready'; mActions=`<a class="primary-button" href="/retrieval?job=${jobId}">Test RAG</a><a class="secondary-button" href="/chunks?equipment=${encodeURIComponent(pipeline.machine_id || '')}">Browse chunks</a>`; }
     }
-    cards.push(stageCard('4','Machine embeddings & RAG','All manuals assigned to one physical machine form one embedding corpus. This stage runs only after every assigned manual has current Stage 3 chunks.',mState,mLabel,`<div class="stage-summary-grid"><div><span>Machine</span><strong>${esc(pipeline.machine_name || 'Not assigned')}</strong></div><div><span>Machine embeddings</span><strong>${machineEmbeddingReady?'Current':machineAssigned?'Waiting / stale':'Not available'}</strong></div><div><span>Rows</span><strong>${Number(pipeline.machine_embedding_rows || 0).toLocaleString()}</strong></div></div>${pipeline.blocked_reason ? `<div class="stage-note">${esc(pipeline.blocked_reason)}</div>` : ''}`,mActions)); rail.push(mState==='done'?'done':mState);
+    cards.push(stageCard('4','Retrieval-Augmented Generation (RAG)','All manuals assigned to one physical machine form one embedding corpus. This stage runs only after every assigned manual has current Stage 3 chunks.',mState,mLabel,`<div class="stage-summary-grid"><div><span>Machine</span><strong>${esc(pipeline.machine_name || 'Not assigned')}</strong></div><div><span>Machine embeddings</span><strong>${machineEmbeddingReady?'Current':machineAssigned?'Waiting / stale':'Not available'}</strong></div><div><span>Rows</span><strong>${Number(pipeline.machine_embedding_rows || 0).toLocaleString()}</strong></div></div>${pipeline.blocked_reason ? `<div class="stage-note">${esc(pipeline.blocked_reason)}</div>` : ''}`,mActions)); rail.push(mState==='done'?'done':mState);
 
     $('stage-cards').innerHTML = cards.join('');
     renderRail(rail);

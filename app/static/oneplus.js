@@ -57,6 +57,13 @@ async function loadStatus() {
   statusInFlight = true;
   try {
     const d = await api("/api/oneplus-control/status");
+    let verifier = null;
+    try { verifier = await api("/api/stage2b/status"); }
+    catch (error) {
+      document.getElementById("verifier-state").textContent = "Status unavailable";
+      badge("verifier-badge", "paused", "Unknown");
+      document.getElementById("verifier-detail").textContent = `Could not read verifier health: ${error.message}`;
+    }
     const ssh = d.ssh || {};
     const llama = d.llama || {};
     setHeaderState(ssh.reachable);
@@ -88,6 +95,23 @@ async function loadStatus() {
       if (workload.cooldown_reason) pieces.push(String(workload.cooldown_reason));
     }
     document.getElementById("workload-detail").textContent = pieces.join(" · ");
+
+    const worker = verifier?.workers?.oneplus || {};
+    const circuit = worker.endpoint_circuit || {};
+    const circuitOpen = !!circuit.open;
+    const activeJob = worker.active_job_id;
+    const failureCount = Number(circuit.failure_count || 0);
+    const opened = Number(circuit.opened_at_epoch || 0);
+    const openedText = opened ? new Date(opened * 1000).toLocaleString() : '';
+    document.getElementById("verifier-state").textContent = circuitOpen ? "Outage / circuit open" : activeJob ? "Verifying" : "Healthy";
+    badge("verifier-badge", circuitOpen ? "paused" : "auto", circuitOpen ? "Open" : "Closed");
+    const verifierParts = [];
+    if (activeJob) verifierParts.push(`Active job #${activeJob}${worker.active_stage ? ` · ${worker.active_stage}` : ''}`);
+    verifierParts.push(`Circuit ${circuitOpen ? 'open' : 'closed'}`);
+    if (failureCount) verifierParts.push(`${failureCount} failure${failureCount === 1 ? '' : 's'}`);
+    if (openedText && circuitOpen) verifierParts.push(`since ${openedText}`);
+    if (circuit.last_error) verifierParts.push(String(circuit.last_error));
+    document.getElementById("verifier-detail").textContent = verifierParts.join(" · ");
 
     const canRun = ssh.reachable && d.password_configured && d.script_ready;
     document.getElementById("start-server").disabled = !canRun;
@@ -149,8 +173,8 @@ async function installScript() {
 
 document.getElementById("refresh-status").addEventListener("click", loadStatus);
 document.getElementById("start-server").addEventListener("click", ()=>runAction("start"));
-document.getElementById("restart-server").addEventListener("click", ()=>runAction("restart"));
-document.getElementById("stop-server").addEventListener("click", ()=>runAction("stop"));
+document.getElementById("restart-server").addEventListener("click", ()=>{ if (window.confirm("Restart the OnePlus llama.cpp server? Active inference will be interrupted and pending work will retry after recovery.")) runAction("restart"); });
+document.getElementById("stop-server").addEventListener("click", ()=>{ if (window.confirm("Stop the OnePlus llama.cpp server? Vision verification will pause until the server is started again.")) runAction("stop"); });
 document.getElementById("install-script").addEventListener("click", installScript);
 loadStatus();
 statusTimer = setInterval(loadStatus, 10000);

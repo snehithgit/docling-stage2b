@@ -4,10 +4,13 @@ from functools import lru_cache
 
 from contextlib import asynccontextmanager
 import asyncio
+import hashlib
 import json
 import re
 import time
+import uuid
 import zipfile
+from urllib.parse import unquote, urlparse
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -16,6 +19,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 import fitz
+import httpx
 
 from .archive import select_docling_document
 from .book_lifecycle import quarantine_book_artifacts, restore_quarantined_artifacts
@@ -188,6 +192,18 @@ class SettingsUpdate(BaseModel):
         return self
 
 
+
+
+class AddBookUrlRequest(BaseModel):
+    url: str = Field(min_length=8, max_length=2000)
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, value: str) -> str:
+        parsed = urlparse(value.strip())
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("Enter a valid http(s) document URL")
+        return value.strip()
 
 
 class WatcherAutoRunUpdate(BaseModel):
@@ -394,6 +410,80 @@ def _docling_review_context(zip_path: Path, source_index: int, expected_page: in
         "above": above,
         "target": row(source_index, target_item),
         "below": below,
+    }
+
+
+def _docling_table_review_context(zip_path: Path, table_index: int, cell_index: int) -> dict:
+    """Return immutable Docling table context for one table-cell correction."""
+    if table_index < 0 or cell_index < 0:
+        raise IndexError("Docling table/cell index must be non-negative")
+    if not zipfile.is_zipfile(zip_path):
+        raise ValueError("Converted output is not a ZIP archive")
+    with zipfile.ZipFile(zip_path) as archive:
+        document, json_member = select_docling_document(archive)
+    tables = document.get("tables") or []
+    if table_index >= len(tables):
+        raise IndexError(f"Table index {table_index} is outside the Docling document")
+    table = tables[table_index]
+    cells = ((table.get("data") or {}).get("table_cells") or [])
+    if cell_index >= len(cells):
+        raise IndexError(f"Cell index {cell_index} is outside table {table_index}")
+    target = cells[cell_index]
+
+    def number(cell: dict, key: str, default: int = 0) -> int:
+        try:
+            return int(cell.get(key))
+        except (TypeError, ValueError):
+            return default
+
+    def span(cell: dict) -> tuple[int, int, int, int]:
+        return (
+            number(cell, "start_row_offset_idx"),
+            number(cell, "end_row_offset_idx", number(cell, "start_row_offset_idx") + 1),
+            number(cell, "start_col_offset_idx"),
+            number(cell, "end_col_offset_idx", number(cell, "start_col_offset_idx") + 1),
+        )
+
+    rs, re_, cs, ce = span(target)
+    page = _docling_page_of(table) or _docling_page_of(target)
+
+    def overlaps(a0: int, a1: int, b0: int, b1: int) -> bool:
+        return max(a0, b0) < min(a1, b1)
+
+    def cell_row(index: int, cell: dict) -> dict:
+        a, b, x, y = span(cell)
+        return {
+            "index": index,
+            "page": _docling_page_of(cell) or page,
+            "label": "column header" if cell.get("column_header") else "row header" if cell.get("row_header") else "table cell",
+            "text": str(cell.get("text") or ""),
+            "row_start": a, "row_end": b, "col_start": x, "col_end": y,
+        }
+
+    header_cells: list[dict] = []
+    row_cells: list[dict] = []
+    for idx, cell in enumerate(cells):
+        if idx == cell_index:
+            continue
+        a, b, x, y = span(cell)
+        if cell.get("column_header") and overlaps(x, y, cs, ce):
+            header_cells.append(cell_row(idx, cell))
+        if overlaps(a, b, rs, re_):
+            row_cells.append(cell_row(idx, cell))
+    header_cells.sort(key=lambda item: (item["row_start"], item["col_start"], item["index"]))
+    row_cells.sort(key=lambda item: (item["col_start"], item["row_start"], item["index"]))
+    return {
+        "schema": "docling-human-table-review-context/v1",
+        "source": "raw_docling_json",
+        "docling_json_member": json_member,
+        "page": page,
+        "source_type": "table_cell",
+        "table_index": table_index,
+        "cell_index": cell_index,
+        "row_start": rs, "row_end": re_, "col_start": cs, "col_end": ce,
+        "headers": header_cells,
+        "target": cell_row(cell_index, target),
+        "row_cells": row_cells,
     }
 
 
@@ -1427,6 +1517,95 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Docling Auto-Convert", docs_url="/api/docs", redoc_url=None, lifespan=lifespan)
+
+# Managed Add-book ingestion writes into the same /input directory used by the
+# watcher. Serializing filename selection prevents two browser uploads from
+# racing to claim the same collision-safe destination.
+_add_book_lock = asyncio.Lock()
+_generation_jobs_lock = asyncio.Lock()
+_generation_jobs: dict[str, dict] = {}
+
+
+def _sha256_path(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _safe_source_filename(value: str, content_type: str | None = None) -> str:
+    name = Path(unquote(str(value or "").replace("\\", "/"))).name.strip().replace("\x00", "")
+    if not name:
+        name = "document.pdf" if str(content_type or "").lower().startswith("application/pdf") else "document.bin"
+    # Keep names practical for SMB/Linux/Windows while preserving useful manual titles.
+    if len(name) > 220:
+        suffix = Path(name).suffix
+        name = f"{Path(name).stem[: max(1, 220-len(suffix))]}{suffix}"
+    return name
+
+
+def _validate_supported_source_name(name: str) -> None:
+    supported = {str(item).lower() for item in runtime.config.supported_extensions}
+    if Path(name).suffix.lower() not in supported:
+        allowed = ", ".join(sorted(supported))
+        raise ValueError(f"Unsupported document type. Allowed extensions: {allowed}")
+
+
+def _choose_input_destination(input_dir: Path, requested_name: str, incoming_sha256: str) -> tuple[Path, bool]:
+    requested_name = _safe_source_filename(requested_name)
+    _validate_supported_source_name(requested_name)
+    candidate = input_dir / requested_name
+    if candidate.is_file():
+        try:
+            if _sha256_path(candidate) == incoming_sha256:
+                return candidate, True
+        except OSError:
+            pass
+    if not candidate.exists():
+        return candidate, False
+    stem, suffix = Path(requested_name).stem, Path(requested_name).suffix
+    for index in range(2, 10000):
+        candidate = input_dir / f"{stem} ({index}){suffix}"
+        if not candidate.exists():
+            return candidate, False
+    raise OSError("Could not allocate a unique filename in the input folder")
+
+
+async def _register_managed_input(temp_path: Path, requested_name: str, incoming_sha256: str) -> dict:
+    input_dir = Path(runtime.config.input_dir)
+    input_dir.mkdir(parents=True, exist_ok=True)
+    async with _add_book_lock:
+        destination, identical_existing = await asyncio.to_thread(
+            _choose_input_destination, input_dir, requested_name, incoming_sha256
+        )
+        if identical_existing:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        else:
+            await asyncio.to_thread(temp_path.replace, destination)
+        stat = await asyncio.to_thread(destination.stat)
+        job_id, created = await runtime.store.create_pending_once(
+            destination.name,
+            list(runtime.config.to_formats),
+            source_size=int(stat.st_size),
+            source_mtime_ns=int(stat.st_mtime_ns),
+            source_sha256=incoming_sha256,
+        )
+    runtime.events.notify("file_discovered")
+    watcher = await runtime.worker.control_status()
+    return {
+        "accepted": True,
+        "job_id": int(job_id),
+        "created": bool(created),
+        "filename": destination.name,
+        "duplicate": bool(identical_existing or not created),
+        "auto_run": bool(runtime.config.watcher_auto_run),
+        "watcher": watcher,
+        "next_action": "automatic" if runtime.config.watcher_auto_run else "start_queue",
+    }
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
 
 @app.get("/review")
@@ -1602,9 +1781,65 @@ async def set_watcher_auto_run(update: WatcherAutoRunUpdate) -> dict:
     }
 
 
+def _audit_diagnostic_row(result_dir: Path) -> dict:
+    try:
+        return verifier_audit_summary(result_dir, text_require_human=bool(runtime.config.stage2c_require_human_review))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return {"review_required": 0, "vision_review_required": 0, "vision_evidence_recovery_required": 0, "gate_status": "unknown"}
+
+
 @app.get("/api/errors")
 async def errors() -> dict:
-    return {"jobs": enrich_jobs(await runtime.store.list_jobs(limit=200, failures_only=True))}
+    conversion_jobs = enrich_jobs(await runtime.store.list_jobs(limit=200, failures_only=True))
+    raw_postprocess = await runtime.postprocess_store.list_jobs(limit=500)
+    postprocess_rows = await asyncio.to_thread(enrich_postprocess_jobs, raw_postprocess)
+    current_verification = await runtime.stage2b_store.list_jobs(limit=10000, current_only=True)
+    verification_failed = [row for row in current_verification if str(row.get("status") or "") == "failed"]
+    stage2a_failed = [row for row in postprocess_rows if str(row.get("status") or "") == "failed"]
+    stage2c_failed = [row for row in postprocess_rows if str(row.get("stage2c_status") or "") == "failed"]
+    stage3_failed = [row for row in postprocess_rows if str(row.get("stage3_status") or "") == "failed"]
+
+    audit_rows: list[dict] = []
+    for row in postprocess_rows:
+        if row.get("status") != "completed" or not row.get("result_dir"):
+            continue
+        result_dir = Path(runtime.config.processed_dir) / Path(str(row["result_dir"])).name
+        audit = await asyncio.to_thread(_audit_diagnostic_row, result_dir)
+        if int(audit.get("review_required") or 0) > 0:
+            audit_rows.append({
+                "postprocess_job_id": int(row.get("id") or 0),
+                "book": row.get("source_filename") or row.get("output_filename"),
+                "review_required": int(audit.get("review_required") or 0),
+                "vision_review_required": int(audit.get("vision_review_required") or 0),
+                "evidence_recovery_required": int(audit.get("vision_evidence_recovery_required") or 0),
+                "gate_status": audit.get("gate_status"),
+            })
+
+    workers = runtime.stage2b_worker.worker_state
+    circuits = {
+        name: dict((workers.get(name) or {}).get("endpoint_circuit") or {})
+        for name in ("pi5", "oneplus")
+    }
+    summary = {
+        "conversion_failed": len(conversion_jobs),
+        "stage2a_failed": len(stage2a_failed),
+        "verification_failed": len(verification_failed),
+        "stage2c_failed": len(stage2c_failed),
+        "stage3_failed": len(stage3_failed),
+        "audit_review_required": sum(int(row.get("review_required") or 0) for row in audit_rows),
+        "books_needing_audit": len(audit_rows),
+        "open_verifier_circuits": sum(1 for state in circuits.values() if state.get("open")),
+    }
+    return {
+        "jobs": conversion_jobs,
+        "summary": summary,
+        "stage2a_failed": stage2a_failed,
+        "verification_failed": verification_failed[:200],
+        "stage2c_failed": stage2c_failed,
+        "stage3_failed": stage3_failed,
+        "audit": audit_rows,
+        "circuits": circuits,
+    }
 
 
 @app.get("/api/settings")
@@ -1635,6 +1870,106 @@ async def download_output(filename: str):
     if safe_filename != filename or not path.is_file():
         raise HTTPException(status_code=404, detail="Output file not found.")
     return FileResponse(path, filename=safe_filename)
+
+
+@app.post("/api/books/add/file")
+async def add_book_file(file: UploadFile = File(...)) -> dict:
+    input_dir = Path(runtime.config.input_dir)
+    input_dir.mkdir(parents=True, exist_ok=True)
+    requested_name = _safe_source_filename(file.filename or "document", file.content_type)
+    try:
+        _validate_supported_source_name(requested_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    temp_path = input_dir / f"._incoming_{uuid.uuid4().hex}.part"
+    digest = hashlib.sha256()
+    total = 0
+    max_bytes = 1024 * 1024 * 1024  # 1 GiB safety ceiling; ordinary manuals are far smaller.
+    try:
+        with temp_path.open("wb") as handle:
+            while True:
+                chunk = await file.read(4 * 1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise HTTPException(status_code=413, detail="Document is larger than the 1 GiB managed-upload safety limit.")
+                digest.update(chunk)
+                handle.write(chunk)
+        if total <= 0:
+            raise HTTPException(status_code=422, detail="The uploaded file was empty.")
+        return await _register_managed_input(temp_path, requested_name, digest.hexdigest())
+    finally:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _url_download_name(url: str, content_disposition: str | None, content_type: str | None) -> str:
+    header = str(content_disposition or "")
+    match = re.search(r"filename\*=UTF-8''([^;]+)", header, re.I)
+    if not match:
+        match = re.search(r'filename="?([^";]+)', header, re.I)
+    if match:
+        return _safe_source_filename(match.group(1), content_type)
+    path_name = Path(unquote(urlparse(url).path)).name
+    if path_name and Path(path_name).suffix:
+        return _safe_source_filename(path_name, content_type)
+    if str(content_type or "").lower().startswith("application/pdf"):
+        return "document.pdf"
+    return _safe_source_filename(path_name or "document.bin", content_type)
+
+
+async def _download_book_url_to_temp(url: str) -> tuple[Path, str, str]:
+    input_dir = Path(runtime.config.input_dir)
+    input_dir.mkdir(parents=True, exist_ok=True)
+    temp_path = input_dir / f"._incoming_{uuid.uuid4().hex}.part"
+    digest = hashlib.sha256()
+    total = 0
+    max_bytes = 1024 * 1024 * 1024
+    timeout = httpx.Timeout(connect=20.0, read=300.0, write=60.0, pool=20.0)
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
+            async with client.stream("GET", url, headers={"User-Agent": "Docling-Auto-Convert/managed-ingest"}) as response:
+                response.raise_for_status()
+                name = _url_download_name(
+                    str(response.url), response.headers.get("content-disposition"), response.headers.get("content-type")
+                )
+                _validate_supported_source_name(name)
+                with temp_path.open("wb") as handle:
+                    async for chunk in response.aiter_bytes(4 * 1024 * 1024):
+                        if not chunk:
+                            continue
+                        total += len(chunk)
+                        if total > max_bytes:
+                            raise ValueError("Remote document is larger than the 1 GiB managed-download safety limit.")
+                        digest.update(chunk)
+                        handle.write(chunk)
+        if total <= 0:
+            raise ValueError("The remote document was empty.")
+        return temp_path, name, digest.hexdigest()
+    except Exception:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+@app.post("/api/books/add/url")
+async def add_book_url(payload: AddBookUrlRequest) -> dict:
+    try:
+        temp_path, name, sha256 = await _download_book_url_to_temp(payload.url)
+        return await _register_managed_input(temp_path, name, sha256)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=502, detail=f"Remote server returned HTTP {exc.response.status_code} while downloading the document.") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Could not download the document URL: {exc}") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not store the document in the managed input folder: {exc}") from exc
 
 
 @app.post("/api/convert/file")
@@ -2100,7 +2435,15 @@ def _audit_json(value: str | None) -> dict:
 
 
 @app.get("/api/stage2b/text-audit")
-async def stage2b_text_audit(postprocess_job_id: int | None = None, limit: int = 1000) -> dict:
+async def stage2b_text_audit(
+    postprocess_job_id: int | None = None,
+    limit: int = 1000,
+    offset: int = 0,
+    book: str = "",
+    outcome: str = "",
+    query: str = "",
+    verification_job_id: int | None = None,
+) -> dict:
     """Read-only audit of completed/failed Text verifier source transcriptions."""
     rows = await runtime.stage2b_store.list_results_raw("pi5", limit=max(1, min(int(limit), 5000)))
     rows = [row for row in rows if str(_audit_json(row.get("source_json")).get("type") or "") != "picture"]
@@ -2197,7 +2540,42 @@ async def stage2b_text_audit(postprocess_job_id: int | None = None, limit: int =
         "safety_rejected": sum(1 for j in jobs if j.get("scope_guard") and j.get("scope_guard", {}).get("accepted") is False),
         "stage2c_applied": sum(1 for j in jobs if (j.get("downstream") or {}).get("status") == "applied"),
     }
-    return {"schema": "docling-text-verifier-audit/v1", "summary": summary, "jobs": jobs}
+    books = sorted({str(job.get("book") or "") for job in jobs if str(job.get("book") or "")})
+    wanted_book = str(book or "").strip()
+    wanted_outcome = str(outcome or "").strip().lower()
+    wanted_query = str(query or "").strip().lower()
+    filtered = []
+    for item in jobs:
+        if verification_job_id is not None and int(item.get("id") or 0) != int(verification_job_id):
+            continue
+        if wanted_book and str(item.get("book") or "") != wanted_book:
+            continue
+        actual = "failed" if item.get("status") == "failed" else str(item.get("disposition") or "")
+        if wanted_outcome and actual != wanted_outcome:
+            continue
+        if wanted_query:
+            request = item.get("request") or {}
+            correction = item.get("correction") or {}
+            scope = item.get("scope_guard") or {}
+            blob = " ".join([
+                str(item.get("book") or ""), str(item.get("route_id") or ""), str(item.get("code") or ""),
+                str(item.get("reason") or ""), str(request.get("page") or ""), str(request.get("suspect_text") or ""),
+                str(correction.get("proposed_text") or ""), " ".join(str(value) for value in (scope.get("reasons") or [])),
+            ]).lower()
+            if wanted_query not in blob:
+                continue
+        filtered.append(item)
+    offset = max(0, int(offset))
+    page_limit = max(1, min(int(limit), 5000))
+    return {
+        "schema": "docling-text-verifier-audit/v2",
+        "summary": summary,
+        "books": books,
+        "total_filtered": len(filtered),
+        "offset": offset,
+        "limit": page_limit,
+        "jobs": filtered[offset:offset + page_limit],
+    }
 
 
 @app.get("/api/stage2b/jobs/{job_id}/text-image")
@@ -3170,8 +3548,7 @@ async def retrieval_prompt_bundle(update: RetrievalPromptExportRequest) -> dict:
     }
 
 
-@app.post("/api/retrieval/generate")
-async def retrieval_generate(update: RetrievalGenerateRequest) -> dict:
+async def _execute_retrieval_generation(update: RetrievalGenerateRequest) -> dict:
     top_k = min(int(update.top_k), int(runtime.config.rag_answer_max_sources))
     candidate_k = min(20, max(top_k, top_k * 4))
     results, searched_books, selected_books, scope = await _retrieval_results_for_question(
@@ -3193,6 +3570,10 @@ async def retrieval_generate(update: RetrievalGenerateRequest) -> dict:
             generated = await generate_grounded_answer(
                 update.provider, runtime.config, update.query, sources, quota_guard=runtime.groq_quota
             )
+    except asyncio.CancelledError:
+        # Cancellation is a real backend cancellation. It propagates through
+        # httpx/stream readers and releases the physical-provider lock.
+        raise
     except CloudQuotaPausedError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
     except ValueError as exc:
@@ -3200,8 +3581,6 @@ async def retrieval_generate(update: RetrievalGenerateRequest) -> dict:
     except (RuntimeError, OSError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except Exception as exc:
-        # httpx transport/status errors expose a concise useful message without
-        # leaking prompts, source text, API keys, or internal stack traces.
         if exc.__class__.__module__.startswith("httpx"):
             raise HTTPException(status_code=502, detail=f"Generator request failed: {exc}") from exc
         raise
@@ -3217,6 +3596,107 @@ async def retrieval_generate(update: RetrievalGenerateRequest) -> dict:
         "generator_used": True,
         "llm_calls": 1,
     }
+
+
+@app.post("/api/retrieval/generate")
+async def retrieval_generate(update: RetrievalGenerateRequest) -> dict:
+    # Backward-compatible synchronous endpoint used by older clients/tests.
+    return await _execute_retrieval_generation(update)
+
+
+def _prune_generation_jobs() -> None:
+    now = time.time()
+    removable = [
+        key for key, value in _generation_jobs.items()
+        if value.get("status") in {"completed", "failed", "cancelled"}
+        and now - float(value.get("finished_at_epoch") or value.get("created_at_epoch") or now) > 1800
+    ]
+    for key in removable:
+        _generation_jobs.pop(key, None)
+    if len(_generation_jobs) > 100:
+        ordered = sorted(_generation_jobs.items(), key=lambda item: float(item[1].get("created_at_epoch") or 0))
+        for key, value in ordered:
+            if len(_generation_jobs) <= 100:
+                break
+            if value.get("status") in {"completed", "failed", "cancelled"}:
+                _generation_jobs.pop(key, None)
+
+
+async def _run_generation_job(request_id: str, update: RetrievalGenerateRequest) -> None:
+    state = _generation_jobs[request_id]
+    state["status"] = "running"
+    state["started_at_epoch"] = time.time()
+    try:
+        state["result"] = await _execute_retrieval_generation(update)
+        state["status"] = "completed"
+    except asyncio.CancelledError:
+        state["status"] = "cancelled"
+        state["error"] = "Generation cancelled by user."
+    except HTTPException as exc:
+        state["status"] = "failed"
+        state["status_code"] = int(exc.status_code)
+        state["error"] = str(exc.detail)
+    except Exception as exc:
+        state["status"] = "failed"
+        state["status_code"] = 500
+        state["error"] = f"Answer generation failed: {exc}"
+    finally:
+        state["finished_at_epoch"] = time.time()
+        state["task"] = None
+
+
+@app.post("/api/retrieval/generate/start")
+async def retrieval_generate_start(update: RetrievalGenerateRequest) -> dict:
+    async with _generation_jobs_lock:
+        _prune_generation_jobs()
+        request_id = uuid.uuid4().hex
+        state = {
+            "request_id": request_id,
+            "status": "queued",
+            "created_at_epoch": time.time(),
+            "started_at_epoch": None,
+            "finished_at_epoch": None,
+            "provider": update.provider,
+            "query": update.query,
+            "result": None,
+            "error": None,
+            "status_code": None,
+            "task": None,
+        }
+        _generation_jobs[request_id] = state
+        task = asyncio.create_task(_run_generation_job(request_id, update), name=f"rag-generation-{request_id[:8]}")
+        state["task"] = task
+    return {"request_id": request_id, "status": "queued"}
+
+
+@app.get("/api/retrieval/generate/status/{request_id}")
+async def retrieval_generate_status(request_id: str) -> dict:
+    state = _generation_jobs.get(request_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Generation request was not found or has expired.")
+    now = time.time()
+    started = float(state.get("started_at_epoch") or state.get("created_at_epoch") or now)
+    payload = {
+        key: value for key, value in state.items()
+        if key not in {"task"}
+    }
+    payload["elapsed_seconds"] = max(0.0, (float(state.get("finished_at_epoch") or now) - started))
+    return payload
+
+
+@app.post("/api/retrieval/generate/cancel/{request_id}")
+async def retrieval_generate_cancel(request_id: str) -> dict:
+    state = _generation_jobs.get(request_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Generation request was not found or has expired.")
+    if state.get("status") in {"completed", "failed", "cancelled"}:
+        return {"request_id": request_id, "status": state.get("status"), "cancelled": state.get("status") == "cancelled"}
+    task = state.get("task")
+    state["status"] = "cancelling"
+    if isinstance(task, asyncio.Task) and not task.done():
+        task.cancel()
+        await asyncio.sleep(0)
+    return {"request_id": request_id, "status": state.get("status"), "cancelled": True}
 
 
 
@@ -3701,21 +4181,10 @@ async def postprocess_artifact(job_id: int, name: str):
     return FileResponse(path, filename=safe_name)
 
 
-@app.get("/api/postprocess/jobs/{job_id}/human-review")
-async def human_review_status(job_id: int) -> dict:
-    job = await runtime.postprocess_store.get_job(job_id)
-    if not job or not job.get("result_dir"):
-        raise HTTPException(status_code=404, detail="Post-process job not found.")
-    result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
-    summary = await asyncio.to_thread(
-        human_review_summary, result_dir, require_human=bool(runtime.config.stage2c_require_human_review)
-    )
-    ledger_path = result_dir / "correction_ledger.json"
-    try:
-        ledger = await asyncio.to_thread(_load_json_file, ledger_path)
-    except (OSError, json.JSONDecodeError):
-        ledger = {}
-    entries = []
+def _human_review_entries(result_dir: Path) -> list[dict]:
+    """Return current text-correction candidates using the same ledger state as Stage 2C/Telegram."""
+    ledger = _load_json_file(result_dir / "correction_ledger.json")
+    entries: list[dict] = []
     for entry in ledger.get("entries") or []:
         if entry.get("status") == "superseded" or entry.get("entry_type") != "text_correction":
             continue
@@ -3726,6 +4195,13 @@ async def human_review_status(job_id: int) -> dict:
             "route_id": entry.get("route_id"),
             "page": entry.get("page"),
             "source_index": entry.get("source_index"),
+            "source_type": entry.get("source_type") or "text",
+            "table_index": entry.get("table_index"),
+            "cell_index": entry.get("cell_index"),
+            "row_start": entry.get("row_start"),
+            "row_end": entry.get("row_end"),
+            "col_start": entry.get("col_start"),
+            "col_end": entry.get("col_end"),
             "original_text": entry.get("original_text") or "",
             "proposed_text": entry.get("proposed_text") or "",
             "status": entry.get("status"),
@@ -3738,7 +4214,97 @@ async def human_review_status(job_id: int) -> dict:
             "manual_crosschecks": entry.get("manual_crosschecks") or [],
         })
     entries.sort(key=lambda item: (bool(item.get("human_verified")), int(item.get("page") or 0), str(item.get("route_id") or "")))
-    return {**summary, "entries": entries}
+    return entries
+
+
+def _human_review_state_matches(entry: dict, state: str) -> bool:
+    state = str(state or "all").lower()
+    status = str(entry.get("status") or "").lower()
+    human = bool(entry.get("human_verified"))
+    if state in {"", "all"}:
+        return True
+    if state == "needs_review":
+        return not human
+    if state == "reviewed":
+        return human
+    if state == "applied":
+        return status == "applied"
+    if state == "original_kept":
+        return status == "rejected"
+    if state == "pending":
+        return status in {"pending", "proposed"}
+    return True
+
+
+@app.get("/api/postprocess/human-review")
+async def human_review_queue(
+    job_id: int | None = None,
+    source_type: str | None = None,
+    reason: str | None = None,
+    state: str = "all",
+) -> dict:
+    """Global one-by-one Web review queue over the authoritative correction ledgers."""
+    jobs = await runtime.postprocess_store.list_jobs(limit=2000)
+    all_entries: list[dict] = []
+    for job in jobs:
+        if not job.get("result_dir"):
+            continue
+        result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+        book = job.get("source_filename") or job.get("output_filename") or f"Book {job.get('id')}"
+        for entry in await asyncio.to_thread(_human_review_entries, result_dir):
+            all_entries.append({**entry, "postprocess_job_id": int(job["id"]), "book": book})
+
+    books = []
+    seen_books: set[int] = set()
+    reasons: set[str] = set()
+    types: set[str] = set()
+    for entry in all_entries:
+        jid = int(entry["postprocess_job_id"])
+        if jid not in seen_books:
+            books.append({"postprocess_job_id": jid, "book": entry.get("book") or f"Book {jid}"})
+            seen_books.add(jid)
+        reason_value = str(entry.get("reason_code") or entry.get("status_reason") or entry.get("verification_verdict") or "").strip()
+        if reason_value:
+            reasons.add(reason_value)
+        if entry.get("source_type"):
+            types.add(str(entry["source_type"]))
+
+    filtered = []
+    for entry in all_entries:
+        if job_id is not None and int(entry.get("postprocess_job_id") or 0) != int(job_id):
+            continue
+        if source_type and str(entry.get("source_type") or "") != source_type:
+            continue
+        entry_reason = str(entry.get("reason_code") or entry.get("status_reason") or entry.get("verification_verdict") or "")
+        if reason and entry_reason != reason:
+            continue
+        if not _human_review_state_matches(entry, state):
+            continue
+        filtered.append(entry)
+
+    filtered.sort(key=lambda item: (bool(item.get("human_verified")), str(item.get("book") or "").lower(), int(item.get("page") or 0), str(item.get("route_id") or "")))
+    books.sort(key=lambda item: str(item.get("book") or "").lower())
+    return {
+        "schema": "docling-human-review-queue/v1",
+        "total": len(all_entries),
+        "total_filtered": len(filtered),
+        "entries": filtered,
+        "facets": {"books": books, "source_types": sorted(types), "reasons": sorted(reasons)},
+    }
+
+
+@app.get("/api/postprocess/jobs/{job_id}/human-review")
+async def human_review_status(job_id: int) -> dict:
+    job = await runtime.postprocess_store.get_job(job_id)
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Post-process job not found.")
+    result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+    summary = await asyncio.to_thread(
+        human_review_summary, result_dir, require_human=bool(runtime.config.stage2c_require_human_review)
+    )
+    entries = await asyncio.to_thread(_human_review_entries, result_dir)
+    conversion = await runtime.postprocess_store.get_conversion_job(int(job.get("conversion_job_id") or job_id))
+    return {**summary, "book": (conversion or {}).get("filename") or job.get("source_filename") or job.get("output_filename"), "entries": entries}
 
 
 @app.get("/api/postprocess/jobs/{job_id}/corrections/{entry_id}/docling-context")
@@ -3761,10 +4327,6 @@ async def human_correction_docling_context(job_id: int, entry_id: str):
     if not entry or entry.get("entry_type") != "text_correction":
         raise HTTPException(status_code=404, detail="Text correction entry not found.")
     try:
-        source_index = int(entry.get("source_index"))
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=422, detail="Correction entry has no Docling text index.")
-    try:
         expected_page = int(entry.get("page")) if entry.get("page") is not None else None
     except (TypeError, ValueError):
         expected_page = None
@@ -3774,7 +4336,19 @@ async def human_correction_docling_context(job_id: int, entry_id: str):
     if not converted_name or not zip_path.is_file():
         raise HTTPException(status_code=404, detail="Converted Docling ZIP is not available.")
     try:
-        context = await asyncio.to_thread(_docling_review_context, zip_path, source_index, expected_page, 3)
+        if str(entry.get("source_type") or "") == "table_cell":
+            try:
+                table_index = int(entry.get("table_index"))
+                cell_index = int(entry.get("cell_index"))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Correction entry has no Docling table/cell index") from exc
+            context = await asyncio.to_thread(_docling_table_review_context, zip_path, table_index, cell_index)
+        else:
+            try:
+                source_index = int(entry.get("source_index"))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Correction entry has no Docling text index") from exc
+            context = await asyncio.to_thread(_docling_review_context, zip_path, source_index, expected_page, 3)
     except (OSError, ValueError, IndexError, zipfile.BadZipFile) as exc:
         raise HTTPException(status_code=422, detail=f"Could not read Docling review context: {exc}") from exc
 
@@ -4114,6 +4688,11 @@ async def dashboard():
 @app.get("/errors")
 async def error_log():
     return FileResponse(STATIC_DIR / "errors.html")
+
+
+@app.get("/add-book")
+async def add_book_page():
+    return FileResponse(STATIC_DIR / "add-book.html")
 
 
 @app.get("/convert")

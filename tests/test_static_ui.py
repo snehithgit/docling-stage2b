@@ -153,13 +153,16 @@ def test_oneplus_server_action_buttons_have_responsive_grid_css():
     assert ".danger-outline" in css
 
 
-def test_overview_centralizes_progression_in_book_workflow():
+def test_queue_page_is_single_source_and_add_book_is_discoverable():
     html = read("index.html")
+    workflow = read("workflow.html")
     js = read("dashboard.js")
-    assert "Processed library" in html
-    assert 'id="documents-body"' in html
-    assert "/api/documents" in js
-    assert 'href="/book?job=${doc.id}"' in js
+    nav = read("nav.js")
+    assert "Advanced document table" not in html
+    assert 'id="documents-body"' not in html
+    assert "/api/documents" not in js
+    assert 'href="/add-book"' in workflow
+    assert 'href = "/add-book"' in nav or 'href="/add-book"' in nav or "'/add-book'" in nav
     assert "Build Stage 2C" not in js
     assert "Build chunks" not in js
 
@@ -171,16 +174,18 @@ def test_quality_page_is_diagnostic_and_links_back_to_book_workflow():
     assert "/api/stage3/books/${id}/build" not in js
 
 
-def test_book_workflow_uses_automatic_stage2c_and_explicit_audit_gate():
+def test_book_workflow_uses_automatic_stage2c_and_contextual_audit_gate():
     html = read("book.html")
     js = read("book.js")
     assert "Hybrid" in html
-    assert "Automatic corrections & enrichment" in js
-    assert "Verifier Audit remains a human gate" in js
+    assert "Correction finalization · Stage 2C" in js
+    assert "Audit is blocking Stage 3" in js
     assert "Keep original if unreadable" in js
     assert "Build Hybrid chunks" in js
     assert "/api/postprocess/jobs/${jobId}/human-review" in js
     assert "stage2c_auto_finalize" in js
+    assert 'id="book-audit-bypass-panel"' not in html
+    assert "showBypass = stage2bDone" in js
 
 
 def test_verification_exposes_manual_crossover_and_optional_audit():
@@ -205,30 +210,28 @@ def test_frontend_assets_and_badge_match_release_version():
     assert f'const version = "{APP_VERSION}"' in read("nav.js")
 
 
-def test_review_page_uses_raw_docling_neighbor_context_for_manual_correction():
+def test_review_page_uses_shared_shell_queue_and_docling_context():
     html = read("review.html")
     js = read("review.js")
     css = read("review.css")
-    assert "RAW DOCLING READING ORDER" in html
-    assert "TEXT ABOVE" in html
-    assert "OCR TARGET BLOCK" in html
-    assert "TEXT BELOW" in html
-    assert "Not Pi5" in html
-    assert "Correction text" in html
-    assert 'id="use-suggestion"' not in html
-    assert 'id="reset"' in html
+    assert 'class="app-shell"' in html
+    assert '/assets/nav.js?' in html
+    assert "RAW DOCLING SOURCE" in html
+    assert 'id="queue-progress"' in html
+    assert 'id="queue-prev"' in html and 'id="queue-next"' in html
+    assert "Table row and header context" in js
     assert "/docling-context" in js
-    assert '$("correction").value = rawTarget' in js
+    assert '$(' + '"correction"' + ').value = rawTarget' in js
     assert "diffTokens" in js
-    assert "120000" in js  # bounded diff work for unexpectedly large OCR spans
+    assert "120000" in js
     assert 'save("apply")' in js
     assert "/corrections/${encodeURIComponent(entryId)}" in js
     assert ".docling-neighbor" in css
-    assert ".diff-removed" in css
-    assert ".diff-added" in css
+    assert ".diff-removed" in css and ".diff-added" in css
     assert 'id="back-workflow"' in html
     assert '/book?job=${encodeURIComponent(job)}' in js
-    assert "Original text is correct" in html
+    assert "Keep original" in html
+    assert "Not Pi5" not in html
 
 
 def test_book_stage3_completed_state_uses_pipeline_freshness_and_machine_rag_stage():
@@ -238,17 +241,19 @@ def test_book_stage3_completed_state_uses_pipeline_freshness_and_machine_rag_sta
     assert "pipeline.machine_embedding_ready === true" in js
     assert "Download chunks" in js
     assert "Rebuild chunks" in js
-    assert "Machine embeddings & RAG" in js
-    assert "Machine RAG" in html
+    assert "Retrieval-Augmented Generation (RAG)" in js
+    assert "<strong>RAG</strong>" in html
 
 
-def test_review_keeps_optional_manual_override_surface():
+def test_review_keeps_human_override_surface_and_auto_advance():
     html = read("review.html")
     js = read("review.js")
-    assert "RAW DOCLING READING ORDER" in html
-    assert "Save manual override" in html
-    assert "Original text is correct" in html
+    assert "HUMAN DECISION" in html
+    assert "Apply human correction" in html
+    assert "Keep original" in html
     assert "/corrections/${encodeURIComponent(entryId)}" in js
+    assert "Opening the next review item" in js
+    assert "Ctrl+Enter" in html
 
 def test_cloud_workflow_exposes_quota_pause_independently_from_audit_gate():
     html = read("book.html")
@@ -258,7 +263,7 @@ def test_cloud_workflow_exposes_quota_pause_independently_from_audit_gate():
     assert 'id="book-quota-alert"' in html
     assert 'id="cloud-quota-alert"' in verification_html
     assert "Cloud quota paused" in js
-    assert "Verifier Audit remains a human gate" in js
+    assert "Audit is blocking Stage 3" in js
     assert "Groq requests are paused before the configured safety reserve" in verification_js
     assert "queued Groq routes remain pending" in verification_js
 
@@ -305,9 +310,7 @@ def test_verification_exposes_persistent_groq_usage_audit_table():
 
 
 def test_review_auto_applied_correction_needs_no_save_click():
-    html = read("review.html")
     js = read("review.js")
-    assert "Automatic source-image corrections are applied without a Save click" in html
     assert "Already applied automatically to the Stage 2C overlay. No manual Save is required." in js
     assert "status === 'applied' && !humanVerified" in js
 
@@ -319,13 +322,14 @@ def test_vision_verifier_audit_page_is_read_only_and_evidence_first():
     assert "Verifier audit" in html
     assert "Human audit gate" in html
     assert "Technical / Decorative" in html
-    assert "Bypass selected book audit for testing" in html
+    assert "Bypass selected book audit for testing" not in html
+    assert "Show extracted detail" in js
     assert "/api/stage2b/vision-audit?limit=5000" in js
     assert "/vision-image?region=full" not in js  # URLs come from the audit API, not guessed client-side
     assert "Exact full image sent" in js
-    assert "Why Stage 2A sent it" in js
-    assert "Vision decision" in js
-    assert "What the pipeline did" in js
+    assert "Why it was checked" in js
+    assert "Pipeline" in js
+    assert "Result" in js
     assert "Exact full-image prompt" in js
     assert "Raw crop response" in js
     assert "Recover evidence" in js
@@ -347,7 +351,8 @@ def test_verifier_audit_is_unified_and_text_audit_is_read_only():
     assert "Verifier audit" in text_html
     assert 'href="/text-audit"' in text_html and 'href="/vision-audit"' in text_html
     assert "Exact target crop sent" in text_js
-    assert "/api/stage2b/text-audit?limit=5000" in text_js
+    assert "/api/stage2b/text-audit?${params}" in text_js
+    assert "limit: String(PAGE_SIZE)" in text_js
     assert "/api/stage2b/jobs/${job.id}/result" in text_js
     assert "Verifier audit" in vision_html
     assert 'href="/text-audit"' in vision_html and 'href="/vision-audit"' in vision_html
@@ -379,7 +384,7 @@ def test_primary_workspace_pages_link_to_rag_quality():
 def test_rag_quality_page_keeps_search_first_and_adds_explicit_grounded_generation():
     html = read("retrieval.html")
     js = read("retrieval.js")
-    assert "Machine RAG" in html
+    assert "Retrieval-Augmented Generation (RAG)" in html
     assert "Generate only from the evidence above" in html
     assert 'id="prepare-index"' in html
     assert 'id="retrieval-query"' in html
@@ -389,10 +394,13 @@ def test_rag_quality_page_keeps_search_first_and_adds_explicit_grounded_generati
     assert '<option value="oneplus">OnePlus · local</option>' in html
     assert '<option value="groq">Groq · cloud</option>' in html
     assert 'id="generate-answer"' in html
+    assert 'id="cancel-answer"' in html
+    assert 'id="generation-progress"' in html
     assert 'id="copy-external-prompt"' in html
     assert "No automatic fallback" in html
     assert "/api/retrieval/search" in js
-    assert "/api/retrieval/generate" in js
+    assert "/api/retrieval/generate/start" in js
+    assert "/api/retrieval/generate/cancel/" in js
     assert "/api/retrieval/prompt-bundle" in js
     assert "/api/retrieval/reindex-all" in js
     assert "/api/retrieval/benchmark/run" in js
@@ -538,7 +546,7 @@ def test_navigation_injects_chunk_viewer_and_page_guidance():
     css = read("styles.css")
     assert "Chunk Viewer" in js
     assert "workspace-guide" in js
-    assert "Machine-scoped retrieval" in js
+    assert "Retrieval-Augmented Generation (RAG)" in js
     assert ".workspace-guide" in css
 
 
@@ -581,14 +589,14 @@ def test_dashboard_recent_documents_renderer_is_defensive():
     assert 'renderJobs(data.jobs);' in js
 
 
-def test_book_workflow_always_exposes_audit_testing_bypass_control():
+def test_book_workflow_places_testing_bypass_contextually_in_stage2c():
+    html = read("book.html")
     js = read("book.js")
     assert "Bypass audit for testing" in js
-    assert "Remove audit bypass" in js
-    assert "/api/postprocess/jobs/${jobId}/verifier-audit/bypass" in js
-    assert "window.confirm" in js
-    assert "They are NOT accepted" in js
-    assert "always visible at the top of this Book workflow page" in js
+    assert "Remove testing bypass" in js
+    assert 'id="book-audit-bypass-panel"' not in html
+    assert "showBypass = stage2bDone" in js
+    assert "Audit is blocking Stage 3" in js
 
 
 def test_book_workflow_exposes_safe_delete_book_control():
@@ -600,6 +608,72 @@ def test_book_workflow_exposes_safe_delete_book_control():
     assert "_deleted_books" in js
     assert "active database history will be deleted" in js
     html = read("book.html")
-    assert 'id="book-audit-bypass-panel"' in html
-    assert 'id="book-audit-bypass-button"' in html
-    assert "Bypass audit for testing" in html
+    assert 'id="book-audit-bypass-panel"' not in html
+    assert 'id="book-audit-bypass-button"' not in html
+    assert "Bypass audit for testing" in js
+
+
+def test_managed_add_book_ui_registers_normal_pipeline_job():
+    html = read("add-book.html")
+    js = read("add-book.js")
+    workflow = read("workflow.html")
+    assert "Add a book" in html
+    assert "/api/books/add/file" in js
+    assert "/api/books/add/url" in js
+    assert "normal conversion pipeline" in html
+    assert 'href="/add-book"' in workflow
+    assert "one-off ZIP only" in read("convert.js")
+
+
+def test_oneplus_page_shows_verifier_circuit_health_and_confirms_server_stop_restart():
+    html = read("oneplus.html")
+    js = read("oneplus.js")
+    assert "Vision verifier · OnePlus" in html
+    assert "/api/stage2b/status" in js
+    assert "endpoint_circuit" in js
+    assert "window.confirm" in js
+
+
+def test_destructive_or_expensive_ui_actions_are_confirmed():
+    assert "window.confirm" in read("quality.js")
+    assert "window.confirm" in read("dashboard.js")
+    assert "window.confirm" in read("artifact-audit.js")
+    assert "Delete machine" in read("retrieval.js")
+
+
+
+def test_4011b_review_queue_is_global_filterable_and_audits_are_one_by_one():
+    review_html = read("review.html")
+    review_js = read("review.js")
+    text_js = read("text-audit.js")
+    vision_js = read("vision-audit.js")
+    artifact_js = read("artifact-audit.js")
+
+    for control in ["review-filter-book", "review-filter-type", "review-filter-reason", "review-filter-state"]:
+        assert f'id="{control}"' in review_html
+    assert "/api/postprocess/human-review?${params}" in review_js
+    assert "Technical reason code" in review_html
+    assert 'const PAGE_SIZE = 1;' in text_js
+    assert 'const PAGE_SIZE = 1;' in vision_js
+    assert 'const PAGE_SIZE = 1;' in artifact_js
+    assert "vision-audit-evidence-counts" in vision_js
+    assert "Show extracted detail" in artifact_js
+    assert "previousPosition" in vision_js  # human vision decisions auto-advance
+    assert 'event.altKey && event.key === "ArrowRight"' in text_js
+    assert 'event.altKey && event.key === "ArrowRight"' in vision_js
+    assert 'event.altKey && event.key === "ArrowRight"' in artifact_js
+
+
+def test_4011c_shared_attention_terminology_and_polling_feedback_are_consistent():
+    nav = read("nav.js")
+    verification = read("verification.js")
+    dashboard = read("dashboard.js")
+    review = read("review.js")
+    assert "global-attention-strip" in nav
+    assert "/api/errors" in nav
+    assert "Needs attention" in nav
+    assert "Retrieval-Augmented Generation (RAG)" in nav
+    assert "Text verifier ·" in verification
+    assert "Vision verifier ·" in verification
+    assert "Queue refresh failed" in dashboard
+    assert "filtersLoaded ?" in review

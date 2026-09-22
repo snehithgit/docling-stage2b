@@ -55,6 +55,7 @@ function formatPills(formats) {
 }
 
 async function rerunStage2(id, button) {
+  if (!window.confirm("Re-run Stage 2A analysis?\n\nThis creates a new analysis generation and may require downstream verification, finalization, chunks and embeddings to rebuild. Historical runs and human decisions are preserved.")) return;
   if (button) { button.disabled = true; button.textContent = "Queuing…"; }
   const response = await fetch(`/api/postprocess/jobs/${id}/rerun`, { method: "POST" });
   let data = {};
@@ -271,14 +272,12 @@ function renderDashboardCloudQuota(stage2bStatus) {
 }
 
 async function refresh() {
-  const [response, documentsResponse, stage2bResponse] = await Promise.all([
+  const [response, stage2bResponse] = await Promise.all([
     fetch("/api/status", { cache: "no-store" }),
-    fetch("/api/documents", { cache: "no-store" }),
     fetch("/api/stage2b/status", { cache: "no-store" }),
   ]);
-  if (!response.ok || !documentsResponse.ok || !stage2bResponse.ok) throw new Error("Could not load the queue.");
+  if (!response.ok || !stage2bResponse.ok) throw new Error("Could not load the queue.");
   const data = await response.json();
-  const documentData = await documentsResponse.json();
   const stage2bStatus = await stage2bResponse.json();
   ["pending", "processing", "completed", "failed"].forEach((key) => {
     $(`#${key}-count`).textContent = data.counts[key] || 0;
@@ -289,7 +288,6 @@ async function refresh() {
   const labels = data.settings.output_format_labels || [data.settings.output_format_label];
   $("#format-note").textContent = `Outputs: ${labels.join(" + ")} · ${data.settings.target_type === "zip" ? "ZIP package" : "direct file"}`;
   renderJobs(data.jobs);
-  renderDocumentLibrary(documentData.documents || [], stage2bStatus);
   renderConnection(data.docling);
   renderDashboardCloudQuota(stage2bStatus);
 }
@@ -375,6 +373,6 @@ refresh().catch((error) => {
 });
 
 const events = new EventSource("/events");
-events.addEventListener("refresh", () => refresh().catch(() => {}));
+events.addEventListener("refresh", () => refresh().catch((error) => showDashboardFeedback(`Queue refresh failed: ${error.message}`)));
 
 if (location.hash === "#settings") document.getElementById("open-settings")?.click();

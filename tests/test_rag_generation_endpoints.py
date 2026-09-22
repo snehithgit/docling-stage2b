@@ -71,3 +71,52 @@ def test_generate_endpoint_uses_only_explicit_selected_provider(monkeypatch):
     assert payload["provider"] == "pi5"
     assert payload["sources"][0]["page_numbers"] == [10]
     assert payload["evidence_scope"]["mode"] == "top_result_book"
+
+
+def test_async_generation_job_completes_and_exposes_status(monkeypatch):
+    async def fake_execute(update):
+        await asyncio.sleep(0)
+        return {"answer": "Ready [S1].", "provider": update.provider}
+
+    monkeypatch.setattr(main, "_execute_retrieval_generation", fake_execute)
+    main._generation_jobs.clear()
+
+    async def scenario():
+        started = await main.retrieval_generate_start(main.RetrievalGenerateRequest(
+            query="test question", provider="pi5", top_k=1, postprocess_job_id=7
+        ))
+        request_id = started["request_id"]
+        await asyncio.sleep(0.01)
+        status = await main.retrieval_generate_status(request_id)
+        assert status["status"] == "completed"
+        assert status["result"]["answer"] == "Ready [S1]."
+        assert status["elapsed_seconds"] >= 0
+
+    asyncio.run(scenario())
+
+
+def test_async_generation_cancel_really_cancels_backend_task(monkeypatch):
+    entered = asyncio.Event()
+
+    async def fake_execute(update):
+        entered.set()
+        await asyncio.sleep(60)
+        return {"answer": "should never finish"}
+
+    monkeypatch.setattr(main, "_execute_retrieval_generation", fake_execute)
+    main._generation_jobs.clear()
+
+    async def scenario():
+        started = await main.retrieval_generate_start(main.RetrievalGenerateRequest(
+            query="cancel me", provider="pi5", top_k=1, postprocess_job_id=7
+        ))
+        request_id = started["request_id"]
+        await entered.wait()
+        cancelled = await main.retrieval_generate_cancel(request_id)
+        assert cancelled["cancelled"] is True
+        await asyncio.sleep(0)
+        status = await main.retrieval_generate_status(request_id)
+        assert status["status"] == "cancelled"
+        assert status["result"] is None
+
+    asyncio.run(scenario())

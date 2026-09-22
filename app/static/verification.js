@@ -1,8 +1,12 @@
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[ch]));
 const selectedBookId = Number(new URLSearchParams(location.search).get("job") || 0);
 let lastStatus = {};
-function textVerifierName(status = lastStatus) { return status?.text_provider?.label || "Pi5 Text"; }
-function visionVerifierName(status = lastStatus) { return status?.vision_provider?.label || "OnePlus Vision"; }
+function verifierProviderName(provider, fallback) {
+  const value = String(provider || fallback || "").toLowerCase();
+  return ({pi5:"Pi5", oneplus:"OnePlus", groq:"Groq"})[value] || String(provider || fallback || "Verifier");
+}
+function textVerifierName(status = lastStatus) { return `Text verifier · ${verifierProviderName(status?.text_provider?.provider, "pi5")}`; }
+function visionVerifierName(status = lastStatus) { return `Vision verifier · ${verifierProviderName(status?.vision_provider?.provider, "oneplus")}`; }
 function quotaFromStatus(status = lastStatus) { return status?.text_provider?.quota || status?.vision_provider?.quota || null; }
 function quotaTime(epoch) {
   const n = Number(epoch || 0);

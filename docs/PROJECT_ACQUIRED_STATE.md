@@ -42,7 +42,7 @@
 # Project acquired state
 
 Last updated: 2026-09-22
-Current code release: `2026.09.22.40.10.1`
+Current code release: `2026.09.22.40.11C`
 
 ## Already acquired — do not rebuild unnecessarily
 

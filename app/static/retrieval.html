@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Machine RAG · Docling Auto-Convert</title>
-<link rel="stylesheet" href="/assets/styles.css?v=2026.09.22.40.10.1" />
-<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.22.40.10.1" />
+<title>Retrieval-Augmented Generation (RAG) · Docling Auto-Convert</title>
+<link rel="stylesheet" href="/assets/styles.css?v=2026.09.22.40.11C" />
+<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.22.40.11C" />
 </head>
 <body class="ui29">
 <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -25,7 +25,7 @@
       <a href="/verification"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M4 12h7M4 17h5"/><path d="m15 15 2 2 4-5"/></svg>Verification</span></a>
       <a href="/artifact-audit"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 10h8M8 14h5"/></svg>Artifact audit</span></a>
       <a href="/text-audit"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z"/><circle cx="12" cy="12" r="2.5"/></svg>Verifier audit</span></a>
-      <a class="active" aria-current="page" href="/retrieval"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 5 5M8 8.5h5M8 11.5h3"/></svg>Machine RAG</span></a>
+      <a class="active" aria-current="page" href="/retrieval"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 5 5M8 8.5h5M8 11.5h3"/></svg>RAG</span></a>
       <a href="/oneplus"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M10 5h4M11 18.5h2"/></svg>OnePlus</span></a>
     </nav>
     <a class="settings-trigger nav-settings" href="/queue#settings"><span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.5 1a7 7 0 0 0-1.7-1L14.4 3h-4.8l-.4 3.1a7 7 0 0 0-1.7 1l-2.5-1-2 3.4L5 11a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.5-1a7 7 0 0 0 1.7 1l.4 3.1h4.8l.4-3.1a7 7 0 0 0 1.7-1l2.5 1 2-3.4L18.9 13a7 7 0 0 0 .1-1Z"/></svg>Settings</span></a>
@@ -35,8 +35,8 @@
   <main class="main-content retrieval-main" id="main-content">
     <header class="page-header retrieval-hero">
       <div>
-        <p class="eyebrow">Stage 3 · Machine-scoped retrieval</p>
-        <h1>Machine RAG</h1>
+        <p class="eyebrow">Machine-scoped retrieval</p>
+        <h1>RAG</h1>
         <p class="subtle">Group all manuals for one physical machine, build one machine embedding index, then search only inside that machine. Single-manual mode is available for lexical inspection.</p>
       </div>
       <div class="document-actions retrieval-header-actions">
@@ -44,7 +44,7 @@
       </div>
     </header>
 
-    <section class="ui29-summary-grid retrieval-summary-grid" aria-label="Machine RAG summary">
+    <section class="ui29-summary-grid retrieval-summary-grid" aria-label="RAG summary">
       <article><span>Machines configured</span><strong id="metric-machines">0</strong></article>
       <article><span>Machines embedded</span><strong id="metric-hybrid">0 / 0</strong></article>
       <article><span>Searchable text chunks</span><strong id="metric-searchable">0</strong></article>
@@ -62,7 +62,7 @@
         </div>
       </div>
 
-      <div class="rag-step-strip" aria-label="Machine RAG steps">
+      <div class="rag-step-strip" aria-label="RAG steps">
         <div><span>1</span><strong>Select scope</strong><small>Machine for normal RAG · one manual for lexical inspection</small></div>
         <div><span>2</span><strong>Check embeddings</strong><small>Hybrid vectors are stored per physical machine, never across unrelated machines</small></div>
         <div><span>3</span><strong>Search & inspect</strong><small>Open the exact chunk or original PDF page before generating an answer</small></div>
@@ -96,8 +96,13 @@
           <div class="retrieval-answer-controls">
             <label><span class="field-label">Generator</span><select class="text-input" id="answer-provider"><option value="pi5">Pi5 · local</option><option value="oneplus">OnePlus · local</option><option value="groq">Groq · cloud</option></select></label>
             <button class="primary-button" id="generate-answer" type="button">Generate answer</button>
+            <button class="secondary-button danger-outline" id="cancel-answer" type="button" hidden>Cancel generation</button>
             <button class="secondary-button" id="copy-external-prompt" type="button">Copy for other LLM</button>
           </div>
+        </div>
+        <div id="generation-progress" class="generation-progress" hidden aria-live="polite">
+          <span class="generation-spinner" aria-hidden="true"></span>
+          <div><strong id="generation-progress-title">Generating answer…</strong><span id="generation-elapsed">0:00 elapsed</span></div>
         </div>
         <div id="answer-message" class="status-message" role="status" aria-live="polite" hidden></div>
         <article class="grounded-answer-card" id="grounded-answer-card" hidden>
@@ -119,7 +124,7 @@
             <label><span class="field-label">Manufacturer</span><input class="text-input" id="equipment-manufacturer" maxlength="160" placeholder="Optional" /></label>
             <label><span class="field-label">Model</span><input class="text-input" id="equipment-model" maxlength="160" placeholder="Optional" /></label>
           </div>
-          <div><span class="field-label">Manuals belonging to this machine</span><p class="subtle equipment-manual-help">Choose the manual type and revision. <strong>Current</strong> revisions are included in Machine RAG; <strong>Historical</strong> and <strong>Draft</strong> copies are retained for audit only.</p><div id="equipment-manual-list" class="equipment-manual-list"><p class="empty-state">Loading manuals…</p></div></div>
+          <div><span class="field-label">Manuals belonging to this machine</span><p class="subtle equipment-manual-help">Choose the manual type and revision. <strong>Current</strong> revisions are included in machine RAG; <strong>Historical</strong> and <strong>Draft</strong> copies are retained for audit only.</p><div id="equipment-manual-list" class="equipment-manual-list"><p class="empty-state">Loading manuals…</p></div></div>
           <div class="equipment-form-actions"><button class="primary-button" type="submit" id="equipment-save">Save machine</button><button class="secondary-button" type="button" id="equipment-cancel" hidden>Cancel edit</button></div>
         </form>
         <div id="equipment-groups" class="equipment-groups"></div>
@@ -168,7 +173,7 @@
     <p class="source-page-note">Red outline = Docling source item used by this retrieval result. If no usable provenance exists, the original page is still shown without a box.</p>
   </div>
 </div>
-<script src="/assets/nav.js?v=2026.09.22.40.10.1"></script>
-<script src="/assets/retrieval.js?v=2026.09.22.40.10.1"></script>
+<script src="/assets/nav.js?v=2026.09.22.40.11C"></script>
+<script src="/assets/retrieval.js?v=2026.09.22.40.11C"></script>
 </body>
 </html>

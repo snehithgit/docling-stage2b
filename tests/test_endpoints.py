@@ -34,8 +34,23 @@ class EndpointTests(unittest.TestCase):
 
         cls.main = importlib.reload(main)
         asyncio.run(cls.main.runtime.store.initialize())
+        asyncio.run(cls.main.runtime.postprocess_store.initialize())
+        asyncio.run(cls.main.runtime.stage2b_store.initialize())
+        # Endpoint tests create a fresh TestClient event loop per test. Keep
+        # real background workers out of those short-lived loops so their
+        # asyncio locks are not left bound to a previous TestClient loop.
         cls.main.runtime.worker.start = AsyncMock()
         cls.main.runtime.worker.stop = AsyncMock()
+        cls.main.runtime.postprocess_worker.start = AsyncMock()
+        cls.main.runtime.postprocess_worker.stop = AsyncMock()
+        cls.main.runtime.stage2b_worker.start = AsyncMock()
+        cls.main.runtime.stage2b_worker.stop = AsyncMock()
+        cls.main.runtime.start_pipeline_sequence = AsyncMock()
+        cls.main.runtime.stop_pipeline_sequence = AsyncMock()
+        cls.main.runtime.telegram_bot.start = AsyncMock()
+        cls.main.runtime.telegram_bot.stop = AsyncMock()
+        cls.main.runtime.stop_safety_refresh = AsyncMock()
+        cls.main.runtime.stage3_builder.stop = AsyncMock()
 
     @classmethod
     def tearDownClass(cls):

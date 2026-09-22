@@ -65,7 +65,6 @@ $("#options-toggle").addEventListener("click", () => {
   const expanded = panel.classList.toggle("open");
   $("#options-toggle").setAttribute("aria-expanded", String(expanded));
 });
-$("#options-panel").classList.add("open");
 
 // ---- File drop zone ----
 
@@ -164,7 +163,7 @@ async function pollTask(taskId) {
       const stem = (sourceName || "converted_docs").replace(/\.[^./]+$/, "") || "converted_docs";
       const downloadName = `${stem}.zip`;
       const resultUrl = `/api/convert/result/${encodeURIComponent(taskId)}?filename=${encodeURIComponent(sourceName || downloadName)}`;
-      setStatus(`Ready. <a class="result-link" href="${resultUrl}">Download ${escapeHtml(downloadName)}</a>`, "success");
+      setStatus(`Ready. <a class="result-link" href="${resultUrl}">Download ${escapeHtml(downloadName)}</a><br><small>This is a one-off ZIP only. It is not added to your book pipeline. Use <a href="/add-book">Add book</a> for normal processing.</small>`, "success");
       setProcessing(false);
       return;
     }

@@ -1,4 +1,30 @@
-# Current release — 2026.09.22.40.10.1
+# Current release — 2026.09.22.40.11C
+
+## `.40.11C` complete — human review UX & UI consistency
+
+- [x] Global filtered web text-review queue across books.
+- [x] Book/type/reason/state filters preserve one-by-one review semantics.
+- [x] Text/Vision/Artifact audit uses one-item navigation and keyboard shortcuts.
+- [x] Vision decisions auto-advance; evidence/raw diagnostics follow the decision-first hierarchy.
+- [x] Web/Telegram authority remains unified in Stage 2C.
+- [x] Consistent verifier/RAG terminology.
+- [x] Shared Needs attention diagnostics strip.
+- [x] Non-silent dashboard queue refresh failure feedback.
+- [x] Source-tree regression suite: 529/529 tests pass.
+
+# Previous release — 2026.09.22.40.11A
+
+## `.40.11A` complete — daily-use UI & operator safety
+
+- [x] Managed Add Book upload/URL flow enters the normal pipeline directly.
+- [x] Contextual Stage 2C audit bypass instead of permanent page-top control.
+- [x] Shared review queue with auto-advance, keyboard shortcuts and table-cell context.
+- [x] OnePlus verification circuit/outage visibility.
+- [x] Confirmations for destructive/expensive actions.
+- [x] Retrieval elapsed progress + true backend cancellation.
+- [x] Aggregated Errors & diagnostics and simplified Queue/Quality layouts.
+
+# Previous release — 2026.09.22.40.10.1
 
 ## `.40.10.1` complete — adaptive OnePlus workload protection
 
@@ -137,9 +163,9 @@ Deployment acceptance pending: complete the still-open transactional retrieval/f
 
 # Docling Visual RAG — Project tracker
 
-Last updated: 2026-09-21
-Current release: `2026.09.22.40.10.1`
-Current phase: **`.40.9` September 21 audit backlog closure implemented and release-validated**
+Last updated: 2026-09-22
+Current release: `2026.09.22.40.11C`
+Current phase: **`.40.11C` human-review UX and UI consistency implemented and release-validated**
 Next phase: **separately tracked retrieval transaction/freshness + Docling dead-task recovery, then Revalidate all + rebuild and fresh N150 benchmarking**
 
 ## Non-negotiable architecture

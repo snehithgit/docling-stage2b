@@ -24,7 +24,9 @@ function qualityBadge(status, displayLabel, kind = "coverage") {
   return `<span class="quality-badge quality-${esc(status)}">${esc(label)}</span>`;
 }
 
-async function retryJob(id) {
+async function retryJob(id, button) {
+  const label = button?.textContent || "Retry";
+  if (button) { button.disabled = true; button.textContent = "Retrying…"; }
   try {
     const response = await fetch(`/api/postprocess/jobs/${id}/retry`, {method: "POST"});
     let data = {}; try { data = await response.json(); } catch (_) {}
@@ -32,10 +34,12 @@ async function retryJob(id) {
     showQualityFeedback("Quality analysis retry queued.", "success");
     await load();
   } catch (error) { showQualityFeedback(error.message); }
+  finally { if (button) { button.disabled = false; button.textContent = label; } }
 }
 window.retryPostprocess = retryJob;
 
 async function rerunJob(id, button) {
+  if (!window.confirm("Re-run Stage 2A analysis?\n\nThis creates a new analysis generation and may require verification, Stage 2C finalization, chunks, retrieval indexes and machine embeddings to rebuild. Historical runs and human decisions are preserved.")) return;
   if (button) { button.disabled = true; button.textContent = "Queuing…"; }
   const response = await fetch(`/api/postprocess/jobs/${id}/rerun`, {method: "POST"});
   let data = {}; try { data = await response.json(); } catch (_) {}
@@ -66,6 +70,7 @@ async function load() {
   document.getElementById("q-failed").textContent = counts.failed || 0;
   document.getElementById("processed-dir").textContent = `Processed: ${data.processed_dir || "—"}`;
   document.querySelector("#quality-state span:last-child").textContent = data.enabled ? "Quality worker enabled" : "Quality worker disabled";
+  document.querySelector("#quality-state .indicator")?.classList.toggle("offline", !data.enabled);
 
   const body = document.getElementById("quality-jobs");
   const jobs = data.jobs || [];
@@ -80,15 +85,14 @@ async function load() {
     const links = job.status === "completed"
       ? `<div class="document-actions">
           <a class="mini-action primary-mini" href="/book?job=${job.id}">Open workflow</a>
-          <a class="mini-action" href="/api/postprocess/jobs/${job.id}/artifact/summary.json" target="_blank">Summary JSON</a>
-          <a class="mini-action" href="/api/postprocess/jobs/${job.id}/artifact/routes.json" target="_blank">Routes JSON</a>
-          <button class="mini-action quiet-action" onclick="rerunPostprocess(${job.id}, this)">Rerun 2A</button>
+          <button class="mini-action danger-action" onclick="rerunPostprocess(${job.id}, this)">Re-run extraction analysis</button>
+          <details class="inline-details"><summary class="mini-action">Details</summary><div class="inline-details-menu"><a href="/api/postprocess/jobs/${job.id}/artifact/summary.json" target="_blank">Summary JSON</a><a href="/api/postprocess/jobs/${job.id}/artifact/routes.json" target="_blank">Routes JSON</a></div></details>
         </div>`
       : job.status === "failed"
-        ? `<div class="document-actions"><button class="mini-action" onclick="retryPostprocess(${job.id})">Retry</button><button class="mini-action" onclick="rerunPostprocess(${job.id}, this)">Rerun</button></div>`
+        ? `<div class="document-actions"><button class="mini-action" onclick="retryPostprocess(${job.id}, this)">Retry</button><button class="mini-action" onclick="rerunPostprocess(${job.id}, this)">Rerun</button></div>`
         : `<span class="quality-muted">Analysis ${esc(job.status)}</span>`;
     const quality = job.status === "completed"
-      ? `<div class="quality-stack">${qualityBadge(job.quality_status, job.quality_display_label)}${qualityBadge(job.integrity_status, job.integrity_display_label, "integrity")}</div>`
+      ? `<div class="quality-stack">${qualityBadge(job.quality_status, job.quality_display_label)}${qualityBadge(job.integrity_status, job.integrity_display_label, "integrity")}<span class="file-subtitle">${Number(job.automation_unresolved || 0).toLocaleString()} unresolved text audit · ${Number(job.human_reviewed || 0).toLocaleString()} human reviewed</span></div>`
       : `<span class="quality-muted">Waiting for completed analysis</span>`;
     const routeCreated = Number(job.route_count || 0);
     const routeCandidates = Number(job.route_candidates_detected ?? routeCreated);
@@ -101,4 +105,4 @@ async function load() {
 }
 
 load().catch(error => showQualityFeedback(error.message));
-setInterval(() => load().catch(() => {}), 5000);
+setInterval(() => load().catch(error => showQualityFeedback(`Quality status refresh failed: ${error.message}`)), 5000);

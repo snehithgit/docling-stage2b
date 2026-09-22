@@ -1196,3 +1196,15 @@ button.mini-action { cursor: pointer; }
 .stale-cleanup-stats { padding-top:0 !important; }
 #stale-files-breakdown { font-size:11px; line-height:1.35; }
 @media (max-width:760px) { .stale-cleanup-row { align-items:stretch; flex-direction:column; } .stale-cleanup-row .document-actions { width:100%; } .stale-cleanup-row .document-actions button { flex:1; } }
+
+/* .40.11B one-by-one human audit hierarchy */
+.vision-audit-evidence-counts { margin: 10px 0 8px; color: var(--muted); font-size: 11px; font-weight: 700; }
+.vision-audit-pager span { min-width: 92px; text-align: center; font-weight: 750; color: var(--muted); }
+
+/* .40.11C shared attention strip */
+.global-attention-strip { margin: 0 0 14px; padding: 10px 12px; border: 1px solid #ead79e; border-radius: 10px; background: #fff7df; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.global-attention-strip[hidden] { display: none; }
+.global-attention-strip > div { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.global-attention-strip strong { color: #765719; font-size: 11px; }
+.global-attention-strip span { color: #765719; font-size: 10px; }
+@media (max-width: 680px) { .global-attention-strip { align-items: flex-start; flex-direction: column; } }

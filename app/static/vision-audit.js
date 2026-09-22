@@ -1,8 +1,10 @@
-const PAGE_SIZE = 30;
+const PAGE_SIZE = 1;
 let auditJobs = [];
 let filteredJobs = [];
 let auditPage = 1;
-const requestedJobId = new URLSearchParams(location.search).get("job");
+const auditParams = new URLSearchParams(location.search);
+const requestedJobId = auditParams.get("job");
+const requestedBookJob = auditParams.get("book");
 
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
@@ -68,11 +70,8 @@ function renderJob(job) {
   const request = job.request || {};
   const downstream = job.downstream || {};
   const failed = job.status === "failed";
-  const provider = job.provider || "vision verifier";
-  const stage2cText = downstream.status
-    ? `${downstream.status}${downstream.status_reason ? ` · ${downstream.status_reason}` : ""}`
-    : "No Stage 2C vision entry recorded";
-  const useText = downstream.status === "applied" ? "Used as technical visual enrichment" : downstream.status === "excluded" ? "Excluded from enrichment" : downstream.status === "pending" ? "Held for review / unresolved" : "No downstream action recorded";
+  const providerCode = String(job.provider || "oneplus").toLowerCase();
+  const provider = ({pi5:"Pi5", oneplus:"OnePlus", groq:"Groq"})[providerCode] || job.provider || "Verifier";
   const cropCount = (job.crops || []).length;
   const humanDecision = downstream.human_visual_decision || "";
   const recoveredEvidence = !!downstream.human_evidence_recovered_at_epoch;
@@ -80,44 +79,32 @@ function renderJob(job) {
   const effectiveObjects = recoveredEvidence && Array.isArray(downstream.visible_objects) && downstream.visible_objects.length ? downstream.visible_objects : (c.visible_objects || []);
   const effectiveSummary = recoveredEvidence && downstream.generated_summary ? downstream.generated_summary : c.summary;
   const effectiveCategory = recoveredEvidence && downstream.diagram_category ? downstream.diagram_category : (c.diagram_category || "unknown");
-  const needsHuman = !failed && !humanDecision && ((c.verdict || job.verdict) === "UNCERTAIN" || downstream.status === "pending" || c.unresolved === true);
   const recoveryRequired = !!downstream.human_evidence_recovery_required;
+  const needsHuman = !failed && !humanDecision && ((c.verdict || job.verdict) === "UNCERTAIN" || downstream.status === "pending" || c.unresolved === true);
   const isSweep = job.code === "FULL_TECHNICAL_VISUAL" || /^AV\d{6}$/.test(String(job.route_id || ""));
-  const humanBlock = humanDecision ? `<section><div class="vision-audit-section-label">Human decision</div><p><strong>${esc(humanDecision.replaceAll("_", " "))}</strong> · authoritative</p>${recoveryRequired && ["technical","useful"].includes(humanDecision) ? `<p class="format-note">Classification is accepted, but usable visual evidence is still being recovered from the full image and crops.</p><div class="document-actions"><button class="mini-action audit-decision" data-job="${job.postprocess_job_id}" data-entry="${esc(downstream.entry_id || `${job.generation}:vision:${job.route_id}`)}" data-decision="${esc(humanDecision)}">Recover evidence</button></div>` : ""}</section>` : "";
-  const decisionButtons = needsHuman ? `<section class="vision-audit-override"><div class="vision-audit-section-label">Human decision required</div><div class="document-actions">${isSweep ? `<button class="mini-action audit-decision" data-job="${job.postprocess_job_id}" data-entry="${esc(downstream.entry_id || `${job.generation}:vision:${job.route_id}`)}" data-decision="technical">Technical</button><button class="mini-action audit-decision" data-job="${job.postprocess_job_id}" data-entry="${esc(downstream.entry_id || `${job.generation}:vision:${job.route_id}`)}" data-decision="decorative">Decorative</button>` : `<button class="mini-action audit-decision" data-job="${job.postprocess_job_id}" data-entry="${esc(downstream.entry_id || `${job.generation}:vision:${job.route_id}`)}" data-decision="useful">Useful</button><button class="mini-action audit-decision" data-job="${job.postprocess_job_id}" data-entry="${esc(downstream.entry_id || `${job.generation}:vision:${job.route_id}`)}" data-decision="not_useful">Not useful</button>`}</div></section>` : humanBlock;
+  const entryId = esc(downstream.entry_id || `${job.generation}:vision:${job.route_id}`);
+  const humanBlock = humanDecision ? `<div class="vision-audit-human-state"><strong>Human decision: ${esc(humanDecision.replaceAll("_", " "))}</strong><span>Authoritative</span>${recoveryRequired && ["technical","useful"].includes(humanDecision) ? `<button class="mini-action audit-decision" data-job="${job.postprocess_job_id}" data-entry="${entryId}" data-decision="${esc(humanDecision)}">Recover evidence</button>` : ""}</div>` : "";
+  const decisionButtons = needsHuman ? `<div class="vision-audit-primary-actions"><strong>Human decision required</strong><div class="document-actions">${isSweep ? `<button class="primary-button audit-decision" data-job="${job.postprocess_job_id}" data-entry="${entryId}" data-decision="technical">Technical</button><button class="secondary-button audit-decision" data-job="${job.postprocess_job_id}" data-entry="${entryId}" data-decision="decorative">Decorative</button>` : `<button class="primary-button audit-decision" data-job="${job.postprocess_job_id}" data-entry="${entryId}" data-decision="useful">Useful</button><button class="secondary-button audit-decision" data-job="${job.postprocess_job_id}" data-entry="${entryId}" data-decision="not_useful">Not useful</button>`}</div></div>` : humanBlock;
+  const downstreamLabel = downstream.status === "applied" ? "Used as technical visual evidence" : downstream.status === "excluded" ? "Excluded from technical evidence" : downstream.status === "pending" ? "Held for human review" : "No downstream action recorded";
+
   return `<article class="panel vision-audit-card" data-job="${job.id}">
     <div class="vision-audit-card-head">
-      <div><p class="eyebrow">Page ${esc(source.page ?? request.page ?? "—")} · ${esc(job.route_id || "route")}</p><h2>${esc(job.book || "Unknown book")}</h2><p class="format-note">${esc(job.code || "VISION_REVIEW")} · ${esc(job.priority || "—")} · ${esc(provider)}${job.model ? ` · ${esc(job.model)}` : ""}</p></div>
+      <div><p class="eyebrow">Page ${esc(source.page ?? request.page ?? "—")} · ${esc(job.route_id || "route")}</p><h2>${esc(job.book || "Unknown book")}</h2><p class="format-note">Vision verifier · ${esc(provider)}${job.model ? ` · ${esc(job.model)}` : ""} · ${esc(fmtSeconds(job.processing_seconds))}</p></div>
       <div class="vision-audit-decision">${failed ? statusPill("FAILED", "Failed") : statusPill(c.verdict || job.verdict)}<strong>${esc(fmtConfidence(c.confidence))}</strong></div>
     </div>
-
     <div class="vision-audit-main-grid">
       <div class="vision-audit-image-column">
         <div class="vision-audit-section-label">Exact full image sent</div>
         <a href="${esc(job.full_image?.image_url || "#")}" target="_blank" rel="noopener"><img class="vision-audit-source-image" loading="lazy" src="${esc(job.full_image?.image_url || "")}" alt="Full image sent to vision verifier" /></a>
-        <div class="vision-audit-image-meta"><span>Picture #${esc(source.index ?? request.picture_index ?? "—")}</span><span>${esc(request.artifact || source.artifact || "")}</span><span>${esc(fmtSeconds(job.processing_seconds))}</span></div>
+        <div class="vision-audit-image-meta"><span>Page ${esc(source.page ?? request.page ?? "—")}</span><span>Picture #${esc(source.index ?? request.picture_index ?? "—")}</span><span>${cropCount} crop${cropCount === 1 ? "" : "s"}</span></div>
       </div>
-
-      <div class="vision-audit-explanation">
-        <section><div class="vision-audit-section-label">Why Stage 2A sent it</div><p>${esc(job.reason || request.reason || "No route reason recorded")}</p></section>
-        ${failed ? `<section><div class="vision-audit-section-label">Failure</div><p class="queue-error">${esc(job.error_type || "Error")}: ${esc(job.error_message || "Vision verification failed")}</p></section>` : `
-        <section><div class="vision-audit-section-label">Vision decision</div><div class="vision-audit-kv"><span>Category</span><strong>${esc(effectiveCategory)}</strong><span>Unresolved</span><strong>${esc(c.unresolved === true ? "Yes" : c.unresolved === false ? "No" : "—")}</strong><span>Reason</span><strong>${esc(c.unresolved_reason || "—")}</strong><span>Crops</span><strong>${cropCount}</strong></div>${effectiveSummary ? `<p class="vision-audit-summary-text">${esc(effectiveSummary)}</p>` : ""}${recoveredEvidence ? `<p class="format-note">Evidence below was recovered after the authoritative human decision; the original verifier result remains preserved in Raw verifier audit details.</p>` : ""}</section>
-        <section><div class="vision-audit-section-label">Exact visible text reported</div>${tagList(effectiveText, "No legible text reported")}</section>
-        <section><div class="vision-audit-section-label">Model-described visible objects</div>${tagList(effectiveObjects, "No objects reported")}</section>
-        ${c.deterministic_override ? `<section class="vision-audit-override"><div class="vision-audit-section-label">Deterministic gate</div><p>${esc(c.deterministic_override)}</p></section>` : ""}
-        <section><div class="vision-audit-section-label">What the pipeline did</div><p><strong>${esc(useText)}</strong></p><p class="format-note">${esc(stage2cText)}</p></section>${decisionButtons}`}
+      <div class="vision-audit-explanation vision-audit-summary-first">
+        ${failed ? `<section><div class="vision-audit-section-label">Verification failed</div><p class="queue-error">${esc(job.error_type || "Error")}: ${esc(job.error_message || "Vision verification failed")}</p></section>` : `<section><div class="vision-audit-section-label">Result</div><h3>${esc(humanVerdict(c.verdict || job.verdict))}</h3><p class="vision-audit-summary-text">${esc(effectiveSummary || "No short summary was produced.")}</p><div class="vision-audit-kv"><span>Category</span><strong>${esc(effectiveCategory)}</strong><span>Pipeline</span><strong>${esc(downstreamLabel)}</strong></div></section>${decisionButtons}`}
       </div>
     </div>
-
-    ${cropCount ? `<details class="vision-audit-crops"><summary>Show ${cropCount} inspected crop${cropCount === 1 ? "" : "s"}</summary><div class="vision-audit-crop-grid">${job.crops.map(crop => cropCard(job, crop)).join("")}</div></details>` : `<div class="vision-audit-no-crops">${c.full_image_parse_failed || job.full_image?.parsed?.parse_failed ? "Full-image response was incomplete; no successful crop evidence was recorded for this older/current result." : "Full image was sufficient; no crop inspection was required."}</div>`}
-
-    <details class="vision-audit-details"><summary>Raw verifier audit details</summary>
-      <div class="vision-audit-detail-grid">
-        <div>${rawBlock("Exact full-image prompt", request.full_image_prompt)}${rawBlock("Full-image parsed result", job.full_image?.parsed)}${rawBlock("Full-image raw response", job.full_image?.raw_response)}${rawBlock("Full-image attempts", job.full_image?.attempts)}</div>
-        <div>${rawBlock("Final merged classification", c)}${rawBlock("Structural image evidence", c.structural_image_evidence)}${rawBlock("Crop settings", request.crop_settings)}</div>
-      </div>
-      <div class="document-actions"><a class="mini-action" href="/api/stage2b/jobs/${job.id}/result" target="_blank" rel="noopener">Open complete result JSON</a></div>
-    </details>
+    ${!failed ? `<div class="vision-audit-evidence-counts">${effectiveText.length} important label${effectiveText.length === 1 ? "" : "s"} · ${effectiveObjects.length} object${effectiveObjects.length === 1 ? "" : "s"} · ${cropCount} crop${cropCount === 1 ? "" : "s"}</div><details class="vision-audit-details extracted-detail"><summary>Show extracted detail</summary><div class="vision-audit-detail-grid"><section><div class="vision-audit-section-label">Important visible text</div>${tagList(effectiveText, "No legible text reported")}</section><section><div class="vision-audit-section-label">Visible objects / structures</div>${tagList(effectiveObjects, "No objects reported")}</section></div><p class="format-note"><strong>Why it was checked:</strong> ${esc(job.reason || request.reason || "No route reason recorded")}${c.unresolved_reason ? ` · ${esc(c.unresolved_reason)}` : ""}</p></details>` : ""}
+    ${cropCount ? `<details class="vision-audit-crops"><summary>Show ${cropCount} inspected crop${cropCount === 1 ? "" : "s"}</summary><div class="vision-audit-crop-grid">${job.crops.map(crop => cropCard(job, crop)).join("")}</div></details>` : `<div class="vision-audit-no-crops">${c.full_image_parse_failed || job.full_image?.parsed?.parse_failed ? "Full-image response was incomplete; no successful crop evidence was recorded in this result." : "Full image was sufficient; no crop inspection was required."}</div>`}
+    <details class="vision-audit-details"><summary>Technical verifier details</summary><div class="vision-audit-detail-grid"><div>${rawBlock("Exact full-image prompt", request.full_image_prompt)}${rawBlock("Full-image parsed result", job.full_image?.parsed)}${rawBlock("Full-image raw response", job.full_image?.raw_response)}${rawBlock("Full-image attempts", job.full_image?.attempts)}</div><div>${rawBlock("Final merged classification", c)}${rawBlock("Structural image evidence", c.structural_image_evidence)}${rawBlock("Crop settings", request.crop_settings)}</div></div><div class="document-actions"><a class="mini-action" href="/api/stage2b/jobs/${job.id}/result" target="_blank" rel="noopener">Open complete result JSON</a></div></details>
   </article>`;
 }
 
@@ -134,6 +121,7 @@ function applyFilters(resetPage=true) {
   const verdict = $("va-verdict").value;
   const query = $("va-search").value.trim().toLowerCase();
   filteredJobs = auditJobs.filter(job => {
+    if (requestedBookJob && String(job.postprocess_job_id) !== String(requestedBookJob)) return false;
     if (requestedJobId && !book && !verdict && !query && String(job.id) !== String(requestedJobId)) return false;
     if (book && job.book !== book) return false;
     if (verdict === "FAILED" && job.status !== "failed") return false;
@@ -154,7 +142,7 @@ function renderPage() {
   const start = (auditPage - 1) * PAGE_SIZE;
   const rows = filteredJobs.slice(start, start + PAGE_SIZE);
   $("va-count").textContent = `${filteredJobs.length.toLocaleString()} audit result${filteredJobs.length === 1 ? "" : "s"}`;
-  $("va-page").textContent = `Page ${auditPage} of ${pages}`;
+  $("va-page").textContent = filteredJobs.length ? `${auditPage} of ${filteredJobs.length}` : "0 of 0";
   $("va-prev").disabled = auditPage <= 1;
   $("va-next").disabled = auditPage >= pages;
   $("va-results").innerHTML = rows.length ? rows.map(renderJob).join("") : `<div class="panel empty-state">No vision verifier results match these filters.</div>`;
@@ -185,6 +173,10 @@ async function loadAudit() {
     auditJobs = data.jobs || [];
     renderSummary(data);
     fillBookFilter();
+    if (requestedBookJob) {
+      const scoped = auditJobs.find(job => String(job.postprocess_job_id) === String(requestedBookJob));
+      if (scoped?.book) $("va-book").value = scoped.book;
+    }
     applyFilters(false);
     feedback("");
   } catch (error) {
@@ -207,29 +199,23 @@ document.addEventListener("click", async event => {
     feedback(recovery && ["queued","running"].includes(recovery.status)
       ? "Human decision saved. Evidence recovery is running on the visual verifier; the full image and configured crops will be merged without changing your decision."
       : "Human visual decision saved. Downstream Stage 3/retrieval will rebuild from the authoritative audit state.", "completed");
+    const previousPosition = auditPage;
     await loadAudit();
+    if (filteredJobs.length > previousPosition) { auditPage = previousPosition + 1; renderPage(); window.scrollTo({top:0, behavior:"smooth"}); }
   } catch (error) { feedback(`Could not save decision: ${error.message}`, "warning"); button.disabled = false; }
 });
 
-async function setAuditBypass(enabled) {
-  const book = $("va-book").value;
-  const row = auditJobs.find(j => j.book === book);
-  if (!book || !row) return;
-  if (enabled && !confirm(`Bypass unresolved Verifier Audit items for ${book} and continue downstream for TESTING only? Unresolved evidence will NOT be accepted.`)) return;
-  const response = await fetch(`/api/postprocess/jobs/${row.postprocess_job_id}/verifier-audit/bypass`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({enabled, reason:"testing"})});
-  if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
-  const data = await response.json();
-  feedback(enabled ? `Audit bypass enabled for testing. ${data.review_required || 0} unresolved item(s) remain.` : "Audit bypass removed; unresolved audit items block Stage 3 again.", enabled ? "warning" : "completed");
-}
-
-function updateBypassButtons() { const selected = !!$("va-book").value; $("va-bypass").disabled = !selected; $("va-enforce").disabled = !selected; }
-$("va-bypass").addEventListener("click", () => setAuditBypass(true).catch(e => feedback(e.message, "warning")));
-$("va-enforce").addEventListener("click", () => setAuditBypass(false).catch(e => feedback(e.message, "warning")));
 $("refresh-audit").addEventListener("click", loadAudit);
-$("va-book").addEventListener("change", () => { applyFilters(); updateBypassButtons(); });
+$("va-book").addEventListener("change", () => applyFilters());
 $("va-verdict").addEventListener("change", () => applyFilters());
 $("va-search").addEventListener("input", () => applyFilters());
 $("va-clear").addEventListener("click", () => { history.replaceState({}, "", "/vision-audit"); location.reload(); });
 $("va-prev").addEventListener("click", () => { auditPage -= 1; renderPage(); window.scrollTo({top:0, behavior:"smooth"}); });
 $("va-next").addEventListener("click", () => { auditPage += 1; renderPage(); window.scrollTo({top:0, behavior:"smooth"}); });
+document.addEventListener("keydown", event => {
+  const editing = ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName);
+  if (editing) return;
+  if ((event.altKey && event.key === "ArrowLeft") || event.key === "[") { event.preventDefault(); if (auditPage > 1) { auditPage -= 1; renderPage(); } }
+  if ((event.altKey && event.key === "ArrowRight") || event.key === "]") { event.preventDefault(); const pages = Math.max(1, Math.ceil(filteredJobs.length / PAGE_SIZE)); if (auditPage < pages) { auditPage += 1; renderPage(); } }
+});
 loadAudit();

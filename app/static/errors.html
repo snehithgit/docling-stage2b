@@ -4,15 +4,15 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Error log · Docling Auto-Convert</title>
-<link rel="stylesheet" href="/assets/styles.css?v=2026.09.22.40.10.1" />
-<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.22.40.10.1" />
+<link rel="stylesheet" href="/assets/styles.css?v=2026.09.22.40.11C" />
+<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.22.40.11C" />
 </head>
 <body class="ui29">
 <a class="skip-link" href="#main-content">Skip to main content</a>
 <header class="mobile-topbar">
   <button class="hamburger" id="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg></button>
   <a class="brand" href="/" aria-label="Docling Auto-Convert"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a>
-  <span class="mobile-status" title="Checking Docling Serve"><span class="indicator"></span></span>
+  <span class="mobile-status" id="mobile-status" title="Checking Docling Serve"><span class="indicator"></span></span>
 </header>
 <div id="nav-backdrop" hidden></div>
 <div class="app-shell">
@@ -33,11 +33,20 @@
     <div class="sidebar-footer"><span class="footer-dot"></span><span><strong>Local pipeline</strong><br><a href="/errors">Errors & diagnostics</a></span></div>
   </aside>
   <main class="main-content" id="main-content">
-    <header class="page-header"><div><p class="eyebrow">Exceptions</p><h1>Error log</h1><p class="subtle">Failures stay on disk so you can investigate and safely re-queue them.</p></div><div class="connection-chip" id="connection-chip"><span class="indicator"></span><span>Checking Docling Serve</span></div></header>
+    <header class="page-header"><div><p class="eyebrow">Pipeline health</p><h1>Errors & diagnostics</h1><p class="subtle">See conversion failures, verification outages, stage failures, and unresolved human-audit work in one place.</p></div><div class="connection-chip" id="connection-chip"><span class="indicator"></span><span>Checking Docling Serve</span></div></header>
+    <section class="ui29-summary-grid diagnostics-summary" aria-label="Pipeline issue summary">
+      <article><span>Conversion failures</span><strong id="diag-conversion">0</strong></article>
+      <article><span>Stage failures</span><strong id="diag-stages">0</strong></article>
+      <article><span>Verifier failures</span><strong id="diag-verification">0</strong></article>
+      <article><span>Audit decisions needed</span><strong id="diag-audit">0</strong></article>
+    </section>
+    <div id="diagnostics-feedback" class="status-message page-feedback" hidden role="status" aria-live="polite"></div>
     <section class="panel error-panel"><div class="panel-heading"><div class="section-title-row"><span class="section-icon error-section-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 3.8 19h16.4L12 4Z"/><path d="M12 9v4m0 3h.01"/></svg></span><div><p class="eyebrow">Recovery queue</p><h2>Failed conversions</h2></div></div><p class="format-note">Retries preserve the same input file.</p></div><div id="error-list" class="error-list"><p class="empty-state">Loading errors…</p></div></section>
+    <section class="panel error-panel"><div class="panel-heading"><div><p class="eyebrow">Pipeline stages</p><h2>Verification & downstream issues</h2></div></div><div id="pipeline-issues" class="error-list"><p class="empty-state">Loading pipeline health…</p></div></section>
+    <section class="panel error-panel"><div class="panel-heading"><div><p class="eyebrow">Human gate</p><h2>Verifier Audit attention</h2></div><a class="secondary-button" href="/vision-audit">Open audit</a></div><div id="audit-issues" class="error-list"><p class="empty-state">Loading audit status…</p></div></section>
   </main>
 </div>
-<script src="/assets/nav.js?v=2026.09.22.40.10.1"></script><script src="/assets/errors.js?v=2026.09.22.40.10.1"></script>
+<script src="/assets/nav.js?v=2026.09.22.40.11C"></script><script src="/assets/errors.js?v=2026.09.22.40.11C"></script>
 </body>
 </html>
 

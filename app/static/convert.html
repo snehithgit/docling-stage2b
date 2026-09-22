@@ -4,8 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Convert · Docling Auto-Convert</title>
-<link rel="stylesheet" href="/assets/styles.css?v=2026.09.22.40.10.1" />
-<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.22.40.10.1" />
+<link rel="stylesheet" href="/assets/styles.css?v=2026.09.22.40.11C" />
+<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.22.40.11C" />
 </head>
 <body class="ui29">
 <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -40,7 +40,7 @@
         <div class="convert-source active" id="source-url"><label class="field-label" for="url-input">URL input source</label><input class="text-input" id="url-input" type="url" placeholder="https://arxiv.org/pdf/2501.17887" /><p class="field-help">Paste a public document URL to start a one-off conversion.</p></div>
         <div class="convert-source" id="source-file"><label class="field-label" for="file-input">Upload file</label><div class="drop-zone" id="drop-zone"><input id="file-input" type="file" hidden /><div class="drop-zone-empty" id="drop-zone-empty"><span class="drop-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0 4 4m-4-4L8 8"/><path d="M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg></span><p>Drop a document here</p><p class="drop-or">or</p><button class="link-button" id="drop-zone-browse" type="button">Choose a file</button></div><div class="drop-zone-file" id="drop-zone-file" hidden><span class="file-name" id="picked-file-name"></span><span class="file-size" id="picked-file-size"></span><button class="icon-button" id="clear-file" type="button" aria-label="Remove file">×</button></div></div><p class="field-help">The file is submitted directly to your configured Docling Serve instance.</p></div>
       </div><div class="convert-actions-col"><button class="primary-button" id="process-button" type="button">Process URL</button><button class="secondary-button" id="reset-button" type="button">Reset form</button></div></div>
-      <button class="options-toggle" id="options-toggle" type="button" aria-expanded="true" aria-controls="options-panel"><span><span class="options-toggle-icon">⚙</span> Conversion options</span><span class="chevron" aria-hidden="true">⌄</span></button>
+      <button class="options-toggle" id="options-toggle" type="button" aria-expanded="false" aria-controls="options-panel"><span><span class="options-toggle-icon">⚙</span> Conversion options</span><span class="chevron" aria-hidden="true">⌄</span></button>
       <div class="options-panel" id="options-panel"><div class="options-intro">These options are sent with this conversion only and are not saved to the local pipeline.</div><div class="options-grid">
         <fieldset class="option-group"><legend>To formats</legend><label class="checkbox-row"><input type="checkbox" name="to_formats" value="json" checked /><span>Docling (JSON)</span></label><label class="checkbox-row"><input type="checkbox" name="to_formats" value="md" checked /><span>Markdown</span></label><label class="checkbox-row"><input type="checkbox" name="to_formats" value="html" /><span>HTML</span></label><label class="checkbox-row"><input type="checkbox" name="to_formats" value="text" /><span>Plain Text</span></label><label class="checkbox-row"><input type="checkbox" name="to_formats" value="doctags" /><span>Doc Tags</span></label></fieldset>
         <fieldset class="option-group"><legend>Image export mode</legend><label class="radio-row"><input type="radio" name="image_export_mode" value="embedded" /><span>Embedded</span></label><label class="radio-row"><input type="radio" name="image_export_mode" value="placeholder" /><span>Placeholder</span></label><label class="radio-row"><input type="radio" name="image_export_mode" value="referenced" checked /><span>Referenced</span></label></fieldset>
@@ -57,7 +57,7 @@
     </section>
   </main>
 </div>
-<script src="/assets/nav.js?v=2026.09.22.40.10.1"></script><script src="/assets/convert.js?v=2026.09.22.40.10.1"></script>
+<script src="/assets/nav.js?v=2026.09.22.40.11C"></script><script src="/assets/convert.js?v=2026.09.22.40.11C"></script>
 </body>
 </html>
 

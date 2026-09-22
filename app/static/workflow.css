@@ -204,3 +204,45 @@
 .book-header-actions { display:flex; align-items:center; gap:10px; flex-shrink:0; }
 .book-header-actions .danger-outline { white-space:nowrap; }
 @media(max-width:650px){ .book-header-actions { width:100%; align-items:stretch; flex-direction:column; } .book-header-actions .danger-outline { width:100%; } }
+
+/* 40.11A managed add-book flow */
+.add-book-panel { max-width: 980px; }
+.add-book-result { margin-top:18px; padding:16px 18px; border:1px solid #d8d1ea; border-radius:14px; background:#faf8ff; display:flex; align-items:center; justify-content:space-between; gap:18px; }
+.add-book-result p { margin:4px 0 0; }
+.add-book-result-actions { display:flex; gap:9px; flex-wrap:wrap; }
+@media(max-width:760px){ .add-book-result { align-items:stretch; flex-direction:column; } .add-book-result-actions { flex-direction:column; } .add-book-result-actions a { text-align:center; } }
+
+/* 40.11A long-running generation feedback */
+.generation-progress { display:flex; align-items:center; gap:12px; margin:14px 0; padding:12px 14px; border:1px solid #ded8e8; border-radius:12px; background:#faf9fd; }
+.generation-progress div { display:flex; flex-direction:column; gap:2px; }
+.generation-progress span:last-child { color:var(--muted, #6f6b79); font-size:12px; }
+.generation-spinner { width:20px; height:20px; border:2px solid #ddd7e8; border-top-color:#7255b5; border-radius:50%; animation:generation-spin .8s linear infinite; flex:0 0 auto; }
+@keyframes generation-spin { to { transform:rotate(360deg); } }
+.stage-note-control { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.stage-note-control p { margin:4px 0 0; }
+.warning-note { border-color:#dfc78f !important; background:#fff9ec !important; }
+@media(max-width:760px){ .stage-note-control { align-items:stretch; flex-direction:column; } }
+
+/* 40.11A action hierarchy */
+.mini-action.danger-action { border-color:#d8aaa5; color:#9e342d; background:#fff8f7; }
+.inline-details { position:relative; }
+.inline-details > summary { list-style:none; cursor:pointer; }
+.inline-details > summary::-webkit-details-marker { display:none; }
+.inline-details-menu { position:absolute; right:0; top:calc(100% + 6px); z-index:20; min-width:150px; padding:6px; border:1px solid #ddd7e8; border-radius:10px; background:#fff; box-shadow:0 10px 30px rgba(42,32,64,.12); }
+.inline-details-menu a { display:block; padding:7px 9px; border-radius:7px; color:inherit; text-decoration:none; }
+.inline-details-menu a:hover { background:#f5f2fa; }
+
+.ui29-summary-grid .ui29-summary-card { appearance:none; width:100%; border:1px solid var(--border); background:var(--surface); color:inherit; text-align:left; cursor:pointer; font:inherit; }
+.ui29-summary-grid .ui29-summary-card:hover { border-color:var(--accent); transform:translateY(-1px); }
+.ui29-summary-grid .ui29-summary-card:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.ui29-summary-grid .ui29-summary-card { min-height:84px; padding:15px 16px; border-radius:12px; }
+@media(max-width:760px){ .ui29-summary-grid .ui29-summary-card { min-height:72px; padding:12px; } }
+.review-queue-summary { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 0 10px; padding:10px 12px; border:1px solid var(--border); border-radius:10px; background:var(--surface-muted,#f8f9fb); }
+@media(max-width:760px){ .review-queue-summary { align-items:stretch; flex-direction:column; } }
+.vision-audit-summary-first h3 { margin:0 0 8px; font-size:1.08rem; }
+.vision-audit-primary-actions,.vision-audit-human-state { margin-top:12px; padding:12px; border:1px solid var(--border); border-radius:12px; background:var(--surface-muted,#f8f9fb); }
+.vision-audit-primary-actions > strong,.vision-audit-human-state > strong { display:block; margin-bottom:8px; }
+.vision-audit-human-state { display:flex; flex-wrap:wrap; align-items:center; gap:10px; }
+.vision-audit-human-state > strong { margin:0; }
+.vision-audit-human-state > span { color:var(--muted); font-size:.84rem; }
+.extracted-detail { margin-top:12px; }

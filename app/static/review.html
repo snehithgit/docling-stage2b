@@ -3,117 +3,119 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Audit OCR correction</title>
-  <link rel="stylesheet" href="/assets/styles.css?v=2026.09.22.40.10.1">
-  <link rel="stylesheet" href="/assets/review.css?v=2026.09.22.40.10.1">
+  <title>Review text correction · Docling Auto-Convert</title>
+  <link rel="stylesheet" href="/assets/styles.css?v=2026.09.22.40.11C">
+  <link rel="stylesheet" href="/assets/workflow.css?v=2026.09.22.40.11C">
+  <link rel="stylesheet" href="/assets/review.css?v=2026.09.22.40.11C">
 </head>
-<body>
+<body class="ui29">
 <a class="skip-link" href="#main-content">Skip to main content</a>
-<main class="review-page" id="main-content">
-  <a id="back-workflow" class="back-link" href="/">← Back to book workflow</a>
-  <div class="review-heading-row">
-    <div>
-      <h1>Audit OCR correction</h1>
-      <p class="intro">Automatic source-image corrections are applied without a Save click. Use this page only to audit the applied result or make a manual override.</p>
-    </div>
-    <div id="entry-meta" class="entry-meta" aria-live="polite"></div>
-  </div>
+<header class="mobile-topbar">
+  <button class="hamburger" id="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  <a class="brand" href="/"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a>
+</header>
+<div id="nav-backdrop" hidden></div>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <button class="sidebar-close" id="sidebar-close" type="button" aria-label="Close navigation">×</button>
+    <a class="brand" href="/"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a>
+    <div class="sidebar-label">Workspace</div>
+    <nav class="nav" aria-label="Primary navigation">
+      <a href="/"><span class="nav-item-label">Books</span></a>
+      <a href="/queue"><span class="nav-item-label">Queue</span></a>
+      <a href="/verification"><span class="nav-item-label">Verification</span></a>
+      <a href="/artifact-audit"><span class="nav-item-label">Artifact audit</span></a>
+      <a class="active" aria-current="page" href="/text-audit"><span class="nav-item-label">Verifier audit</span></a>
+      <a href="/retrieval"><span class="nav-item-label">RAG</span></a>
+      <a href="/oneplus"><span class="nav-item-label">OnePlus</span></a>
+    </nav>
+    <a class="settings-trigger nav-settings" href="/queue#settings"><span class="nav-item-label">Settings</span></a>
+    <div class="sidebar-footer"><span class="footer-dot"></span><span><strong>Local pipeline</strong><br><a href="/errors">Errors & diagnostics</a></span></div>
+  </aside>
 
-  <div id="message" class="review-message" aria-live="polite"></div>
-
-  <section class="review-grid">
-    <div class="page-card">
-      <div class="card-title-row">
-        <h2>Original PDF page</h2>
-        <span id="page-label" class="page-label"></span>
+  <main class="main-content review-page" id="main-content">
+    <a id="back-workflow" class="back-link" href="/">← Back to book workflow</a>
+    <header class="page-header review-heading-row">
+      <div>
+        <p class="eyebrow">Human text review</p>
+        <h1>Review OCR correction</h1>
+        <p id="review-book" class="subtle">Loading book…</p>
+        <p class="intro">Compare the immutable Docling source with the verifier suggestion. Your decision becomes authoritative; raw source files are never edited.</p>
       </div>
-      <img id="page-image" alt="Original PDF page">
-    </div>
-
-    <div class="edit-card">
-      <section class="docling-context-card" aria-labelledby="docling-context-heading">
-        <div class="text-panel-heading">
-          <div>
-            <span class="eyebrow">RAW DOCLING READING ORDER</span>
-            <h2 id="docling-context-heading">Text around the suspicious block</h2>
-          </div>
-          <span class="status-pill source-pill">Not Pi5</span>
+      <div class="review-header-side">
+        <div id="entry-meta" class="entry-meta" aria-live="polite"></div>
+        <div class="review-queue-nav" aria-label="Review queue navigation">
+          <button id="queue-prev" class="secondary-button" type="button">Previous</button>
+          <strong id="queue-progress">— of —</strong>
+          <button id="queue-next" class="secondary-button" type="button">Next</button>
         </div>
-        <p class="field-note">These blocks come directly from the immutable Docling JSON on the same page. They are shown only as context and are never edited here.</p>
-
-        <div class="context-stack">
-          <div class="context-section above-context">
-            <div class="context-label">TEXT ABOVE</div>
-            <div id="docling-above" class="context-blocks"></div>
-          </div>
-
-          <div class="context-section target-context">
-            <div class="context-label">OCR TARGET BLOCK</div>
-            <textarea id="original" readonly spellcheck="false"></textarea>
-            <div id="target-source-meta" class="context-meta"></div>
-          </div>
-
-          <div class="context-section below-context">
-            <div class="context-label">TEXT BELOW</div>
-            <div id="docling-below" class="context-blocks"></div>
-          </div>
-        </div>
-      </section>
-
-      <section id="pi5-suggestion-card" class="pi5-suggestion-card" hidden>
-        <div class="text-panel-heading">
-          <div>
-            <span class="eyebrow">OPTIONAL RECONSTRUCTION</span>
-            <h2>Pending reconstruction candidate</h2>
-          </div>
-          <span class="status-pill suggestion-pill">Not applied</span>
-        </div>
-        <pre id="pi5-suggestion" class="pi5-suggestion-text"></pre>
-        <div class="inline-actions">
-          <button id="use-pi5-suggestion" class="secondary-button" type="button">Use reconstruction</button>
-        </div>
-        <p class="field-note">This section is shown only for a pending/proposed item. Automatically applied source-image reconstructions do not require manual saving.</p>
-      </section>
-
-      <section class="manual-edit-card">
-        <div class="text-panel-heading">
-          <div>
-            <span class="eyebrow">APPLIED RESULT / MANUAL OVERRIDE</span>
-            <h2 id="edit-heading">Correction text</h2>
-          </div>
-          <span id="edit-status" class="status-pill status-after">Editable</span>
-        </div>
-        <textarea id="correction" spellcheck="false" placeholder="Type the corrected target block only. Do not copy the text above/below into this field. Use [UNREADABLE] where the page cannot be read safely."></textarea>
-        <div class="inline-actions">
-          <button id="reset" class="secondary-button" type="button">Reset to Docling text</button>
-        </div>
-        <p id="edit-note" class="field-note">If an automatic reconstruction is already applied, the editor starts with that applied text. No Save click is required unless you want to override it manually.</p>
-      </section>
-
-      <section class="diff-card" aria-labelledby="diff-heading">
-        <div class="diff-heading-row">
-          <div>
-            <span class="eyebrow">APPLIED / OVERRIDE DIFF</span>
-            <h2 id="diff-heading">Difference from raw Docling</h2>
-          </div>
-          <div id="diff-counts" class="diff-counts"></div>
-        </div>
-        <div class="diff-legend">
-          <span><i class="legend-swatch removed-swatch"></i>Wrong OCR removed</span>
-          <span><i class="legend-swatch added-swatch"></i>Text you filled</span>
-        </div>
-        <div id="diff" class="diff-output" aria-live="polite"></div>
-      </section>
-
-      <div class="review-actions">
-        <button id="save" class="primary-button" type="button">Save manual override</button>
-        <button id="reject" class="secondary-button" type="button">Original text is correct</button>
-        <button id="rerun" class="secondary-button" type="button">Open verification</button>
       </div>
-      <p class="hint">Automatic applied corrections are already present in the overlay. Saving here is only for a human override. The original PDF, converted ZIP, and raw Docling JSON remain unchanged.</p>
-    </div>
-  </section>
-</main>
-<script src="/assets/review.js?v=2026.09.22.40.10.1"></script>
+    </header>
+
+
+    <section class="panel review-filter-panel" aria-label="Review queue filters">
+      <div class="review-filter-row">
+        <label>Book<select id="review-filter-book"><option value="">All books</option></select></label>
+        <label>Type<select id="review-filter-type"><option value="">All types</option><option value="text">Text block</option><option value="table_cell">Table cell</option></select></label>
+        <label>Reason<select id="review-filter-reason"><option value="">All reasons</option></select></label>
+        <label>State<select id="review-filter-state"><option value="all">All states</option><option value="needs_review">Needs review</option><option value="reviewed">Reviewed</option><option value="pending">Pending / proposed</option><option value="applied">Applied correction</option><option value="original_kept">Original kept</option></select></label>
+      </div>
+      <div class="review-filter-footer"><span id="review-filter-count">Loading queue…</span><button id="review-filter-clear" class="mini-action" type="button">Clear filters</button></div>
+    </section>
+    <div id="message" class="review-message" aria-live="polite"></div>
+
+    <section class="review-grid">
+      <div class="page-card">
+        <div class="card-title-row"><h2>Original PDF page</h2><span id="page-label" class="page-label"></span></div>
+        <img id="page-image" alt="Original PDF page">
+      </div>
+
+      <div class="edit-card">
+        <section class="docling-context-card" aria-labelledby="docling-context-heading">
+          <div class="text-panel-heading">
+            <div><span id="context-eyebrow" class="eyebrow">RAW DOCLING SOURCE</span><h2 id="docling-context-heading">Context around the suspicious text</h2></div>
+            <span class="status-pill source-pill">Immutable source</span>
+          </div>
+          <p id="context-note" class="field-note">Context comes directly from the immutable Docling JSON and is shown only to support your decision.</p>
+          <div class="context-stack">
+            <div class="context-section above-context"><div id="above-label" class="context-label">TEXT ABOVE</div><div id="docling-above" class="context-blocks"></div></div>
+            <div class="context-section target-context"><div id="target-label" class="context-label">OCR TARGET BLOCK</div><textarea id="original" readonly spellcheck="false"></textarea><div id="target-source-meta" class="context-meta"></div></div>
+            <div class="context-section below-context"><div id="below-label" class="context-label">TEXT BELOW</div><div id="docling-below" class="context-blocks"></div></div>
+          </div>
+        </section>
+
+        <section id="pi5-suggestion-card" class="pi5-suggestion-card" hidden>
+          <div class="text-panel-heading"><div><span class="eyebrow">VERIFIER SUGGESTION</span><h2>Reconstruction candidate</h2></div><span class="status-pill suggestion-pill">Not human-approved</span></div>
+          <pre id="pi5-suggestion" class="pi5-suggestion-text"></pre>
+          <div class="inline-actions"><button id="use-pi5-suggestion" class="secondary-button" type="button">Use reconstruction</button></div>
+          <p class="field-note">Copy the candidate into the editor, then save only if you agree with it.</p>
+        </section>
+
+        <section class="manual-edit-card">
+          <div class="text-panel-heading"><div><span class="eyebrow">HUMAN DECISION</span><h2 id="edit-heading">Correction text</h2></div><span id="edit-status" class="status-pill status-after">Editable</span></div>
+          <textarea id="correction" spellcheck="false" placeholder="Type only the corrected target text. Use [UNREADABLE] if it cannot be recovered safely."></textarea>
+          <div class="inline-actions"><button id="reset" class="secondary-button" type="button">Reset to Docling text</button></div>
+          <p id="edit-note" class="field-note">Saving creates a human-authoritative decision. Keeping the original records that the Docling source is correct.</p>
+        </section>
+
+        <section class="diff-card" aria-labelledby="diff-heading">
+          <div class="diff-heading-row"><div><span class="eyebrow">DIFFERENCE</span><h2 id="diff-heading">Difference from raw Docling</h2></div><div id="diff-counts" class="diff-counts"></div></div>
+          <div class="diff-legend"><span><i class="legend-swatch removed-swatch"></i>Original removed</span><span><i class="legend-swatch added-swatch"></i>Correction added</span></div>
+          <div id="diff" class="diff-output" aria-live="polite"></div>
+        </section>
+
+        <div class="review-actions">
+          <button id="save" class="primary-button" type="button">Apply human correction</button>
+          <button id="reject" class="secondary-button" type="button">Keep original</button>
+          <button id="rerun" class="secondary-button" type="button">Open verification</button>
+        </div>
+        <p class="hint">Keyboard: Ctrl+Enter applies the correction; Ctrl+Shift+Enter keeps the original; Alt+←/→ moves through the queue.</p>
+        <details class="review-technical-details"><summary>Technical reason code</summary><code id="technical-reason-code">—</code></details>
+      </div>
+    </section>
+  </main>
+</div>
+<script src="/assets/nav.js?v=2026.09.22.40.11C"></script>
+<script src="/assets/review.js?v=2026.09.22.40.11C"></script>
 </body>
 </html>

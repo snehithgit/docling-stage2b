@@ -1,4 +1,30 @@
-# Current release — 2026.09.22.40.10.1
+# Current release — 2026.09.22.40.11C
+
+## `.40.11C` complete — human review UX & UI consistency
+
+- [x] Global filtered web text-review queue across books.
+- [x] Book/type/reason/state review filters with filter-preserving navigation.
+- [x] Text/Vision/Artifact audit rendered one item at a time with keyboard navigation.
+- [x] Vision human decisions auto-advance; evidence summary precedes collapsed extracted/raw detail.
+- [x] Existing shared Stage 2C human-authority model preserved across Web and Telegram.
+- [x] Provider-accurate verifier labels and consistent Retrieval-Augmented Generation (RAG) naming.
+- [x] Shared Needs attention strip backed by aggregated diagnostics.
+- [x] Dashboard queue-refresh failures are surfaced rather than silently swallowed.
+- [x] Source-tree regression suite: 529/529 tests pass.
+
+# Previous release — 2026.09.22.40.11A
+
+## `.40.11A` complete — daily-use UI & operator safety
+
+- [x] Managed Add Book upload/URL flow enters the normal pipeline directly.
+- [x] Contextual Stage 2C audit bypass instead of permanent page-top control.
+- [x] Shared review queue with auto-advance, keyboard shortcuts and table-cell context.
+- [x] OnePlus verification circuit/outage visibility.
+- [x] Confirmations for destructive/expensive actions.
+- [x] Retrieval elapsed progress + true backend cancellation.
+- [x] Aggregated Errors & diagnostics and simplified Queue/Quality layouts.
+
+# Previous release — 2026.09.22.40.10.1
 
 ## `.40.10.1` complete — adaptive OnePlus workload protection
 
@@ -156,8 +182,8 @@
 
 # Project completed implementation
 
-Last updated: 2026-09-21  
-Current release: `2026.09.22.40.10.1`
+Last updated: 2026-09-22  
+Current release: `2026.09.22.40.11C`
 
 Do not redesign/reacquire these items without a specific regression or requirement.
 

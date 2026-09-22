@@ -1,7 +1,9 @@
-const PAGE_SIZE = 30;
+const PAGE_SIZE = 1;
 let auditJobs = [];
 let filteredJobs = [];
 let auditPage = 1;
+let totalFiltered = 0;
+let searchTimer = null;
 const requestedJobId = new URLSearchParams(location.search).get("job");
 
 const $ = id => document.getElementById(id);
@@ -26,6 +28,21 @@ function rawBlock(title, value) {
   return `<details class="vision-audit-raw"><summary>${esc(title)}</summary><pre>${esc(pretty(value))}</pre></details>`;
 }
 
+function friendlyReason(value) {
+  const raw = String(value || "");
+  const known = {
+    SOURCE_IMAGE_UNREADABLE_KEEP_ORIGINAL: "Source image unreadable — original preserved",
+    CRITICAL_SOURCE_TOKEN_NOT_PRESERVED_KEEP_ORIGINAL: "Important technical value not preserved",
+    TROUBLESHOOTING_ACTION_DROPPED_KEEP_ORIGINAL: "Troubleshooting action dropped",
+    TABLE_CELL_CONTEXT_CONTAMINATION_KEEP_ORIGINAL: "Table-cell correction included neighboring context",
+    SOURCE_CONTENT_CONTRACTION_KEEP_ORIGINAL: "Correction removed too much source content",
+    OCR_GARBLE: "Possible OCR corruption",
+    LIKELY_CORRUPT: "Likely OCR corruption",
+    UNCERTAIN: "Needs human review"
+  };
+  return known[raw] || raw.replaceAll("_", " ").toLowerCase().replace(/^./, c => c.toUpperCase());
+}
+
 function outcomeLabel(job) {
   if (job.status === "failed") return "Failed";
   if (job.disposition === "applied") return "Applied correction";
@@ -45,7 +62,8 @@ function renderJob(job) {
   const rejected = scope.accepted === false;
   const pipeline = downstream.status === "applied" ? "Stage 2C overlay applied" : downstream.status === "pending" ? "Held for review; original preserved" : downstream.status ? `Stage 2C: ${downstream.status}` : job.disposition === "verified_original" ? "No overlay needed; original kept" : job.disposition === "pending" ? "No overlay; original preserved" : "No Stage 2C entry recorded";
   const page = request.page ?? job.source?.page ?? "—";
-  const provider = job.provider || "text verifier";
+  const providerCode = String(job.provider || "pi5").toLowerCase();
+  const provider = ({pi5:"Pi5", oneplus:"OnePlus", groq:"Groq"})[providerCode] || job.provider || "Verifier";
   const metrics = [
     ["Similarity", scope.sequence_similarity],
     ["Target recall", scope.target_token_recall],
@@ -55,7 +73,7 @@ function renderJob(job) {
 
   return `<article class="panel vision-audit-card" data-job="${job.id}">
     <div class="vision-audit-card-head">
-      <div><p class="eyebrow">Page ${esc(page)} · ${esc(job.route_id || "route")}</p><h2>${esc(job.book || "Unknown book")}</h2><p class="format-note">${esc(job.code || "TEXT_REVIEW")} · ${esc(provider)}${job.model ? ` · ${esc(job.model)}` : ""} · ${esc(fmtSeconds(job.processing_seconds))}</p></div>
+      <div><p class="eyebrow">Page ${esc(page)} · ${esc(job.route_id || "route")}</p><h2>${esc(job.book || "Unknown book")}</h2><p class="format-note">${esc(job.code || "TEXT_REVIEW")} · Text verifier · ${esc(provider)}${job.model ? ` · ${esc(job.model)}` : ""} · ${esc(fmtSeconds(job.processing_seconds))}</p></div>
       <div class="vision-audit-decision">${statusPill(job.status === "failed" ? "failed" : job.disposition, outcomeLabel(job))}</div>
     </div>
 
@@ -66,10 +84,10 @@ function renderJob(job) {
       </div>
 
       <div class="vision-audit-explanation">
-        <section><div class="vision-audit-section-label">Why it was sent</div><p>${esc(job.reason || job.code || "Text verification route")}</p></section>
+        <section><div class="vision-audit-section-label">Why it was sent</div><p>${esc(friendlyReason(job.reason || job.code || "Text verification route"))}</p></section>
         <section><div class="vision-audit-section-label">Immutable Docling target</div><p class="audit-transcription">${esc(target || "—")}</p></section>
         ${job.status === "failed" ? `<section><div class="vision-audit-section-label">Failure</div><p class="queue-error">${esc(job.error_type || "Error")}: ${esc(job.error_message || "Verification failed")}</p></section>` : `<section><div class="vision-audit-section-label">Verifier transcription</div><p class="audit-transcription">${esc(proposed || "No readable transcription")}</p></section>`}
-        <section class="${rejected ? "vision-audit-override" : ""}"><div class="vision-audit-section-label">Safety decision</div><p><strong>${esc(rejected ? "Rejected — original preserved" : correction.status === "applied" ? "Accepted" : correction.reason || "No correction needed")}</strong></p>${metrics.length ? `<div class="vision-audit-kv">${metrics.map(([name,value]) => `<span>${esc(name)}</span><strong>${Number(value).toFixed(3)}</strong>`).join("")}</div>` : ""}${(scope.reasons || []).length ? `<div class="vision-audit-tags">${scope.reasons.map(x => `<span>${esc(x)}</span>`).join("")}</div>` : ""}</section>
+        <section class="${rejected ? "vision-audit-override" : ""}"><div class="vision-audit-section-label">Safety decision</div><p><strong>${esc(rejected ? "Rejected — original preserved" : correction.status === "applied" ? "Accepted" : correction.reason || "No correction needed")}</strong></p>${metrics.length ? `<div class="vision-audit-kv">${metrics.map(([name,value]) => `<span>${esc(name)}</span><strong>${Number(value).toFixed(3)}</strong>`).join("")}</div>` : ""}${(scope.reasons || []).length ? `<div class="vision-audit-tags">${scope.reasons.map(x => `<span title="${esc(x)}">${esc(friendlyReason(x))}</span>`).join("")}</div>` : ""}</section>
         <section><div class="vision-audit-section-label">What the pipeline did</div><p><strong>${esc(pipeline)}</strong></p>${downstream.status_reason ? `<p class="format-note">${esc(downstream.status_reason)}</p>` : ""}</section>
       </div>
     </div>
@@ -79,48 +97,27 @@ function renderJob(job) {
         <div>${rawBlock("BEFORE anchors", request.before_anchors)}${rawBlock("AFTER anchors", request.after_anchors)}${rawBlock("Saved crop metadata", request.target_crop)}${rawBlock("Raw verifier response", job.raw_response)}</div>
         <div>${rawBlock("Source reconstruction", reconstruction)}${rawBlock("Scope / alignment guard", scope)}${rawBlock("Parsed verdict", job.parsed)}${rawBlock("Correction decision", correction)}${rawBlock("Critical-token safety", alignment)}</div>
       </div>
-      <div class="document-actions"><a class="mini-action" href="/api/stage2b/jobs/${job.id}/result" target="_blank" rel="noopener">Open complete result JSON</a>${["LIKELY_CORRUPT","UNCERTAIN"].includes(job.verdict) && page !== "—" ? `<a class="mini-action" href="/review?job=${encodeURIComponent(job.postprocess_job_id)}&entry=${encodeURIComponent(`${job.generation}:text:${job.route_id}`)}&page=${encodeURIComponent(page)}">Manual override</a>` : ""}</div>
+      <div class="document-actions"><a class="mini-action" href="/api/stage2b/jobs/${job.id}/result" target="_blank" rel="noopener">Technical details JSON</a>${job.downstream?.entry_id && page !== "—" ? `<a class="mini-action primary-mini" href="/review?job=${encodeURIComponent(job.postprocess_job_id)}&entry=${encodeURIComponent(job.downstream.entry_id)}&page=${encodeURIComponent(page)}">Review / decide</a>` : ""}</div>
     </details>
   </article>`;
 }
 
-function fillBookFilter() {
+function fillBookFilter(books=[]) {
   const select = $("ta-book");
   const previous = select.value;
-  const books = [...new Set(auditJobs.map(j => j.book).filter(Boolean))].sort((a,b) => String(a).localeCompare(String(b)));
-  select.innerHTML = `<option value="">All books</option>${books.map(book => `<option value="${esc(book)}">${esc(book)}</option>`).join("")}`;
-  if (books.includes(previous)) select.value = previous;
-}
-
-function applyFilters(resetPage=true) {
-  const book = $("ta-book").value;
-  const outcome = $("ta-outcome").value;
-  const query = $("ta-search").value.trim().toLowerCase();
-  filteredJobs = auditJobs.filter(job => {
-    if (requestedJobId && !book && !outcome && !query && String(job.id) !== String(requestedJobId)) return false;
-    if (book && job.book !== book) return false;
-    const actual = job.status === "failed" ? "failed" : job.disposition;
-    if (outcome && actual !== outcome) return false;
-    if (query) {
-      const blob = [job.book, job.route_id, job.code, job.reason, job.request?.page, job.request?.suspect_text, job.correction?.proposed_text, ...(job.scope_guard?.reasons || [])].join(" ").toLowerCase();
-      if (!blob.includes(query)) return false;
-    }
-    return true;
-  });
-  if (resetPage) auditPage = 1;
-  renderPage();
+  const values = [...new Set((books || []).filter(Boolean))].sort((a,b) => String(a).localeCompare(String(b)));
+  select.innerHTML = `<option value="">All books</option>${values.map(book => `<option value="${esc(book)}">${esc(book)}</option>`).join("")}`;
+  if (values.includes(previous)) select.value = previous;
 }
 
 function renderPage() {
-  const pages = Math.max(1, Math.ceil(filteredJobs.length / PAGE_SIZE));
+  const pages = Math.max(1, Math.ceil(totalFiltered / PAGE_SIZE));
   auditPage = Math.min(Math.max(1, auditPage), pages);
-  const start = (auditPage - 1) * PAGE_SIZE;
-  const rows = filteredJobs.slice(start, start + PAGE_SIZE);
-  $("ta-count").textContent = `${filteredJobs.length.toLocaleString()} audit result${filteredJobs.length === 1 ? "" : "s"}`;
-  $("ta-page").textContent = `Page ${auditPage} of ${pages}`;
+  $("ta-count").textContent = `${totalFiltered.toLocaleString()} audit result${totalFiltered === 1 ? "" : "s"}`;
+  $("ta-page").textContent = totalFiltered ? `${auditPage} of ${totalFiltered}` : "0 of 0";
   $("ta-prev").disabled = auditPage <= 1;
   $("ta-next").disabled = auditPage >= pages;
-  $("ta-results").innerHTML = rows.length ? rows.map(renderJob).join("") : `<div class="panel empty-state">No text verifier results match these filters.</div>`;
+  $("ta-results").innerHTML = auditJobs.length ? auditJobs.map(renderJob).join("") : `<div class="panel empty-state">No text verifier results match these filters.</div>`;
 }
 
 function renderSummary(data) {
@@ -139,24 +136,51 @@ async function loadAudit() {
   button.disabled = true;
   feedback("Loading text verifier audit…");
   try {
-    const response = await fetch("/api/stage2b/text-audit?limit=5000", {cache:"no-store"});
+    const params = new URLSearchParams({limit: String(PAGE_SIZE), offset: String((auditPage - 1) * PAGE_SIZE)});
+    const book = $("ta-book").value;
+    const outcome = $("ta-outcome").value;
+    const query = $("ta-search").value.trim();
+    if (book) params.set("book", book);
+    if (outcome) params.set("outcome", outcome);
+    if (query) params.set("query", query);
+    if (requestedJobId) params.set("verification_job_id", requestedJobId);
+    const response = await fetch(`/api/stage2b/text-audit?${params}`, {cache:"no-store"});
     if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
     const data = await response.json();
     auditJobs = data.jobs || [];
+    filteredJobs = auditJobs;
+    totalFiltered = Number(data.total_filtered ?? auditJobs.length);
     renderSummary(data);
-    fillBookFilter();
-    applyFilters(false);
+    fillBookFilter(data.books || []);
+    renderPage();
     feedback("");
   } catch (error) {
     feedback(`Could not load text audit: ${error.message}`, "warning");
   } finally { button.disabled = false; }
 }
 
+function reloadFromFirstPage() { auditPage = 1; loadAudit(); }
 $("refresh-audit").addEventListener("click", loadAudit);
-$("ta-book").addEventListener("change", () => applyFilters());
-$("ta-outcome").addEventListener("change", () => applyFilters());
-$("ta-search").addEventListener("input", () => applyFilters());
-$("ta-clear").addEventListener("click", () => { history.replaceState({}, "", "/text-audit"); location.reload(); });
-$("ta-prev").addEventListener("click", () => { auditPage -= 1; renderPage(); window.scrollTo({top:0, behavior:"smooth"}); });
-$("ta-next").addEventListener("click", () => { auditPage += 1; renderPage(); window.scrollTo({top:0, behavior:"smooth"}); });
+$("ta-book").addEventListener("change", reloadFromFirstPage);
+$("ta-outcome").addEventListener("change", reloadFromFirstPage);
+$("ta-search").addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(reloadFromFirstPage, 250);
+});
+$("ta-clear").addEventListener("click", () => {
+  history.replaceState({}, "", "/text-audit");
+  $("ta-book").value = "";
+  $("ta-outcome").value = "";
+  $("ta-search").value = "";
+  auditPage = 1;
+  loadAudit();
+});
+$("ta-prev").addEventListener("click", () => { if (auditPage > 1) { auditPage -= 1; loadAudit(); window.scrollTo({top:0, behavior:"smooth"}); } });
+$("ta-next").addEventListener("click", () => { auditPage += 1; loadAudit(); window.scrollTo({top:0, behavior:"smooth"}); });
+document.addEventListener("keydown", event => {
+  const editing = ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName);
+  if (editing) return;
+  if ((event.altKey && event.key === "ArrowLeft") || event.key === "[") { event.preventDefault(); if (auditPage > 1) { auditPage -= 1; loadAudit(); } }
+  if ((event.altKey && event.key === "ArrowRight") || event.key === "]") { event.preventDefault(); const pages = Math.max(1, Math.ceil(totalFiltered / PAGE_SIZE)); if (auditPage < pages) { auditPage += 1; loadAudit(); } }
+});
 loadAudit();
