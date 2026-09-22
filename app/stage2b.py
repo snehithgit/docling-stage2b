@@ -2988,7 +2988,10 @@ class Stage2BWorker:
                 except Exception as exc:
                     if self._is_retryable_endpoint_failure(exc):
                         count_processed = False
-                        delay = await self._open_endpoint_circuit("pi5", f"{type(exc).__name__}: {exc}")
+                        delay = await self._open_endpoint_circuit(
+                            "pi5", f"{type(exc).__name__}: {exc}",
+                            event_context=await self._notification_job_context(row, error=exc),
+                        )
                         self._pi5_wait_state(state, rows, str(exc))
                         state["retry_after_seconds"] = delay
                         logger.warning(
@@ -3414,7 +3417,10 @@ class Stage2BWorker:
                     state["reused"] += 1
                 except Exception as exc:
                     if self._is_retryable_endpoint_failure(exc):
-                        delay = await self._open_endpoint_circuit("pi5", f"{type(exc).__name__}: {exc}")
+                        delay = await self._open_endpoint_circuit(
+                            "pi5", f"{type(exc).__name__}: {exc}",
+                            event_context=await self._notification_job_context(row, error=exc),
+                        )
                         self._pi5_wait_state(state, rows, str(exc))
                         state["retry_after_seconds"] = delay
                         logger.warning(
@@ -3727,7 +3733,9 @@ class Stage2BWorker:
         tmp.replace(path)
         return str(path)
 
-    async def _open_endpoint_circuit(self, provider: str, detail: str) -> int:
+    async def _open_endpoint_circuit(
+        self, provider: str, detail: str, *, event_context: dict[str, object] | None = None
+    ) -> int:
         if provider not in self._endpoint_circuit:
             return max(5, int(getattr(self._config_getter(), "stage2b_endpoint_breaker_base_seconds", 30)))
         state = self._endpoint_circuit[provider]
@@ -3751,7 +3759,9 @@ class Stage2BWorker:
             await asyncio.to_thread(self._write_endpoint_outage_file_sync, provider, str(detail))
         except OSError:
             logger.exception("Could not persist Stage 2B %s endpoint outage state", provider)
-        self._events.notify(f"stage2b_{provider}_endpoint_circuit_open")
+        context = dict(event_context or {})
+        context.setdefault("error", str(detail)[:1000])
+        self._notify_event(f"stage2b_{provider}_endpoint_circuit_open", **context)
         return int(delay)
 
     async def _close_endpoint_circuit(self, provider: str) -> None:
@@ -3866,6 +3876,39 @@ class Stage2BWorker:
                 self._events.notify(f"stage2b_{target}_worker_error")
                 await asyncio.sleep(self._config_getter().stage2b_poll_interval_seconds)
 
+    def _notify_event(self, reason: str, **context: object) -> None:
+        """Emit rich context while remaining compatible with legacy event sinks."""
+        try:
+            self._events.notify(reason, **context)
+        except TypeError as exc:
+            if context and "unexpected keyword argument" in str(exc):
+                self._events.notify(reason)
+                return
+            raise
+
+    async def _notification_job_context(
+        self, job: dict[str, Any], *, error: object | None = None
+    ) -> dict[str, object]:
+        """Build push-alert context at the job source, not in the Telegram transport."""
+        filename = str(job.get("output_filename") or "").strip()
+        postprocess_job_id = int(job.get("postprocess_job_id") or 0)
+        if postprocess_job_id:
+            try:
+                book = await self._postprocess_store.get_job(postprocess_job_id)
+            except Exception:
+                book = None
+            if book:
+                filename = str(book.get("source_filename") or book.get("output_filename") or filename).strip()
+        context: dict[str, object] = {
+            "filename": filename or None,
+            "postprocess_job_id": postprocess_job_id or None,
+            "route_id": str(job.get("route_id") or "").strip() or None,
+            "stage": str(job.get("_active_stage") or "stage2b").strip(),
+        }
+        if error is not None:
+            context["error"] = f"{type(error).__name__}: {error}"
+        return {key: value for key, value in context.items() if value is not None}
+
     def _retry_delay(self, job: dict[str, Any]) -> int:
         config = self._config_getter()
         attempt = max(1, int(job.get("attempt_count") or 0) + 1)
@@ -3896,7 +3939,10 @@ class Stage2BWorker:
                 target, job.get("id"), job.get("route_id"), job.get("_active_stage"),
                 max_retries, type(exc).__name__, exc,
             )
-            self._events.notify(f"stage2b_{target}_failed")
+            self._notify_event(
+                f"stage2b_{target}_failed",
+                **(await self._notification_job_context(job, error=exc)),
+            )
             return
 
         delay = self._retry_delay(job)
@@ -4002,11 +4048,14 @@ class Stage2BWorker:
                 ) + 1
             try:
                 await self._record_stage2c_entry(target, job, request, result, verdict, model)
-            except Exception:
+            except Exception as exc:
                 # Verification is authoritative Stage 2B output. A ledger write
                 # problem must never convert a completed verifier job into failure.
                 logger.exception("Stage 2C ledger update failed for %s job %s", target, job.get("id"))
-                self._events.notify("stage2c_ledger_error")
+                self._notify_event(
+                    "stage2c_ledger_error",
+                    **(await self._notification_job_context(job, error=exc)),
+                )
             try:
                 self._checkpoint_path(job).unlink(missing_ok=True)
             except OSError:
@@ -4047,7 +4096,10 @@ class Stage2BWorker:
                 "Stage 2B Groq request paused before quota limit on job %s route %s: %s",
                 job.get("id"), job.get("route_id"), exc,
             )
-            self._events.notify("stage2b_cloud_quota_paused")
+            self._notify_event(
+                "stage2b_cloud_quota_paused",
+                **(await self._notification_job_context(job, error=exc)),
+            )
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code if exc.response is not None else 0
             retryable = status >= 500 or status in {408, 429}
@@ -4067,7 +4119,10 @@ class Stage2BWorker:
                     "Stage 2B %s job %s route %s failed at %s: HTTP %s %s",
                     target, job.get("id"), job.get("route_id"), job.get("_active_stage"), status, exc,
                 )
-                self._events.notify(f"stage2b_{target}_failed")
+                self._events.notify(
+                    f"stage2b_{target}_failed",
+                    **(await self._notification_job_context(job, error=exc)),
+                )
         except (httpx.TransportError, TimeoutError, ConnectionError) as exc:
             seconds = time.monotonic() - started
             provider = str(
@@ -4081,7 +4136,10 @@ class Stage2BWorker:
             if provider == "oneplus" and type(exc) is TimeoutError:
                 await self._oneplus_workload.trigger_severe_cooldown("absolute_job_timeout")
             if self._is_endpoint_connection_failure(exc) and provider in self._endpoint_circuit:
-                delay = await self._open_endpoint_circuit(provider, f"{type(exc).__name__}: {exc}")
+                outage_context = await self._notification_job_context(job, error=exc)
+                delay = await self._open_endpoint_circuit(
+                    provider, f"{type(exc).__name__}: {exc}", event_context=outage_context
+                )
                 await self._store.mark_deferred(
                     int(job["id"]), "EndpointUnavailable", str(exc), delay_seconds=delay
                 )
@@ -4107,7 +4165,10 @@ class Stage2BWorker:
                 target, job.get("id"), job.get("route_id"), job.get("_active_stage"),
                 type(exc).__name__, exc,
             )
-            self._events.notify(f"stage2b_{target}_failed")
+            self._notify_event(
+                f"stage2b_{target}_failed",
+                **(await self._notification_job_context(job, error=exc)),
+            )
         finally:
             self.worker_state[target]["active_job_id"] = None
             self.worker_state[target]["active_stage"] = None

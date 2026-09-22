@@ -1,6 +1,19 @@
+# `.40.11E` handoff
+
+`2026.09.22.40.11E` is the current implementation baseline.
+
+## `.40.11E` Telegram behavior
+
+- Native Telegram slash-command menu is registered on bot startup; the Menu button opens it.
+- Audit commands appear in that menu only when `telegram_controls` is enabled.
+- Critical/routine event frames can carry filename/job/route/stage/error context; Telegram renders it but never queries pipeline databases itself.
+- Conversion, Stage 2A, Stage 3 and now Stage 2B/Stage 2C job failures can name the affected manual when known at the source.
+- `telegramify-markdown` is contract-probed at runtime. Formatter failure degrades to plain text with a visible warning instead of silently dropping alerts.
+- Existing Stage 2C Web/Telegram human-authority paths are unchanged.
+
 # `.40.11D` handoff
 
-`2026.09.22.40.11D` is the current implementation baseline.
+`2026.09.22.40.11D` was the previous implementation baseline.
 
 ## `.40.11D` Telegram behavior
 

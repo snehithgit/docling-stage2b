@@ -1,4 +1,16 @@
-# Current release — 2026.09.22.40.11D
+# Current release — 2026.09.22.40.11E
+
+## `.40.11E` complete — Telegram actionable context & native menus
+
+- [x] Native Telegram command list + Menu button.
+- [x] Controls-aware audit commands in the menu.
+- [x] Contextual push alerts include manual filename/job route/stage/error when known at the event source.
+- [x] No Telegram-side SQLite lookup added.
+- [x] Runtime formatter dependency contract probe + explicit plain-text degradation warning.
+- [x] Backward-compatible event sink behavior.
+- [x] Regression suite: 538 passed; 1 real-dependency contract test skipped only in this network-isolated validation environment.
+
+# Previous release — 2026.09.22.40.11D
 
 ## `.40.11D` complete — Telegram mobile UX & alerting
 
@@ -198,7 +210,7 @@
 # Project completed implementation
 
 Last updated: 2026-09-22  
-Current release: `2026.09.22.40.11D`
+Current release: `2026.09.22.40.11E`
 
 Do not redesign/reacquire these items without a specific regression or requirement.
 

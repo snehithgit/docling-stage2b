@@ -2530,8 +2530,8 @@ class PostprocessWorker:
                 processed = await self._process_one()
                 if processed:
                     continue
-            except Exception:
-                self._events.notify("postprocess_error")
+            except Exception as exc:
+                self._events.notify("postprocess_error", stage="stage2a_worker", error=f"{type(exc).__name__}: {exc}")
             await asyncio.sleep(self._config_getter().postprocess_poll_interval_seconds)
 
     async def _process_one(self) -> bool:
@@ -2649,11 +2649,20 @@ class PostprocessWorker:
                 job["id"], seconds, result_dir.name, output_sha,
                 profile["primary_kind"], routes["summary"]["routes"],
             )
-            self._events.notify("postprocess_completed")
+            self._events.notify(
+                "postprocess_completed",
+                filename=job.get("source_filename") or job.get("output_filename"),
+                postprocess_job_id=job.get("id"),
+            )
         except Exception as exc:
             seconds = time.monotonic() - started
             await self._store.mark_failed(job["id"], type(exc).__name__, str(exc), seconds)
-            self._events.notify("postprocess_failed")
+            self._events.notify(
+                "postprocess_failed",
+                filename=job.get("source_filename") or job.get("output_filename"),
+                postprocess_job_id=job.get("id"),
+                error=f"{type(exc).__name__}: {exc}",
+            )
         return True
 
     async def _verifier_health_loop(self) -> None:

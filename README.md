@@ -1,3 +1,13 @@
+## 2026.09.22.40.11E — Telegram actionable alerts, native command menu & formatter contract guard
+
+- Adds Telegram's native command menu and forces the private-chat Menu button to show commands: `/start`, `/status`, `/books`, `/workers`, `/audit`, `/errors`, `/help`, plus `/textaudit`, `/visionaudit`, `/artifactaudit`, `/stopaudit` when `telegram_controls` is enabled.
+- Restores action-critical context in push alerts without coupling Telegram to SQLite: producers attach manual filename/job/route/stage/error context to the in-process event; the transport only renders that supplied context.
+- Stage 2B verifier failures, quota pauses, Stage 2C ledger failures, and job-triggered endpoint circuit opens now identify the affected manual when the source job is known.
+- Adds a real installed-library startup contract probe for `telegramify-markdown`; if the production dependency is missing/incompatible, formatting falls back to plain text and the allowed chats receive a visible degraded-formatting warning.
+- Keeps legacy `notify(reason)` event sinks compatible while the production broker supports optional context.
+- Regression suite: **538 passed, 1 dependency-contract test skipped locally because the sandbox cannot install the external package**; runtime contract probing closes that gap on the deployed image.
+- Full details: `docs/RELEASE_VALIDATION_2026.09.22.40.11E.md`.
+
 ## 2026.09.22.40.11D — Telegram mobile UX, safe formatting & alerting
 
 - Rebuilds Telegram command output for phone screens with semantic icons: 🔴 critical, 🟡 attention, 🟢 OK, ⚓ app identity, plus section/action icons.

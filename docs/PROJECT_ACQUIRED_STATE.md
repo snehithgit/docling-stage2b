@@ -1,3 +1,10 @@
+## .40.11E acquired state
+
+- No new service/framework/database/model dependency beyond the already-acquired `telegramify-markdown==1.2.0`.
+- Telegram command discovery now uses the official Bot API `setMyCommands` + commands menu button; no BotFather-only manual setup is required after restart.
+- EventBroker payloads may include small scalar alert context. SQLite/files remain authoritative and Telegram still never performs a database lookup for push formatting.
+- Legacy reason-only event sinks remain supported.
+
 ## .40.11D acquired state
 
 - Added one pure-Python text-formatting dependency: `telegramify-markdown==1.2.0`; no Telegram framework, database, model, or cloud service was added.
@@ -49,7 +56,7 @@
 # Project acquired state
 
 Last updated: 2026-09-22
-Current code release: `2026.09.22.40.11D`
+Current code release: `2026.09.22.40.11E`
 
 ## Already acquired — do not rebuild unnecessarily
 

@@ -365,3 +365,80 @@ def test_requirements_pin_telegramify_markdown():
     from pathlib import Path
     requirements = (Path(__file__).resolve().parents[1] / "requirements.txt").read_text(encoding="utf-8")
     assert "telegramify-markdown==1.2.0" in requirements
+
+
+def test_telegram_command_menu_exposes_native_monitoring_and_audit_actions():
+    enabled = TelegramBotService._command_menu(True)
+    names = [item["command"] for item in enabled]
+    assert names[:7] == ["start", "status", "books", "workers", "audit", "errors", "help"]
+    assert {"textaudit", "visionaudit", "artifactaudit", "stopaudit"}.issubset(names)
+    assert all(item["description"] for item in enabled)
+
+    monitoring_only = TelegramBotService._command_menu(False)
+    monitoring_names = [item["command"] for item in monitoring_only]
+    assert monitoring_names == ["start", "status", "books", "workers", "audit", "errors", "help"]
+
+
+@pytest.mark.asyncio
+async def test_telegram_installs_native_command_menu_and_chat_menu_button(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+
+    async def handler(command, args):
+        return "ok"
+
+    service = TelegramBotService(lambda: _Config(), handler)
+    calls = []
+
+    async def fake_api(method, payload=None):
+        calls.append((method, payload or {}))
+        return {"ok": True, "result": True}
+
+    service._api = fake_api
+    await service._install_command_menu(True)
+
+    assert calls[0][0] == "setMyCommands"
+    command_names = [item["command"] for item in calls[0][1]["commands"]]
+    assert "start" in command_names
+    assert "status" in command_names
+    assert "help" in command_names
+    assert "textaudit" in command_names
+    assert calls[1] == ("setChatMenuButton", {"menu_button": {"type": "commands"}})
+
+
+@pytest.mark.asyncio
+async def test_event_loop_includes_filename_and_failure_context(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+
+    async def handler(command, args):
+        return "monitor"
+
+    async def stream():
+        yield (
+            'event: refresh\n'
+            'data: {"reason":"stage2b_oneplus_failed","filename":"Fire Alarm (v2).pdf",'
+            '"stage":"oneplus_vision","route_id":"vision:44","error":"TimeoutError: idle"}\n\n'
+        )
+
+    service = TelegramBotService(lambda: _Config(), handler, event_stream_factory=stream)
+    sent = []
+
+    async def fake_send(text, chat_id=None, **kwargs):
+        sent.append(text)
+        return {}
+
+    service.send = fake_send
+    await service._event_loop()
+    assert len(sent) == 1
+    message = sent[0]
+    assert "Vision verifier job failed" in message
+    assert "Fire Alarm (v2).pdf" in message
+    assert "oneplus_vision" in message
+    assert "TimeoutError: idle" in message
+
+
+def test_real_telegramify_markdown_contract_when_dependency_is_installed():
+    pytest.importorskip("telegramify_markdown")
+    from app.telegram_bot import _telegramify_contract_probe
+
+    ok, detail = _telegramify_contract_probe()
+    assert ok, detail

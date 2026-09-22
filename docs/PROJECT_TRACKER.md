@@ -1,4 +1,15 @@
-# Current release — 2026.09.22.40.11D
+# Current release — 2026.09.22.40.11E
+
+## `.40.11E` complete — Telegram actionable context & native menus
+
+- [x] Native command menu registered with Telegram Bot API.
+- [x] Commands Menu button enabled for private chats.
+- [x] Monitoring commands always exposed; human-audit commands exposed only when controls are enabled.
+- [x] Event-source context restores manual filename and technical failure context in push alerts.
+- [x] Runtime real-library formatter probe with explicit degraded-mode warning.
+- [x] Regression suite: 538 passed; 1 dependency integration test skipped locally because external package installation is blocked.
+
+# Previous release — 2026.09.22.40.11D
 
 ## `.40.11D` complete — Telegram mobile UX & alerting
 
@@ -179,8 +190,8 @@ Deployment acceptance pending: complete the still-open transactional retrieval/f
 # Docling Visual RAG — Project tracker
 
 Last updated: 2026-09-22
-Current release: `2026.09.22.40.11D`
-Current phase: **`.40.11C` human-review UX and UI consistency implemented and release-validated**
+Current release: `2026.09.22.40.11E`
+Current phase: **`.40.11E` Telegram actionable alerts, formatter guard and native command menu implemented and release-validated**
 Next phase: **separately tracked retrieval transaction/freshness + Docling dead-task recovery, then Revalidate all + rebuild and fresh N150 benchmarking**
 
 ## Non-negotiable architecture

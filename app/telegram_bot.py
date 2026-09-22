@@ -77,6 +77,66 @@ def _markdown_chunks(value: str, max_utf16_len: int = 4000) -> list[tuple[str, l
         return _plain_text_chunks(source, max_utf16_len)
 
 
+def _telegramify_contract_probe() -> tuple[bool, str]:
+    """Exercise the installed formatter API with representative mobile content."""
+    try:
+        from telegramify_markdown import convert, split_entities
+
+        sample = (
+            "🔴 **ALERT**\n"
+            "`GE_9FA-VoltageRegulator (v2).pdf`\n\n"
+            "```\nPIPELINE\nBooks  12\nFailed  2\n```"
+        )
+        text, entities = convert(sample, latex_escape=False)
+        chunks = split_entities(text, entities, max_utf16_len=48)
+        if not text or not entities or not chunks:
+            return False, "formatter returned empty text/entities/chunks"
+        serialized = []
+        for chunk_text, chunk_entities in chunks:
+            if not chunk_text or _utf16_len(chunk_text) > 48:
+                return False, "formatter split exceeded Telegram UTF-16 limit"
+            serialized.extend(entity.to_dict() for entity in chunk_entities)
+        kinds = {str(item.get("type") or "") for item in serialized}
+        if not ({"bold", "code"} & kinds):
+            return False, "formatter did not preserve expected entities"
+        return True, "telegramify-markdown convert/split_entities contract OK"
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+
+
+def _event_payload(frame: str) -> dict[str, Any]:
+    """Extract the JSON data object from one SSE frame."""
+    if not isinstance(frame, str):
+        return {}
+    for line in frame.splitlines():
+        if not line.startswith("data:"):
+            continue
+        try:
+            payload = json.loads(line[5:].strip() or "{}")
+        except (json.JSONDecodeError, TypeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+    return {}
+
+
+def _event_context_markdown(payload: dict[str, Any]) -> str:
+    """Render only the small amount of context needed to act on a push alert."""
+    lines: list[str] = []
+    filename = str(payload.get("filename") or "").strip()
+    if filename:
+        lines.append(f"📘 Book: {_markdown_code(filename, 180)}")
+    stage = str(payload.get("stage") or "").strip()
+    if stage:
+        lines.append(f"🧭 Stage: {_markdown_code(stage, 80)}")
+    route_id = str(payload.get("route_id") or "").strip()
+    if route_id and not filename:
+        lines.append(f"🔎 Route: {_markdown_code(route_id, 120)}")
+    error = str(payload.get("error") or "").strip()
+    if error:
+        lines.append(f"⚠️ Error: {_markdown_code(error, 240)}")
+    return "\n".join(lines)
+
+
 class TelegramBotService:
     """Optional Telegram monitoring + human-audit transport.
 
@@ -102,6 +162,8 @@ class TelegramBotService:
         self._offset = 0
         self._client: httpx.AsyncClient | None = None
         self._audit_sessions: dict[int, dict[str, Any]] = {}
+        self._formatter_ok = False
+        self._formatter_detail = "not checked"
 
     def _settings(self) -> tuple[bool, str, set[int], bool, bool]:
         cfg = self._config_getter()
@@ -109,14 +171,53 @@ class TelegramBotService:
         chats = {int(x) for x in (getattr(cfg, "telegram_allowed_chat_ids", []) or []) if str(x).strip().lstrip("-").isdigit()}
         return bool(getattr(cfg, "telegram_enabled", False)), token, chats, bool(getattr(cfg, "telegram_notifications", True)), bool(getattr(cfg, "telegram_controls", True))
 
+    @staticmethod
+    def _command_menu(controls: bool) -> list[dict[str, str]]:
+        commands = [
+            {"command": "start", "description": "⚓ Open Docling Auto-Convert menu"},
+            {"command": "status", "description": "📊 Pipeline overview and attention items"},
+            {"command": "books", "description": "📚 Book progress, worst first"},
+            {"command": "workers", "description": "⚙️ Pi5 and OnePlus health"},
+            {"command": "audit", "description": "🔎 Human-review backlog"},
+            {"command": "errors", "description": "🚨 Failures and blockers"},
+            {"command": "help", "description": "ℹ️ Commands and usage"},
+        ]
+        if controls:
+            commands.extend([
+                {"command": "textaudit", "description": "📝 Review text corrections"},
+                {"command": "visionaudit", "description": "🖼 Review vision evidence"},
+                {"command": "artifactaudit", "description": "🔬 Review artifact sweep"},
+                {"command": "stopaudit", "description": "⏹ Stop active audit session"},
+            ])
+        return commands
+
+    async def _install_command_menu(self, controls: bool) -> None:
+        """Publish the native Telegram slash-command menu without blocking bot startup."""
+        try:
+            await self._api("setMyCommands", {"commands": self._command_menu(controls)})
+            await self._api("setChatMenuButton", {"menu_button": {"type": "commands"}})
+        except (httpx.HTTPError, ValueError, TypeError):
+            # A menu registration failure must not disable monitoring/auditing.
+            pass
+
     async def start(self) -> None:
-        enabled, token, chats, notifications, _ = self._settings()
+        enabled, token, chats, notifications, controls = self._settings()
         if not enabled or not token or not chats or self._task:
             return
         self._client = httpx.AsyncClient(timeout=httpx.Timeout(35.0, connect=10.0))
+        self._formatter_ok, self._formatter_detail = _telegramify_contract_probe()
+        await self._install_command_menu(controls)
         self._task = asyncio.create_task(self._poll_loop(), name="telegram-bot-poll")
         if notifications and self._event_stream_factory:
             self._event_task = asyncio.create_task(self._event_loop(), name="telegram-bot-events")
+        if not self._formatter_ok:
+            warning = (
+                "🟡 Telegram formatter degraded\n"
+                f"{self._formatter_detail}\n"
+                "Messages will fall back to plain text until the dependency is fixed."
+            )
+            for chat_id in sorted(chats):
+                await self._api("sendMessage", {"chat_id": int(chat_id), "text": warning})
 
     async def stop(self) -> None:
         for task in (self._task, self._event_task):
@@ -445,22 +546,25 @@ class TelegramBotService:
         }
         known = set(critical) | set(routine)
         async for frame in self._event_stream_factory():
-            if not isinstance(frame, str) or '"reason":' not in frame:
-                continue
-            reason = next((item for item in known if f'"{item}"' in frame), None)
-            if not reason:
+            payload = _event_payload(frame)
+            reason = str(payload.get("reason") or "")
+            if reason not in known:
                 continue
             timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")
+            context = _event_context_markdown(payload)
+            context_block = f"\n{context}\n" if context else "\n"
             if reason in critical:
                 await self.send(
                     "🔴 **ALERT**\n"
                     f"_{timestamp}_\n\n"
-                    f"{critical[reason]}\n\n"
+                    f"{critical[reason]}\n"
+                    f"{context_block}\n"
                     "🚨 `/errors` for details · 📊 `/status` for pipeline state"
                 )
             else:
                 await self.send(
                     f"🟢 _{timestamp}_\n"
-                    f"{routine[reason]}\n\n"
+                    f"{routine[reason]}\n"
+                    f"{context_block}\n"
                     "📊 `/status` for the current pipeline state"
                 )

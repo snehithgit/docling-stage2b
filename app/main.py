@@ -862,7 +862,12 @@ class Runtime:
                 raise
             except Exception as exc:
                 self.pipeline_sequence_state["last_error"] = str(exc)[:1000]
-                self.events.notify("pipeline_sequence_error")
+                self.events.notify(
+                    "pipeline_sequence_error",
+                    postprocess_job_id=self.pipeline_sequence_state.get("current_book"),
+                    stage=self.pipeline_sequence_state.get("current_stage"),
+                    error=f"{type(exc).__name__}: {exc}",
+                )
             self.pipeline_sequence_state["last_run_at_epoch"] = time.time()
             await asyncio.sleep(max(3, int(self.config.postprocess_poll_interval_seconds)))
 

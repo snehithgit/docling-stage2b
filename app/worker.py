@@ -86,7 +86,7 @@ class ConversionWorker:
                 await self._discover_files()
             except Exception as exc:
                 self.health_status = {**self.health_status, "discovery_error": str(exc)}
-                self._events.notify("worker_error")
+                self._events.notify("worker_error", stage="discovery", error=f"{type(exc).__name__}: {exc}")
             await self._sleep(self._config_getter().poll_interval_seconds)
 
     async def _processing_loop(self) -> None:
@@ -102,7 +102,7 @@ class ConversionWorker:
                 processed = await self._process_one(authorized_only=not config.watcher_auto_run)
             except Exception as exc:
                 self.health_status = {**self.health_status, "worker_error": str(exc)}
-                self._events.notify("worker_error")
+                self._events.notify("worker_error", stage="conversion_worker", error=f"{type(exc).__name__}: {exc}")
                 processed = False
             if not processed:
                 await self._sleep(self._config_getter().poll_interval_seconds)
@@ -493,7 +493,12 @@ class ConversionWorker:
                 str(exc),
                 round(time.monotonic() - started, 3),
             )
-            self._events.notify("processing_failed")
+            self._events.notify(
+                "processing_failed",
+                filename=job.get("filename"),
+                job_id=job.get("id"),
+                error=f"TimeoutError: {exc}",
+            )
         except (DoclingApiError, OSError, KeyError, zipfile.BadZipFile) as exc:
             await self._store.mark_failed(
                 job["id"],
@@ -501,7 +506,12 @@ class ConversionWorker:
                 str(exc),
                 round(time.monotonic() - started, 3),
             )
-            self._events.notify("processing_failed")
+            self._events.notify(
+                "processing_failed",
+                filename=job.get("filename"),
+                job_id=job.get("id"),
+                error=f"{type(exc).__name__}: {exc}",
+            )
         if batch_tracked:
             await self._complete_authorized_job(job["id"])
         return True

@@ -11,8 +11,22 @@ class EventBroker:
     def __init__(self) -> None:
         self._listeners: set[asyncio.Queue[str]] = set()
 
-    def notify(self, reason: str = "state") -> None:
-        payload = json.dumps({"reason": reason})
+    def notify(self, reason: str = "state", **context: object) -> None:
+        """Publish a lightweight refresh event with optional alert context.
+
+        SQLite/files remain the source of truth. Context is deliberately copied
+        from the failure/completion source so notification transports can name
+        the affected manual without querying pipeline databases themselves.
+        """
+        event: dict[str, object] = {"reason": str(reason or "state")}
+        for key, value in context.items():
+            if value is None:
+                continue
+            if isinstance(value, (str, int, float, bool)):
+                event[str(key)] = value
+            else:
+                event[str(key)] = str(value)
+        payload = json.dumps(event, ensure_ascii=False)
         for listener in list(self._listeners):
             if not listener.full():
                 listener.put_nowait(payload)

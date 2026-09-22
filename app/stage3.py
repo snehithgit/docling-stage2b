@@ -365,7 +365,11 @@ class Stage3ChunkBuilder:
             state["status"] = "completed"
             state["completed_at_epoch"] = time.time()
             persist()
-            self._events.notify("stage3_chunking_completed")
+            self._events.notify(
+                "stage3_chunking_completed",
+                filename=job.get("source_filename") or job.get("output_filename"),
+                postprocess_job_id=postprocess_job_id,
+            )
         except asyncio.CancelledError:
             state["status"] = "cancelled"
             state["completed_at_epoch"] = time.time()
@@ -376,7 +380,12 @@ class Stage3ChunkBuilder:
             state["error"] = f"{type(exc).__name__}: {exc}"
             state["completed_at_epoch"] = time.time()
             persist()
-            self._events.notify("stage3_chunking_failed")
+            self._events.notify(
+                "stage3_chunking_failed",
+                filename=job.get("source_filename") or job.get("output_filename"),
+                postprocess_job_id=postprocess_job_id,
+                error=f"{type(exc).__name__}: {exc}",
+            )
 
 
     @staticmethod

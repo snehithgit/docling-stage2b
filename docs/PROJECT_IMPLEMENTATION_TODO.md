@@ -1,3 +1,12 @@
+## `.40.11E` Telegram follow-up — closed
+
+- [x] Add native `/start`, `/help`, `/status`, `/books`, `/workers`, `/audit`, `/errors` Telegram command menu.
+- [x] Show `/textaudit`, `/visionaudit`, `/artifactaudit`, `/stopaudit` in the native menu only when `telegram_controls` is enabled.
+- [x] Restore filename/job/stage/error context in actionable push alerts without Telegram querying SQLite.
+- [x] Add production startup contract probe for the real `telegramify-markdown` dependency.
+- [x] Preserve reason-only event-sink compatibility.
+- [x] Add regression tests for menu registration and contextual alert rendering.
+
 ## `.40.11D` Telegram/mobile UX — closed
 
 - [x] Semantic status/action icons.
