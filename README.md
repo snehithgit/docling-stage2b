@@ -1,3 +1,11 @@
+## 2026.09.22.40.11I — Telegram review-count authority fix
+
+- Fixes contradictory Telegram audit counts such as `/audit` showing visual work while `/visionaudit` says complete.
+- Telegram audit queues are now current-Stage-2C-ledger-first; Stage 2B rows are only evidence/image sources.
+- `/audit` separates Text, Vision, Artifact and Recovery counts, while `/errors` separates true human-decision blockers from automated evidence recovery.
+- Duplicate visual routes/reruns collapse to one physical-image review subject.
+- Full details: `docs/RELEASE_VALIDATION_2026.09.22.40.11I.md`.
+
 ## 2026.09.22.40.11H — authoritative human-review queues + inline Text decisions
 
 - Fixes reviewed visual evidence resurfacing after reruns: Text/Vision/Artifact audit surfaces resolve against the **current post-process result directory/current correction ledger**, not historical Stage 2B result directories.

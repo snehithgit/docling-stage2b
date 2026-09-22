@@ -1344,6 +1344,46 @@ def _vision_requires_human(entry: dict[str, Any]) -> bool:
     return verdict == "UNCERTAIN" or bool(entry.get("unresolved")) or str(entry.get("status") or "").lower() == "pending"
 
 
+def _artifact_visual_entry(entry: dict[str, Any]) -> bool:
+    return bool(
+        re.fullmatch(r"AV\d{6}", str(entry.get("route_id") or ""))
+        or str(entry.get("route_code") or "") == "FULL_TECHNICAL_VISUAL"
+    )
+
+
+def _authoritative_visual_subjects(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse duplicate visual routes/reruns to one physical-image authority.
+
+    A saved human decision always wins. Otherwise an unresolved normal Vision
+    route wins over an unresolved artifact-sweep duplicate so the image appears
+    in exactly one human queue. Resolved-only duplicates fall back to newest.
+    """
+    groups: dict[tuple[str, Any], list[dict[str, Any]]] = {}
+    for entry in entries:
+        source_index = entry.get("source_index")
+        key = ("source", source_index) if source_index is not None else ("entry", str(entry.get("entry_id") or ""))
+        groups.setdefault(key, []).append(entry)
+
+    subjects: list[dict[str, Any]] = []
+    for candidates in groups.values():
+        reviewed = [
+            item for item in candidates
+            if bool(item.get("human_verified"))
+            and str(item.get("human_visual_decision") or "") in {"technical", "decorative", "useful", "not_useful"}
+        ]
+        if reviewed:
+            subjects.append(max(reviewed, key=_human_decision_epoch))
+            continue
+        unresolved = [item for item in candidates if _vision_requires_human(item)]
+        if unresolved:
+            normal = [item for item in unresolved if not _artifact_visual_entry(item)]
+            pool = normal or unresolved
+            subjects.append(max(pool, key=lambda item: float(item.get("created_at_epoch") or 0)))
+            continue
+        subjects.append(max(candidates, key=lambda item: float(item.get("created_at_epoch") or 0)))
+    return subjects
+
+
 def verifier_audit_summary(result_dir: Path, *, text_require_human: bool = False) -> dict[str, Any]:
     """Combined human gate used before Stage 3.
 
@@ -1358,10 +1398,13 @@ def verifier_audit_summary(result_dir: Path, *, text_require_human: bool = False
     except (OSError, json.JSONDecodeError, TypeError):
         ledger = {}
     vision_entries = [e for e in (ledger.get("entries") or []) if e.get("entry_type") == "vision_enrichment" and e.get("status") != "superseded"]
-    visual_required = [e for e in vision_entries if _vision_requires_human(e)]
-    reviewed = [e for e in vision_entries if e.get("human_visual_decision") in {"technical", "decorative", "useful", "not_useful"}]
+    visual_subjects = _authoritative_visual_subjects(vision_entries)
+    visual_required = [e for e in visual_subjects if _vision_requires_human(e)]
+    normal_visual_required = [e for e in visual_required if not _artifact_visual_entry(e)]
+    artifact_visual_required = [e for e in visual_required if _artifact_visual_entry(e)]
+    reviewed = [e for e in visual_subjects if e.get("human_visual_decision") in {"technical", "decorative", "useful", "not_useful"}]
     evidence_recovery_required = [
-        e for e in vision_entries
+        e for e in visual_subjects
         if str(e.get("human_visual_decision") or "") in {"technical", "useful"}
         and (
             bool(e.get("human_evidence_recovery_required"))
@@ -1382,9 +1425,17 @@ def verifier_audit_summary(result_dir: Path, *, text_require_human: bool = False
     return {
         "text": text,
         "vision_total": len(vision_entries),
+        "vision_subject_total": len(visual_subjects),
         "vision_human_reviewed": len(reviewed),
+        # Backward-compatible total visual decision backlog. Prefer the split
+        # fields below for UI/Telegram queues so normal Vision and artifact
+        # sweep reviews cannot contradict their dedicated commands.
         "vision_review_required": len(visual_required),
         "vision_required_entry_ids": [str(e.get("entry_id") or "") for e in visual_required],
+        "vision_route_review_required": len(normal_visual_required),
+        "vision_route_required_entry_ids": [str(e.get("entry_id") or "") for e in normal_visual_required],
+        "artifact_review_required": len(artifact_visual_required),
+        "artifact_required_entry_ids": [str(e.get("entry_id") or "") for e in artifact_visual_required],
         "vision_evidence_recovery_required": len(evidence_recovery_required),
         "vision_evidence_recovery_entry_ids": [str(e.get("entry_id") or "") for e in evidence_recovery_required],
         "review_required": blocking,

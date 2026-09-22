@@ -96,3 +96,47 @@ def test_existing_human_useful_empty_evidence_without_new_flag_still_blocks(tmp_
     summary = verifier_audit_summary(d)
     assert summary["vision_evidence_recovery_required"] == 1
     assert summary["blocking_review_required"] == 1
+
+
+def test_visual_review_summary_splits_vision_and_artifact_subjects(tmp_path: Path):
+    d = tmp_path / "book"
+    _ledger(d, [
+        {
+            "entry_id": "g:vision:R00001", "entry_type": "vision_enrichment",
+            "route_id": "R00001", "source_index": 1, "status": "pending",
+            "verification_verdict": "UNCERTAIN", "unresolved": True,
+        },
+        {
+            "entry_id": "g:vision:AV000002", "entry_type": "vision_enrichment",
+            "route_id": "AV000002", "source_index": 2, "status": "pending",
+            "verification_verdict": "UNCERTAIN", "unresolved": True,
+        },
+    ])
+    summary = verifier_audit_summary(d)
+    assert summary["vision_review_required"] == 2
+    assert summary["vision_route_review_required"] == 1
+    assert summary["artifact_review_required"] == 1
+    assert summary["blocking_review_required"] == 2
+
+
+def test_visual_review_summary_human_decision_wins_duplicate_pending_route(tmp_path: Path):
+    d = tmp_path / "book"
+    _ledger(d, [
+        {
+            "entry_id": "old:vision:R00001", "entry_type": "vision_enrichment",
+            "route_id": "R00001", "source_index": 7, "status": "pending",
+            "verification_verdict": "UNCERTAIN", "unresolved": True,
+        },
+        {
+            "entry_id": "new:vision:AV000007", "entry_type": "vision_enrichment",
+            "route_id": "AV000007", "source_index": 7, "status": "excluded",
+            "verification_verdict": "UNCERTAIN", "unresolved": False,
+            "human_verified": True, "human_visual_decision": "decorative",
+            "human_visual_decided_at_epoch": 10,
+        },
+    ])
+    summary = verifier_audit_summary(d)
+    assert summary["vision_subject_total"] == 1
+    assert summary["vision_human_reviewed"] == 1
+    assert summary["vision_review_required"] == 0
+    assert summary["blocking_review_required"] == 0

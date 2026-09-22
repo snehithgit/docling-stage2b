@@ -1,3 +1,10 @@
+## .40.11I acquired state
+
+- Telegram review commands are Stage 2C-ledger-first; Stage 2B rows are supporting evidence, not review authority.
+- One physical Docling image has one visual human-review authority across Vision, Artifact sweep, and rerun duplicates.
+- `/audit` exposes separate Text / Vision / Artifact / Recovery counts. Recovery is automated follow-up, not a human decision queue.
+- `/errors` must never combine optional Text audit candidates with blocking human decisions.
+
 ## .40.11H acquired state
 
 - Human-review state is not inferred from historical verifier rows. The current post-process result directory/current Stage 2C correction ledger is authoritative.
@@ -74,7 +81,7 @@ Current UI baseline includes focused unresolved Human review queues for Text/Vis
 # Project acquired state
 
 Last updated: 2026-09-22
-Current code release: `2026.09.22.40.11H`
+Current code release: `2026.09.22.40.11I`
 
 ## Already acquired — do not rebuild unnecessarily
 

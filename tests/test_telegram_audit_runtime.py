@@ -165,3 +165,43 @@ async def test_telegram_visual_and_artifact_queues_are_separate(tmp_path):
     assert [x["value"] for x in vision["options"]] == ["useful", "not_useful"]
     assert artifact["key"]["entry_id"] == sweep_entry
     assert [x["value"] for x in artifact["options"]] == ["technical", "decorative"]
+
+
+@pytest.mark.asyncio
+async def test_telegram_visual_queue_uses_current_ledger_even_when_evidence_row_is_from_older_result_dir(tmp_path):
+    entry_id = "newgen:vision:R00009"
+    _write_ledger(tmp_path, "current-book", [{
+        "entry_id": entry_id,
+        "entry_type": "vision_enrichment",
+        "route_id": "R00009",
+        "source_index": 9,
+        "status": "pending",
+        "verification_verdict": "UNCERTAIN",
+        "unresolved": True,
+        "verification_job_id": 42,
+        "page": 8,
+    }])
+    rows = [{
+        "id": 42, "target": "oneplus", "status": "completed", "postprocess_job_id": 5,
+        "generation": "oldgen", "route_id": "R00009", "code": "LOW_CONFIDENCE_VISUAL",
+        "result_dir": "historical-book", "output_filename": "manual.zip", "verdict": "UNCERTAIN",
+        "source_json": json.dumps({"type": "picture", "index": 9}),
+        "request_json": json.dumps({"page": 8}),
+        "result_json": json.dumps({"parsed": {"verdict": "UNCERTAIN", "unresolved": True}}),
+    }]
+    runtime = _runtime(tmp_path, rows)
+
+    class _Postprocess:
+        async def list_jobs(self, limit=5000):
+            return [{
+                "id": 5, "status": "completed", "result_dir": "current-book",
+                "source_filename": "manual.pdf", "output_filename": "manual.zip",
+            }]
+
+    runtime.postprocess_store = _Postprocess()
+    review = await runtime._telegram_next_visual_audit("vision")
+    assert review["done"] is False
+    assert review["key"]["entry_id"] == entry_id
+    assert review["key"]["result_dir"] == "current-book"
+    assert review["key"]["row_id"] == 42
+    assert review["remaining"] == 1

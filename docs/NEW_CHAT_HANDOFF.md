@@ -1,3 +1,15 @@
+# `.40.11I` handoff
+
+`2026.09.22.40.11I` is the current implementation baseline.
+
+## `.40.11I` Telegram review-count authority
+
+- `/audit`, `/visionaudit`, `/artifactaudit`, `/errors`, and `/status` now use one current-ledger authority model instead of mixing Stage 2B history with Stage 2C state.
+- Telegram Text/Vision/Artifact queues are ledger-first. Persisted Stage 2B rows are used only as evidence/image sources via `verification_job_id`, so reruns cannot make `/visionaudit` report 0 while `/audit` still shows unresolved current-ledger work.
+- Visual review subjects are deduplicated by physical Docling image. An authoritative human decision wins across normal Vision/artifact-sweep/rerun duplicates.
+- `/audit` separates `Text`, `Vision`, `Artifact`, and automated `Recovery` counts. Recovery is no longer mislabeled as a human decision.
+- `/errors` reports human-decision blockers separately from evidence-recovery blockers. Optional Text audit work is not mislabeled as a pipeline blocker.
+
 # `.40.11H` handoff
 
 `2026.09.22.40.11H` is the current implementation baseline.

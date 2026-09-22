@@ -1,3 +1,12 @@
+# Current release — 2026.09.22.40.11I
+
+## `.40.11I` complete — Telegram review counts use one authority model
+
+- `/audit`, dedicated audit commands, status, and errors now reconcile against current Stage 2C ledgers.
+- Stage 2B history cannot create contradictory remaining counts.
+- Visual subjects are deduplicated by physical image and classified into Vision vs Artifact queues.
+- Evidence recovery is reported separately from human-review decisions.
+
 # Current release — 2026.09.22.40.11H
 
 ## `.40.11H` complete — review authority + faster Text decisions
@@ -221,8 +230,8 @@ Deployment acceptance pending: complete the still-open transactional retrieval/f
 # Docling Visual RAG — Project tracker
 
 Last updated: 2026-09-22
-Current release: `2026.09.22.40.11H`
-Current phase: **`.40.11H` authoritative human-review queues and inline Text decisions implemented and release-validated**
+Current release: `2026.09.22.40.11I`
+Current phase: **`.40.11I` consistent Telegram review authority implemented and release-validated**
 Next phase: **separately tracked retrieval transaction/freshness + Docling dead-task recovery, then Revalidate all + rebuild and fresh N150 benchmarking**
 
 ## Non-negotiable architecture

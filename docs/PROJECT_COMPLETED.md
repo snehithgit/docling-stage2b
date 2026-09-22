@@ -1,3 +1,15 @@
+# Current release — 2026.09.22.40.11I
+
+## `.40.11I` complete — consistent Telegram human-review authority
+
+- [x] Ledger-first Telegram Text/Vision/Artifact queues.
+- [x] `/audit` counters align with the dedicated review queues.
+- [x] Normal Vision and Artifact sweep decisions are counted separately.
+- [x] Duplicate visual routes/reruns collapse to one physical-image review subject.
+- [x] Evidence recovery is separated from human-decision backlog.
+- [x] `/errors` distinguishes human-decision blockers from recovery blockers.
+- [x] Regression suite: 545 passed; 1 optional formatter integration test skipped.
+
 # Current release — 2026.09.22.40.11H
 
 ## `.40.11H` complete — current-authority review queues
@@ -247,7 +259,7 @@
 # Project completed implementation
 
 Last updated: 2026-09-22  
-Current release: `2026.09.22.40.11H`
+Current release: `2026.09.22.40.11I`
 
 Do not redesign/reacquire these items without a specific regression or requirement.
 

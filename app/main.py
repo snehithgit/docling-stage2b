@@ -1130,67 +1130,103 @@ class Runtime:
         fence = "`" * max(1, longest + 1)
         return f"{fence}{text}{fence}"
 
-    async def _telegram_audit_rows(self) -> list[dict]:
-        rows = (
+    async def _telegram_current_audit_books(self) -> list[dict]:
+        """Current completed post-process books; historical runs are never review authority."""
+        if hasattr(self, "postprocess_store"):
+            rows = await self.postprocess_store.list_jobs(limit=5000)
+            return [row for row in rows if str(row.get("status") or "") == "completed" and row.get("result_dir")]
+        # Lightweight compatibility for tests/upgrades that expose only the
+        # verification store. Production always uses PostprocessStore above.
+        raw = (
             await self.stage2b_store.list_results_raw("pi5", limit=5000)
             + await self.stage2b_store.list_results_raw("oneplus", limit=5000)
         )
-        rows.sort(key=lambda row: (
-            str(row.get("output_filename") or row.get("result_dir") or "").casefold(),
-            int(_audit_json(row.get("request_json")).get("page") or 0),
-            int(row.get("id") or 0),
-        ))
-        return rows
+        books: dict[tuple[int, str], dict] = {}
+        for row in raw:
+            result_dir = Path(str(row.get("result_dir") or "")).name
+            if not result_dir:
+                continue
+            jid = int(row.get("postprocess_job_id") or 0)
+            books[(jid, result_dir)] = {
+                "id": jid, "status": "completed", "result_dir": result_dir,
+                "output_filename": row.get("output_filename"),
+                "source_filename": row.get("output_filename"),
+            }
+        return list(books.values())
 
-    async def _telegram_next_text_audit(self) -> dict:
+    async def _telegram_text_audit_candidates(self) -> list[dict]:
+        """Build the Telegram Text queue from current Stage 2C ledgers first.
+
+        Verification rows are evidence only. Human-review authority comes from
+        the current correction ledger, so reruns cannot hide or resurrect work.
+        """
         candidates: list[dict] = []
-        for row in await self._telegram_audit_rows():
-            source = _audit_json(row.get("source_json"))
-            if str(source.get("type") or "") == "picture" or str(row.get("status") or "") != "completed":
-                continue
-            result_dir_name = Path(str(row.get("result_dir") or "")).name
-            if not result_dir_name:
-                continue
+        for job in await self._telegram_current_audit_books():
+            result_dir_name = Path(str(job.get("result_dir") or "")).name
             result_dir = Path(self.config.processed_dir) / result_dir_name
             ledger = await asyncio.to_thread(_load_json_file, result_dir / "correction_ledger.json")
-            entry_id = f"{row.get('generation')}:text:{row.get('route_id')}"
-            entry = next((item for item in (ledger.get("entries") or []) if str(item.get("entry_id") or "") == entry_id), None)
-            if not isinstance(entry, dict) or str(entry.get("status") or "") == "superseded" or entry.get("human_verified"):
-                continue
-            verdict = str(entry.get("verification_verdict") or row.get("verdict") or "").upper()
-            status = str(entry.get("status") or "")
-            if verdict not in {"LIKELY_CORRUPT", "UNCERTAIN"} and status not in {"pending", "proposed", "rejected"}:
-                continue
-            request = _audit_json(row.get("request_json"))
-            result = _audit_json(row.get("result_json"))
-            reconstruction = result.get("source_reconstruction") if isinstance(result.get("source_reconstruction"), dict) else {}
-            correction = result.get("correction") if isinstance(result.get("correction"), dict) else {}
-            original = str(entry.get("original_text") or request.get("suspect_text") or "").strip()
-            proposed = str(
-                entry.get("proposed_text")
-                or correction.get("proposed_text")
-                or reconstruction.get("corrected_text")
-                or ""
-            ).strip()
-            if not original:
-                continue
-            candidates.append({
-                "row": row,
-                "result_dir": result_dir_name,
-                "entry_id": entry_id,
-                "original": original,
-                "proposed": proposed,
-                "page": request.get("page") or entry.get("page"),
-                "reason": row.get("reason") or entry.get("status_reason") or entry.get("reason"),
-                "verdict": verdict or "UNCERTAIN",
-                "book": row.get("output_filename") or row.get("result_dir") or "Unknown book",
-            })
+            entries = [
+                item for item in (ledger.get("entries") or [])
+                if isinstance(item, dict)
+                and item.get("entry_type") in {"text_correction", "table_cell_correction"}
+                and str(item.get("status") or "") != "superseded"
+            ]
+            groups: dict[tuple, list[dict]] = {}
+            for entry in entries:
+                groups.setdefault(_entry_source_identity(entry), []).append(entry)
+            for group in groups.values():
+                reviewed = [item for item in group if bool(item.get("human_verified"))]
+                if reviewed:
+                    continue
+                entry = max(
+                    group,
+                    key=lambda item: float(
+                        item.get("updated_at_epoch") or item.get("created_at_epoch") or 0
+                    ),
+                )
+                verdict = str(entry.get("verification_verdict") or "").upper()
+                if verdict not in {"LIKELY_CORRUPT", "UNCERTAIN"}:
+                    continue
+                if not bool(getattr(self.config, "stage2c_require_human_review", False)) and str(entry.get("status") or "").lower() not in {"pending", "proposed"}:
+                    continue
+                row_id = int(entry.get("verification_job_id") or 0)
+                row = await self.stage2b_store.get_job(row_id) if row_id else None
+                request = _audit_json((row or {}).get("request_json"))
+                result = _audit_json((row or {}).get("result_json"))
+                reconstruction = result.get("source_reconstruction") if isinstance(result.get("source_reconstruction"), dict) else {}
+                correction = result.get("correction") if isinstance(result.get("correction"), dict) else {}
+                original = str(entry.get("original_text") or request.get("suspect_text") or "").strip()
+                proposed = str(
+                    entry.get("proposed_text")
+                    or correction.get("proposed_text")
+                    or reconstruction.get("corrected_text")
+                    or ""
+                ).strip()
+                if not original:
+                    continue
+                candidates.append({
+                    "row_id": row_id,
+                    "result_dir": result_dir_name,
+                    "entry_id": str(entry.get("entry_id") or ""),
+                    "original": original,
+                    "proposed": proposed,
+                    "page": entry.get("page") or request.get("page"),
+                    "reason": entry.get("status_reason") or entry.get("reason") or (row or {}).get("reason"),
+                    "verdict": verdict,
+                    "book": job.get("source_filename") or job.get("output_filename") or result_dir_name or "Unknown book",
+                    "postprocess_job_id": int(job.get("id") or 0),
+                })
+        candidates.sort(key=lambda item: (str(item.get("book") or "").casefold(), int(item.get("page") or 0), str(item.get("entry_id") or "")))
+        return candidates
+
+    async def _telegram_next_text_audit(self) -> dict:
+        candidates = await self._telegram_text_audit_candidates()
         if not candidates:
             return {"done": True, "remaining": 0}
         item = candidates[0]
-        row = item["row"]
+        row_id = int(item.get("row_id") or 0)
         try:
-            image, mime, _ = await self.stage2b_worker.text_audit_image(int(row.get("id") or 0))
+            image, mime, _ = await self.stage2b_worker.text_audit_image(row_id) if row_id else (b"", "image/png", "")
         except (ValueError, FileNotFoundError, IndexError, KeyError):
             image, mime = b"", "image/png"
         proposed = item["proposed"]
@@ -1214,7 +1250,12 @@ class Runtime:
         return {
             "done": False,
             "remaining": len(candidates),
-            "key": {"row_id": int(row.get("id") or 0), "postprocess_job_id": int(row.get("postprocess_job_id") or 0), "result_dir": item["result_dir"], "entry_id": item["entry_id"]},
+            "key": {
+                "row_id": row_id,
+                "postprocess_job_id": int(item.get("postprocess_job_id") or 0),
+                "result_dir": item["result_dir"],
+                "entry_id": item["entry_id"],
+            },
             "image": image,
             "mime_type": mime,
             "caption": caption,
@@ -1225,52 +1266,75 @@ class Runtime:
     def _telegram_is_artifact_sweep(row: dict) -> bool:
         return str(row.get("code") or "") == "FULL_TECHNICAL_VISUAL" or bool(re.fullmatch(r"AV\d{6}", str(row.get("route_id") or "")))
 
-    async def _telegram_next_visual_audit(self, audit_type: str) -> dict:
+    @staticmethod
+    def _telegram_visual_requires_human(entry: dict) -> bool:
+        if bool(entry.get("human_verified")) or str(entry.get("human_visual_decision") or "") in {"technical", "decorative", "useful", "not_useful"}:
+            return False
+        verdict = str(entry.get("verification_verdict") or "").upper()
+        return verdict == "UNCERTAIN" or bool(entry.get("unresolved")) or str(entry.get("status") or "").lower() == "pending"
+
+    async def _telegram_visual_audit_candidates(self, audit_type: str) -> list[dict]:
         candidates: list[dict] = []
-        for row in await self._telegram_audit_rows():
-            source = _audit_json(row.get("source_json"))
-            if str(source.get("type") or "") != "picture" or str(row.get("status") or "") != "completed":
-                continue
-            sweep = self._telegram_is_artifact_sweep(row)
-            if audit_type == "artifact" and not sweep:
-                continue
-            if audit_type == "vision" and sweep:
-                continue
-            result_dir_name = Path(str(row.get("result_dir") or "")).name
-            if not result_dir_name:
-                continue
+        for job in await self._telegram_current_audit_books():
+            result_dir_name = Path(str(job.get("result_dir") or "")).name
             result_dir = Path(self.config.processed_dir) / result_dir_name
             ledger = await asyncio.to_thread(_load_json_file, result_dir / "correction_ledger.json")
-            entry_id = f"{row.get('generation')}:vision:{row.get('route_id')}"
-            entry = next((item for item in (ledger.get("entries") or []) if str(item.get("entry_id") or "") == entry_id), None)
-            if not isinstance(entry, dict) or str(entry.get("status") or "") == "superseded" or entry.get("human_visual_decision"):
-                continue
-            result = _audit_json(row.get("result_json"))
-            parsed = result.get("parsed") if isinstance(result.get("parsed"), dict) else {}
-            verdict = str(parsed.get("verdict") or row.get("verdict") or "").upper()
-            unresolved = bool(parsed.get("unresolved") or entry.get("unresolved"))
-            if verdict != "UNCERTAIN" and not unresolved and str(entry.get("status") or "") != "pending":
-                continue
-            request = _audit_json(row.get("request_json"))
-            candidates.append({
-                "row": row,
-                "result_dir": result_dir_name,
-                "entry_id": entry_id,
-                "book": row.get("output_filename") or row.get("result_dir") or "Unknown book",
-                "page": request.get("page") or entry.get("page"),
-                "verdict": verdict or "UNCERTAIN",
-                "confidence": parsed.get("confidence"),
-                "category": parsed.get("diagram_category") or entry.get("diagram_category") or "unknown",
-                "summary": parsed.get("summary") or entry.get("generated_summary") or "",
-                "labels": parsed.get("visible_text") or entry.get("visible_text") or [],
-                "reason": row.get("reason") or request.get("reason") or entry.get("status_reason") or "",
-            })
+            entries = [
+                item for item in (ledger.get("entries") or [])
+                if isinstance(item, dict)
+                and item.get("entry_type") == "vision_enrichment"
+                and str(item.get("status") or "") != "superseded"
+            ]
+            groups: dict[tuple[str, object], list[dict]] = {}
+            for entry in entries:
+                source_index = entry.get("source_index")
+                key = ("source", source_index) if source_index is not None else ("entry", str(entry.get("entry_id") or ""))
+                groups.setdefault(key, []).append(entry)
+            for group in groups.values():
+                if any(
+                    bool(item.get("human_verified"))
+                    and str(item.get("human_visual_decision") or "") in {"technical", "decorative", "useful", "not_useful"}
+                    for item in group
+                ):
+                    continue
+                unresolved = [item for item in group if self._telegram_visual_requires_human(item)]
+                if not unresolved:
+                    continue
+                normal = [item for item in unresolved if not self._telegram_is_artifact_sweep(item)]
+                subject_type = "vision" if normal else "artifact"
+                if subject_type != audit_type:
+                    continue
+                pool = normal or unresolved
+                entry = max(pool, key=lambda item: float(item.get("updated_at_epoch") or item.get("created_at_epoch") or 0))
+                row_id = int(entry.get("verification_job_id") or 0)
+                row = await self.stage2b_store.get_job(row_id) if row_id else None
+                result = _audit_json((row or {}).get("result_json"))
+                parsed = result.get("parsed") if isinstance(result.get("parsed"), dict) else {}
+                candidates.append({
+                    "row_id": row_id,
+                    "result_dir": result_dir_name,
+                    "entry_id": str(entry.get("entry_id") or ""),
+                    "book": job.get("source_filename") or job.get("output_filename") or result_dir_name or "Unknown book",
+                    "page": entry.get("page") or _audit_json((row or {}).get("request_json")).get("page"),
+                    "verdict": str(entry.get("verification_verdict") or parsed.get("verdict") or "UNCERTAIN").upper(),
+                    "confidence": entry.get("confidence") if entry.get("confidence") is not None else parsed.get("confidence"),
+                    "category": entry.get("diagram_category") or parsed.get("diagram_category") or "unknown",
+                    "summary": entry.get("generated_summary") or parsed.get("summary") or "",
+                    "labels": entry.get("visible_text") or parsed.get("visible_text") or [],
+                    "reason": entry.get("status_reason") or entry.get("reason") or (row or {}).get("reason") or "",
+                    "postprocess_job_id": int(job.get("id") or 0),
+                })
+        candidates.sort(key=lambda item: (str(item.get("book") or "").casefold(), int(item.get("page") or 0), str(item.get("entry_id") or "")))
+        return candidates
+
+    async def _telegram_next_visual_audit(self, audit_type: str) -> dict:
+        candidates = await self._telegram_visual_audit_candidates(audit_type)
         if not candidates:
             return {"done": True, "remaining": 0}
         item = candidates[0]
-        row = item["row"]
+        row_id = int(item.get("row_id") or 0)
         try:
-            image, mime, _ = await self.stage2b_worker.vision_audit_image(int(row.get("id") or 0), "full")
+            image, mime, _ = await self.stage2b_worker.vision_audit_image(row_id, "full") if row_id else (b"", "image/png", "")
         except (ValueError, FileNotFoundError, IndexError, KeyError):
             image, mime = b"", "image/png"
         confidence = item["confidence"]
@@ -1304,7 +1368,12 @@ class Runtime:
         return {
             "done": False,
             "remaining": len(candidates),
-            "key": {"row_id": int(row.get("id") or 0), "postprocess_job_id": int(row.get("postprocess_job_id") or 0), "result_dir": item["result_dir"], "entry_id": item["entry_id"]},
+            "key": {
+                "row_id": row_id,
+                "postprocess_job_id": int(item.get("postprocess_job_id") or 0),
+                "result_dir": item["result_dir"],
+                "entry_id": item["entry_id"],
+            },
             "image": image,
             "mime_type": mime,
             "caption": caption,
@@ -1505,7 +1574,30 @@ class Runtime:
         stage2a_failed = [job for job in jobs if str(job.get("status") or "") == "failed"]
         stage2c_failed = [job for job in jobs if str(job.get("stage2c_status") or "") == "failed"]
         stage3_failed = [job for job in jobs if str(job.get("stage3_status") or "") == "failed"]
-        audit_required = sum(int(audit.get("review_required") or 0) for audit in audits.values())
+
+        def audit_review_counts(audit: dict | None) -> dict[str, int]:
+            audit = audit or {}
+            text = audit.get("text") if isinstance(audit.get("text"), dict) else {}
+            text_review = int(text.get("review_required") or 0)
+            text_blocking = int(text.get("blocking_review_required") or 0)
+            vision = int(audit.get("vision_route_review_required") if audit.get("vision_route_review_required") is not None else audit.get("vision_review_required") or 0)
+            artifact = int(audit.get("artifact_review_required") or 0)
+            recovery = int(audit.get("vision_evidence_recovery_required") or 0)
+            return {
+                "text": text_review,
+                "vision": vision,
+                "artifact": artifact,
+                "recovery": recovery,
+                "human_total": text_review + vision + artifact,
+                "human_blocking": text_blocking + vision + artifact,
+                "blocking_total": text_blocking + vision + artifact + recovery,
+            }
+
+        review_counts = {jid: audit_review_counts(audit) for jid, audit in audits.items()}
+        review_queue_total = sum(item["human_total"] for item in review_counts.values())
+        human_blocking_total = sum(item["human_blocking"] for item in review_counts.values())
+        recovery_blocking_total = sum(item["recovery"] for item in review_counts.values())
+        audit_required = human_blocking_total + recovery_blocking_total
         bypassed = sum(1 for audit in audits.values() if audit.get("bypassed_for_testing"))
         worker_states = self.stage2b_worker.worker_state
         quota = await self.groq_quota.snapshot()
@@ -1537,8 +1629,10 @@ class Runtime:
             critical_items.append(f"🔗 Pipeline sequence error — {self._telegram_code(sequence_error, 120)}")
         if route_deferred_total:
             attention_items.append(f"🧭 {route_deferred_total} Stage 2A route(s) deferred by the safety ceiling")
-        if audit_required:
-            attention_items.append(f"🔎 {audit_required} unresolved human audit item(s) — `/audit`")
+        if review_queue_total:
+            attention_items.append(f"🔎 {review_queue_total} human decision(s) waiting — `/audit`")
+        if recovery_blocking_total:
+            attention_items.append(f"🛠 {recovery_blocking_total} accepted visual(s) still need evidence recovery")
         if bypassed:
             attention_items.append(f"🧪 {bypassed} book(s) have testing bypass active")
         oneplus_workload = (worker_states.get("oneplus") or {}).get("workload") or {}
@@ -1591,7 +1685,8 @@ class Runtime:
                     "artifact_pending", "artifact_processing", "artifact_failed",
                 ))
                 jid = int(book.get("postprocess_job_id") or 0)
-                unresolved = int((audits.get(jid) or {}).get("review_required") or 0)
+                counts = review_counts.get(jid) or audit_review_counts(audits.get(jid))
+                unresolved = int(counts.get("human_total") or 0)
                 if normal_open or artifact_open:
                     still_verifying += 1
                 elif unresolved:
@@ -1604,7 +1699,7 @@ class Runtime:
             failure_total = len(conversion_failed_rows) + len(stage2a_failed) + verification_failed + len(stage2c_failed) + len(stage3_failed)
             lines = header("📊 **Status**") + attention_block()
             lines += [
-                f"📚 `{len(books)}` books  ·  🔄 `{still_verifying}` active  ·  🔎 `{audit_required}` review  ·  🔴 `{failure_total}` failed",
+                f"📚 `{len(books)}` books  ·  🔄 `{still_verifying}` active  ·  🔎 `{review_queue_total}` review  ·  🔴 `{failure_total}` failed",
                 "",
                 f"🧭 2A `{route_created}/{route_candidates}`" + (f" · ⚠️ `{route_deferred_total}` deferred" if route_deferred_total else ""),
                 f"📝 Text `{totals['text_completed']}/{text_total}`  ·  🖼 Vision `{totals['vision_completed']}/{vision_total}`",
@@ -1627,7 +1722,9 @@ class Runtime:
                 name = name[:-4] if name.lower().endswith(".zip") else name
                 jid = int(book.get("postprocess_job_id") or 0)
                 audit = audits.get(jid) or {}
-                unresolved = int(audit.get("review_required") or 0)
+                counts = review_counts.get(jid) or audit_review_counts(audit)
+                unresolved = int(counts.get("human_total") or 0)
+                recovery = int(counts.get("recovery") or 0)
                 pending = sum(int(book.get(key) or 0) for key in ("text_pending", "text_processing", "vision_pending", "vision_processing", "artifact_pending", "artifact_processing"))
                 failed = sum(int(book.get(key) or 0) for key in ("text_failed", "vision_failed", "artifact_failed"))
                 post_job = next((job for job in jobs if int(job.get("id") or 0) == jid), {})
@@ -1636,13 +1733,19 @@ class Runtime:
                 failed += int(str(post_job.get("stage3_status") or "") == "failed")
                 if failed:
                     rank, state, icon = 0, "Failed", "🔴"
-                elif unresolved or audit.get("bypassed_for_testing"):
-                    rank, state, icon = 1, ("Audit bypassed" if audit.get("bypassed_for_testing") else "Human review"), "🟡"
+                elif unresolved or recovery or audit.get("bypassed_for_testing"):
+                    if audit.get("bypassed_for_testing"):
+                        state = "Audit bypassed"
+                    elif unresolved:
+                        state = "Human review"
+                    else:
+                        state = "Evidence recovery"
+                    rank, icon = 1, "🟡"
                 elif pending:
                     rank, state, icon = 2, "Verifying", "🔵"
                 else:
                     rank, state, icon = 3, "Complete", "🟢"
-                entries.append({"rank": rank, "name": name, "jid": jid, "audit": audit, "unresolved": unresolved, "post_job": post_job, "state": state, "icon": icon, "book": book})
+                entries.append({"rank": rank, "name": name, "jid": jid, "audit": audit, "unresolved": unresolved, "recovery": recovery, "post_job": post_job, "state": state, "icon": icon, "book": book})
             entries.sort(key=lambda item: (item["rank"], str(item["name"]).casefold()))
             per_page = 8
             max_page = max(1, (len(entries) + per_page - 1) // per_page)
@@ -1660,7 +1763,7 @@ class Runtime:
                 deferred = int(post_job.get("route_deferred") or 0)
                 lines += [
                     f"{item['icon']} {self._telegram_code(item['name'], 120)}",
-                    f"**{item['state']}** · 🧭 `{route_created}/{route_candidates}` · 🔬 `{art_done}/{art_total}` · 🔎 `{item['unresolved']}`" + (f" · ⚠️ `{deferred}` deferred" if deferred else ""),
+                    f"**{item['state']}** · 🧭 `{route_created}/{route_candidates}` · 🔬 `{art_done}/{art_total}` · 🔎 `{item['unresolved']}`" + (f" · 🛠 `{item['recovery']}`" if item.get("recovery") else "") + (f" · ⚠️ `{deferred}` deferred" if deferred else ""),
                     "",
                 ]
             remaining = max(0, len(entries) - (start + len(shown_entries)))
@@ -1711,20 +1814,20 @@ class Runtime:
             for job in jobs:
                 jid = int(job.get("id") or job.get("job_id") or job.get("postprocess_job_id") or 0)
                 audit = audits.get(jid)
-                if not audit or (not audit.get("review_required") and not audit.get("bypassed_for_testing")):
+                if not audit:
+                    continue
+                counts = review_counts.get(jid) or audit_review_counts(audit)
+                if not counts["human_total"] and not counts["recovery"] and not audit.get("bypassed_for_testing"):
                     continue
                 name = str(job.get("output_filename") or job.get("source_filename") or job.get("result_dir") or jid)
                 name = name[:-4] if name.lower().endswith(".zip") else name
-                unresolved = int(audit.get("review_required") or 0)
-                text_required = int((audit.get("text") or {}).get("review_required") or 0)
-                vision_required = int(audit.get("vision_review_required") or 0)
-                recovery_required = int(audit.get("vision_evidence_recovery_required") or 0)
                 entries.append({
-                    "rank": 0 if unresolved else 1, "name": name, "unresolved": unresolved,
-                    "text": text_required, "vision": vision_required, "recovery": recovery_required,
+                    "rank": 0 if counts["human_total"] else 1,
+                    "name": name,
+                    **counts,
                     "bypassed": bool(audit.get("bypassed_for_testing")),
                 })
-            entries.sort(key=lambda item: (item["rank"], -item["unresolved"], str(item["name"]).casefold()))
+            entries.sort(key=lambda item: (item["rank"], -(item["human_total"] + item["recovery"]), str(item["name"]).casefold()))
             per_page = 10
             max_page = max(1, (len(entries) + per_page - 1) // per_page)
             page = min(requested_page(), max_page)
@@ -1734,10 +1837,12 @@ class Runtime:
             if not shown_entries:
                 lines += ["🟢 **No unresolved human-review items.**", ""]
             for item in shown_entries:
-                icon = "🟡" if item["unresolved"] else "🧪"
+                icon = "🟡" if item["human_total"] else "🛠"
                 lines += [
                     f"{icon} {self._telegram_code(item['name'], 120)}",
-                    f"📝 Text `{item['text']}` · 🖼 Vision `{item['vision']}` · 🧩 Recovery `{item['recovery']}`" + (" · 🧪 bypass" if item["bypassed"] else ""),
+                    f"📝 Text `{item['text']}` · 🖼 Vision `{item['vision']}` · 🔬 Artifact `{item['artifact']}`"
+                    + (f" · 🛠 Recovery `{item['recovery']}`" if item["recovery"] else "")
+                    + (" · 🧪 bypass" if item["bypassed"] else ""),
                     "",
                 ]
             remaining = max(0, len(entries) - (start + len(shown_entries)))
@@ -1754,7 +1859,8 @@ class Runtime:
                 ("🤖", "Verification", verification_failed),
                 ("🧾", "Stage 2C", len(stage2c_failed)),
                 ("🧩", "Stage 3", len(stage3_failed)),
-                ("🔎", "Human review", audit_required),
+                ("🔎", "Human decisions", human_blocking_total),
+                ("🛠", "Evidence recovery", recovery_blocking_total),
             ]
             nonzero = [(icon, label, count) for icon, label, count in failures if count]
             if nonzero:

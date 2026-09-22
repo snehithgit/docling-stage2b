@@ -1,3 +1,12 @@
+## `.40.11I` Telegram review-count mismatch — closed
+
+- [x] Fix `/audit` vs `/visionaudit` contradictory remaining counts.
+- [x] Make Telegram review queues current-ledger-first.
+- [x] Preserve access to historical verifier evidence by `verification_job_id` without making historical result directories authoritative.
+- [x] Split normal Vision vs Artifact human-review counts.
+- [x] Separate evidence-recovery blockers from human decisions.
+- [x] Regression-test duplicate visual authority and rerun evidence lookup.
+
 ## `.40.11H` human-review authority follow-up — closed
 
 - [x] Stop historical/superseded verifier rows from resurfacing already-reviewed items.
