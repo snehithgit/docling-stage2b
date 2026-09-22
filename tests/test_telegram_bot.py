@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from app.telegram_bot import TelegramBotService
@@ -8,7 +10,7 @@ class _Config:
     telegram_bot_token_env = "TELEGRAM_BOT_TOKEN"
     telegram_allowed_chat_ids = [123]
     telegram_notifications = True
-    telegram_controls = False
+    telegram_controls = True
 
 
 @pytest.mark.asyncio
@@ -204,3 +206,162 @@ async def test_telegram_stop_verify_audit_stops_future_cards(monkeypatch):
     })
     assert 123 not in service._audit_sessions
     assert any("audit stopped" in text.lower() for text, _ in messages)
+
+
+class _NoControlsConfig(_Config):
+    telegram_controls = False
+
+
+@pytest.mark.asyncio
+async def test_telegram_controls_false_blocks_audit_start(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    started = []
+    sent = []
+
+    async def handler(command, args):
+        return "monitor"
+
+    async def audit_handler(action, kind, payload):
+        started.append((action, kind))
+        return {"done": True, "remaining": 0}
+
+    service = TelegramBotService(lambda: _NoControlsConfig(), handler, audit_handler=audit_handler)
+
+    async def fake_send(text, chat_id=None, **kwargs):
+        sent.append((text, chat_id))
+        return {}
+
+    service.send = fake_send
+    await service._handle(123, "/textaudit")
+    assert started == []
+    assert 123 not in service._audit_sessions
+    assert any("controls are disabled" in text.lower() for text, _ in sent)
+
+
+@pytest.mark.asyncio
+async def test_telegram_controls_false_blocks_existing_decision(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    decisions = []
+
+    async def handler(command, args):
+        return "monitor"
+
+    async def audit_handler(action, kind, payload):
+        decisions.append((action, kind, payload))
+        return {"ok": True}
+
+    service = TelegramBotService(lambda: _NoControlsConfig(), handler, audit_handler=audit_handler)
+    service._audit_sessions[123] = {
+        "type": "text",
+        "reviewed": 0,
+        "current": {"entry_id": "e1"},
+        "current_message_id": 77,
+    }
+    api_calls = []
+
+    async def fake_api(method, payload=None):
+        api_calls.append((method, payload or {}))
+        return {"ok": True}
+
+    service._api = fake_api
+    await service._handle_callback({
+        "id": "cb-disabled",
+        "data": "aud:d:apply",
+        "message": {"message_id": 77, "chat": {"id": 123}},
+    })
+    assert decisions == []
+    assert any("controls are disabled" in str(payload.get("text") or "").lower() for method, payload in api_calls if method == "answerCallbackQuery")
+
+
+@pytest.mark.asyncio
+async def test_send_splits_formatted_messages_and_preserves_entities(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    async def handler(command, args):
+        return "monitor"
+    service = TelegramBotService(lambda: _Config(), handler)
+    api_calls = []
+
+    def fake_chunks(value, max_utf16_len=4000):
+        assert max_utf16_len == 4000
+        return [
+            ("first", [{"type": "bold", "offset": 0, "length": 5}]),
+            ("second", []),
+        ]
+
+    async def fake_api(method, payload=None):
+        api_calls.append((method, payload or {}))
+        return {"result": {"message_id": len(api_calls)}}
+
+    monkeypatch.setattr("app.telegram_bot._markdown_chunks", fake_chunks)
+    service._api = fake_api
+    await service.send("**first** second", 123, reply_markup={"inline_keyboard": [[{"text": "OK", "callback_data": "ok"}]]})
+    assert [payload["text"] for method, payload in api_calls if method == "sendMessage"] == ["first", "second"]
+    assert api_calls[0][1]["entities"][0]["type"] == "bold"
+    assert "reply_markup" not in api_calls[0][1]
+    assert "reply_markup" in api_calls[1][1]
+
+
+@pytest.mark.asyncio
+async def test_send_photo_uses_caption_entities_and_keeps_keyboard_on_image(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    async def handler(command, args):
+        return "monitor"
+    service = TelegramBotService(lambda: _Config(), handler)
+    multipart_calls = []
+    api_calls = []
+
+    def fake_chunks(value, max_utf16_len=4000):
+        assert max_utf16_len == 1024
+        return [
+            ("caption", [{"type": "bold", "offset": 0, "length": 7}]),
+            ("more detail", []),
+        ]
+
+    async def fake_multipart(method, data, files):
+        multipart_calls.append((method, data, files))
+        return {"result": {"message_id": 9}}
+
+    async def fake_api(method, payload=None):
+        api_calls.append((method, payload or {}))
+        return {"ok": True}
+
+    monkeypatch.setattr("app.telegram_bot._markdown_chunks", fake_chunks)
+    service._api_multipart = fake_multipart
+    service._api = fake_api
+    keyboard = {"inline_keyboard": [[{"text": "✅ Useful", "callback_data": "aud:d:useful"}]]}
+    result = await service.send_photo(b"png", "image/png", "**caption**", 123, reply_markup=keyboard)
+    assert result["result"]["message_id"] == 9
+    assert json.loads(multipart_calls[0][1]["caption_entities"])[0]["type"] == "bold"
+    assert json.loads(multipart_calls[0][1]["reply_markup"]) == keyboard
+    assert api_calls[0][0] == "sendMessage"
+    assert api_calls[0][1]["text"] == "more detail"
+
+
+@pytest.mark.asyncio
+async def test_event_loop_marks_failure_as_critical_and_recovery_as_routine(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    async def handler(command, args):
+        return "monitor"
+
+    async def stream():
+        yield 'event: refresh\ndata: {"reason":"processing_failed"}\n\n'
+        yield 'event: refresh\ndata: {"reason":"stage2b_pi5_endpoint_circuit_closed"}\n\n'
+
+    service = TelegramBotService(lambda: _Config(), handler, event_stream_factory=stream)
+    sent = []
+
+    async def fake_send(text, chat_id=None, **kwargs):
+        sent.append(text)
+        return {}
+
+    service.send = fake_send
+    await service._event_loop()
+    assert any("🔴 **ALERT**" in text and "Conversion failed" in text for text in sent)
+    assert any("🟢" in text and "Pi5 verifier circuit recovered" in text for text in sent)
+    assert all("Marine Pipeline Studio" not in text for text in sent)
+
+
+def test_requirements_pin_telegramify_markdown():
+    from pathlib import Path
+    requirements = (Path(__file__).resolve().parents[1] / "requirements.txt").read_text(encoding="utf-8")
+    assert "telegramify-markdown==1.2.0" in requirements

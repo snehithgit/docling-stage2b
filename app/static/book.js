@@ -169,7 +169,7 @@
   async function deleteBook(button) {
     if (busy || !book) return;
     const name = String(book.source_filename || book.output_filename || 'this book');
-    const first = `Delete "${name}" from Marine Pipeline Studio?\n\nThis removes its active conversion/Stage 2A/Stage 2B/Stage 2C/Stage 3/RAG state and machine assignment.\n\nThe source manual, converted Docling ZIP, and processed result folder are moved into _deleted_books quarantine folders instead of being destroyed. They will not be auto-discovered there.\n\nChoose OK for Yes, or Cancel for No.`;
+    const first = `Delete "${name}" from Docling Auto-Convert?\n\nThis removes its active conversion/Stage 2A/Stage 2B/Stage 2C/Stage 3/RAG state and machine assignment.\n\nThe source manual, converted Docling ZIP, and processed result folder are moved into _deleted_books quarantine folders instead of being destroyed. They will not be auto-discovered there.\n\nChoose OK for Yes, or Cancel for No.`;
     if (!window.confirm(first)) return;
     const second = `Final confirmation: remove "${name}" from the active library now?\n\nYou can recover quarantined files manually later, but this book's active database history will be deleted.`;
     if (!window.confirm(second)) return;

@@ -1,3 +1,13 @@
+## `.40.11D` Telegram/mobile UX — closed
+
+- [x] Semantic status/action icons.
+- [x] Safe Markdown-to-Telegram entity conversion and UTF-16-aware splitting.
+- [x] Attention-first health commands and worst-first paginated lists.
+- [x] Critical pipeline/verifier/quota/circuit push alerts.
+- [x] Enforced `telegram_controls` human-audit gate.
+- [x] OnePlus SSH/server status separated from verifier health.
+- [x] Docling Auto-Convert live-surface branding cleanup.
+
 ## After `.40.9`
 
 ### September 21 audit list — closed

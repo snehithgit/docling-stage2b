@@ -1,3 +1,10 @@
+## .40.11D acquired state
+
+- Added one pure-Python text-formatting dependency: `telegramify-markdown==1.2.0`; no Telegram framework, database, model, or cloud service was added.
+- Telegram continues to use raw `httpx` Bot API calls and the existing application-owned Stage 2C audit handlers.
+- Message formatting now uses Telegram entities and UTF-16-aware splitting; the event broker remains reason-only and Telegram still does not read pipeline databases directly.
+- `telegram_controls` is now an enforced audit-decision safety gate.
+
 ## .40.9 acquired state
 
 - No new model, NLP package, tokenizer runtime or database engine was added.
@@ -42,7 +49,7 @@
 # Project acquired state
 
 Last updated: 2026-09-22
-Current code release: `2026.09.22.40.11C`
+Current code release: `2026.09.22.40.11D`
 
 ## Already acquired — do not rebuild unnecessarily
 

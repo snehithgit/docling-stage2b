@@ -1,4 +1,19 @@
-# Current release — 2026.09.22.40.11C
+# Current release — 2026.09.22.40.11D
+
+## `.40.11D` complete — Telegram mobile UX & alerting
+
+- [x] Semantic Telegram icon system for critical/attention/OK/app/action states.
+- [x] `telegramify-markdown==1.2.0` entity conversion + safe splitting; blind transport truncation removed.
+- [x] Attention-first `/status`, `/workers`, `/errors`.
+- [x] Worst-first paginated `/books` and `/audit` with explicit remainder messaging.
+- [x] Critical failure/quota/circuit push notifications plus green recovery/routine notifications.
+- [x] `telegram_controls` now gates audit start and decision callbacks.
+- [x] OnePlus SSH/server state separated from verifier circuit/workload health in Telegram.
+- [x] Docling Auto-Convert branding corrected in the identified live surfaces.
+- [x] Stage 2C human-authority model preserved.
+- [x] Source-tree regression suite: 535/535 tests pass.
+
+# Previous release — 2026.09.22.40.11C
 
 ## `.40.11C` complete — human review UX & UI consistency
 
@@ -183,7 +198,7 @@
 # Project completed implementation
 
 Last updated: 2026-09-22  
-Current release: `2026.09.22.40.11C`
+Current release: `2026.09.22.40.11D`
 
 Do not redesign/reacquire these items without a specific regression or requirement.
 

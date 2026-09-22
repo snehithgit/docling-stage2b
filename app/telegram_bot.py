@@ -9,6 +9,74 @@ from typing import Awaitable, Callable, Any
 import httpx
 
 
+def _utf16_len(value: str) -> int:
+    return len(str(value).encode("utf-16-le")) // 2
+
+
+def _plain_text_chunks(value: str, max_utf16_len: int) -> list[tuple[str, list[dict[str, Any]]]]:
+    """Dependency-missing safety fallback; production installs telegramify-markdown."""
+    remaining = str(value or "")
+    chunks: list[tuple[str, list[dict[str, Any]]]] = []
+    while remaining:
+        if _utf16_len(remaining) <= max_utf16_len:
+            chunks.append((remaining, []))
+            break
+        lo, hi = 1, len(remaining)
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if _utf16_len(remaining[:mid]) <= max_utf16_len:
+                lo = mid
+            else:
+                hi = mid - 1
+        cut = max(1, lo)
+        newline = remaining.rfind("\n", 0, cut + 1)
+        if newline >= max(1, cut // 2):
+            cut = newline + 1
+        chunk = remaining[:cut].rstrip()
+        if chunk:
+            chunks.append((chunk, []))
+        remaining = remaining[cut:].lstrip("\n")
+    return chunks or [("", [])]
+
+
+
+
+def _markdown_code(value: object, limit: int = 300) -> str:
+    text = " ".join(str(value or "—").split())
+    if len(text) > limit:
+        text = text[: max(1, limit - 1)].rstrip() + "…"
+    longest = 0
+    run = 0
+    for char in text:
+        if char == "`":
+            run += 1
+            longest = max(longest, run)
+        else:
+            run = 0
+    fence = "`" * max(1, longest + 1)
+    return f"{fence}{text}{fence}"
+
+def _markdown_chunks(value: str, max_utf16_len: int = 4000) -> list[tuple[str, list[dict[str, Any]]]]:
+    """Convert Markdown source to Telegram text/entities and split at safe boundaries."""
+    source = str(value or "")
+    try:
+        from telegramify_markdown import convert, split_entities
+
+        text, entities = convert(source, latex_escape=False)
+        chunks = split_entities(text, entities, max_utf16_len=max_utf16_len)
+        return [
+            (chunk_text, [entity.to_dict() for entity in chunk_entities])
+            for chunk_text, chunk_entities in chunks
+        ] or [("", [])]
+    except ImportError:
+        return _plain_text_chunks(source, max_utf16_len)
+    except (TypeError, ValueError, RuntimeError):
+        # Formatting must never prevent a health alert or audit decision from
+        # reaching Telegram. Fall back to literal text if conversion rejects a
+        # malformed Markdown edge case.
+        return _plain_text_chunks(source, max_utf16_len)
+
+
 class TelegramBotService:
     """Optional Telegram monitoring + human-audit transport.
 
@@ -82,28 +150,47 @@ class TelegramBotService:
     async def send(self, text: str, chat_id: int | None = None, *, reply_markup: dict | None = None) -> dict:
         _, _, chats, _, _ = self._settings()
         targets = [chat_id] if chat_id is not None else sorted(chats)
+        chunks = _markdown_chunks(str(text), max_utf16_len=4000)
         last: dict = {}
         for target in targets:
-            try:
-                payload: dict[str, Any] = {"chat_id": int(target), "text": str(text)[:3900]}
-                if reply_markup:
-                    payload["reply_markup"] = reply_markup
-                last = await self._api("sendMessage", payload)
-            except (httpx.HTTPError, ValueError):
-                pass
+            for index, (chunk_text, entities) in enumerate(chunks):
+                if not chunk_text:
+                    continue
+                try:
+                    payload: dict[str, Any] = {"chat_id": int(target), "text": chunk_text}
+                    if entities:
+                        payload["entities"] = entities
+                    if reply_markup and index == len(chunks) - 1:
+                        payload["reply_markup"] = reply_markup
+                    last = await self._api("sendMessage", payload)
+                except (httpx.HTTPError, ValueError):
+                    pass
         return last
 
     async def send_photo(self, image: bytes, mime_type: str, caption: str, chat_id: int, *, reply_markup: dict | None = None) -> dict:
         extension = ".jpg" if str(mime_type).lower() in {"image/jpeg", "image/jpg"} else ".png"
-        data = {"chat_id": str(int(chat_id)), "caption": str(caption)[:1024]}
+        caption_chunks = _markdown_chunks(str(caption), max_utf16_len=1024)
+        caption_text, caption_entities = caption_chunks[0]
+        data = {"chat_id": str(int(chat_id)), "caption": caption_text}
+        if caption_entities:
+            data["caption_entities"] = json.dumps(caption_entities, separators=(",", ":"), ensure_ascii=False)
         if reply_markup:
             data["reply_markup"] = json.dumps(reply_markup, separators=(",", ":"))
         try:
-            return await self._api_multipart(
+            result = await self._api_multipart(
                 "sendPhoto",
                 data,
                 {"photo": (f"audit{extension}", bytes(image), str(mime_type or "image/png"))},
             )
+            # Captions cannot span messages. If a caption had to be split, send
+            # the remaining detail as formatted follow-up messages without the
+            # decision keyboard; the decision remains attached to the image.
+            for extra_text, extra_entities in caption_chunks[1:]:
+                payload: dict[str, Any] = {"chat_id": int(chat_id), "text": extra_text}
+                if extra_entities:
+                    payload["entities"] = extra_entities
+                await self._api("sendMessage", payload)
+            return result
         except (httpx.HTTPError, ValueError):
             return await self.send(caption, chat_id, reply_markup=reply_markup)
 
@@ -157,7 +244,7 @@ class TelegramBotService:
                 await asyncio.sleep(5)
 
     async def _handle(self, chat_id: int, text: str) -> None:
-        _, _, chats, _, _ = self._settings()
+        _, _, chats, _, controls = self._settings()
         if chat_id not in chats or not text.startswith("/"):
             return
         parts = text.split()
@@ -170,18 +257,25 @@ class TelegramBotService:
 
         audit_type = self._audit_command(command, args)
         if audit_type:
+            if not controls:
+                await self.send(
+                    "🔒 **Telegram audit controls are disabled**\n\n"
+                    "Use the Docling Auto-Convert web review queue, or enable `telegram_controls` in `config.yaml`.",
+                    chat_id,
+                )
+                return
             await self._start_audit(chat_id, audit_type)
             return
 
         try:
             reply = await self._command_handler(command, args)
         except Exception as exc:  # command boundary: return a safe error, keep bot alive
-            reply = f"Command failed: {type(exc).__name__}: {exc}"
+            reply = f"🔴 **Command failed**\n\n{_markdown_code(type(exc).__name__, 80)}: {_markdown_code(exc, 300)}"
         await self.send(reply, chat_id)
 
     async def _start_audit(self, chat_id: int, audit_type: str) -> None:
         if not self._audit_handler:
-            await self.send("Human audit is not available in this build.", chat_id)
+            await self.send("🟡 **Human audit is unavailable in this build.**", chat_id)
             return
         self._audit_sessions[chat_id] = {
             "type": audit_type,
@@ -197,8 +291,8 @@ class TelegramBotService:
             name = str((session or {}).get("type") or "verify").capitalize()
             reviewed = int((session or {}).get("reviewed") or 0)
             await self.send(
-                f"[{datetime.now().astimezone().isoformat(timespec='seconds')}]\n\n"
-                f"⏹ {name} audit stopped\n\nReviewed this session   {reviewed}\n\n"
+                f"⏹ **{name} audit stopped**\n\n"
+                f"✅ Reviewed this session: `{reviewed}`\n\n"
                 "No more audit images will be sent. Start again whenever you want.",
                 chat_id,
             )
@@ -212,7 +306,7 @@ class TelegramBotService:
             item = await self._audit_handler("next", audit_type, {"chat_id": chat_id})
         except Exception as exc:
             await self._stop_audit(chat_id, announce=False)
-            await self.send(f"Audit failed: {type(exc).__name__}: {exc}", chat_id)
+            await self.send(f"🔴 **Audit failed**\n\n{_markdown_code(type(exc).__name__, 80)}: {_markdown_code(exc, 300)}", chat_id)
             return
 
         if not item or item.get("done"):
@@ -221,15 +315,16 @@ class TelegramBotService:
             self._audit_sessions.pop(chat_id, None)
             title = {"text": "Text", "vision": "Vision", "artifact": "Artifact"}.get(audit_type, "Verifier")
             await self.send(
-                f"[{datetime.now().astimezone().isoformat(timespec='seconds')}]\n\n"
-                f"✅ {title} audit complete\n\nReviewed this session   {reviewed}\nRemaining                {remaining}",
+                f"✅ **{title} audit complete**\n\n"
+                f"Reviewed this session: `{reviewed}`\n"
+                f"Remaining: `{remaining}`",
                 chat_id,
             )
             return
 
         session["current"] = item.get("key")
         keyboard = self._audit_keyboard(list(item.get("options") or []))
-        caption = str(item.get("caption") or "Verifier audit")
+        caption = str(item.get("caption") or "🔎 **Verifier audit**")
         image = item.get("image")
         if isinstance(image, (bytes, bytearray)) and image:
             result = await self.send_photo(bytes(image), str(item.get("mime_type") or "image/png"), caption, chat_id, reply_markup=keyboard)
@@ -240,7 +335,7 @@ class TelegramBotService:
             session["current_message_id"] = int(message.get("message_id") or 0) or None
 
     async def _handle_callback(self, query: dict[str, Any]) -> None:
-        _, _, chats, _, _ = self._settings()
+        _, _, chats, _, controls = self._settings()
         callback_id = str(query.get("id") or "")
         message = query.get("message") or {}
         chat_id = int((message.get("chat") or {}).get("id") or 0)
@@ -275,6 +370,11 @@ class TelegramBotService:
                 except httpx.HTTPError:
                     pass
             await self._stop_audit(chat_id, announce=True)
+            return
+
+        if data.startswith("aud:d:") and not controls:
+            if callback_id:
+                await self._api("answerCallbackQuery", {"callback_query_id": callback_id, "text": "Telegram audit controls are disabled."})
             return
 
         if not data.startswith("aud:d:") or not self._audit_handler:
@@ -317,21 +417,50 @@ class TelegramBotService:
     async def _event_loop(self) -> None:
         if not self._event_stream_factory:
             return
-        important = {
-            "stage2b_pi5_endpoint_circuit_open", "stage2b_pi5_endpoint_circuit_closed", "stage2b_oneplus_endpoint_circuit_open", "stage2b_oneplus_endpoint_circuit_closed",
-            "stage2b_artifact_sweep_released", "stage3_chunking_completed",
-            "verifier_audit_decision", "verifier_audit_bypass_updated",
-            "pipeline_retrieval_refresh_completed", "stage2c_human_correction",
+        critical = {
+            "processing_failed": "📥 Conversion failed",
+            "postprocess_failed": "🧭 Stage 2A post-process failed",
+            "postprocess_error": "🧭 Stage 2A worker error",
+            "stage3_chunking_failed": "🧩 Stage 3 chunking failed",
+            "stage2b_pi5_failed": "🧠 Text verifier job failed",
+            "stage2b_oneplus_failed": "📱 Vision verifier job failed",
+            "stage2b_pi5_worker_error": "🧠 Text verifier worker error",
+            "stage2b_oneplus_worker_error": "📱 Vision verifier worker error",
+            "worker_error": "📥 Conversion worker error",
+            "stage2c_ledger_error": "🧾 Correction ledger error",
+            "pipeline_sequence_error": "🔗 Pipeline sequence error",
+            "stage2b_cloud_quota_paused": "☁️ Cloud verifier quota paused",
+            "stage2b_pi5_endpoint_circuit_open": "🔌 Pi5 verifier circuit open",
+            "stage2b_oneplus_endpoint_circuit_open": "🔌 OnePlus verifier circuit open",
         }
+        routine = {
+            "stage2b_pi5_endpoint_circuit_closed": "🔌 Pi5 verifier circuit recovered",
+            "stage2b_oneplus_endpoint_circuit_closed": "🔌 OnePlus verifier circuit recovered",
+            "stage2b_artifact_sweep_released": "🖼 Artifact verification sweep released",
+            "stage3_chunking_completed": "🧩 Stage 3 chunking completed",
+            "verifier_audit_decision": "🔎 Human verifier decision saved",
+            "verifier_audit_bypass_updated": "🧪 Audit testing bypass updated",
+            "pipeline_retrieval_refresh_completed": "🔍 Retrieval index refreshed",
+            "stage2c_human_correction": "✍️ Human correction saved",
+        }
+        known = set(critical) | set(routine)
         async for frame in self._event_stream_factory():
             if not isinstance(frame, str) or '"reason":' not in frame:
                 continue
-            reason = next((r for r in important if f'"{r}"' in frame), None)
-            if reason:
-                timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
-                label = reason.replace("_", " ").capitalize()
+            reason = next((item for item in known if f'"{item}"' in frame), None)
+            if not reason:
+                continue
+            timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")
+            if reason in critical:
                 await self.send(
-                    f"[{timestamp}]\n\n⚓ Marine Pipeline Studio\n\n"
-                    "━━━━━━━━━━━━━━━━━━━━\nUPDATE\n━━━━━━━━━━━━━━━━━━━━\n\n"
-                    f"{label}\n\nUse /status for the current pipeline state."
+                    "🔴 **ALERT**\n"
+                    f"_{timestamp}_\n\n"
+                    f"{critical[reason]}\n\n"
+                    "🚨 `/errors` for details · 📊 `/status` for pipeline state"
+                )
+            else:
+                await self.send(
+                    f"🟢 _{timestamp}_\n"
+                    f"{routine[reason]}\n\n"
+                    "📊 `/status` for the current pipeline state"
                 )

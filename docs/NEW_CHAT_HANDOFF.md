@@ -1,6 +1,20 @@
-# `.40.11C` handoff
+# `.40.11D` handoff
 
-`2026.09.22.40.11C` is the current implementation baseline.
+`2026.09.22.40.11D` is the current implementation baseline.
+
+## `.40.11D` Telegram behavior
+
+- Telegram messages use semantic status/action icons and Markdown-derived Telegram entities instead of proportional-font pseudo-columns.
+- Long command replies are safely split; photo captions keep their decision keyboard and spill excess detail into follow-up messages.
+- `/status`, `/workers`, `/errors` show attention first; `/books` and `/audit` are worst-first with paging.
+- Critical pipeline/verifier/quota/circuit failures are pushed as 🔴 alerts; routine/recovery events are 🟢.
+- `telegram_controls: false` now blocks audit starts and decision callbacks.
+- OnePlus SSH/server state is shown separately from verifier circuit/workload state.
+- Web/Telegram human decisions still use the same Stage 2C authority model.
+
+# Previous handoff — `.40.11C`
+
+`2026.09.22.40.11C` was the previous implementation baseline.
 
 ## `.40.11C` human-review/UI behavior
 

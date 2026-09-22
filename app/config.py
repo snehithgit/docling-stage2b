@@ -104,7 +104,7 @@ class AppConfig:
     external_verifiers_enabled: bool = False
     verifier_health_interval_seconds: int = 30
 
-    # Optional Telegram monitoring/control plane. The bot token is read only
+    # Optional Telegram monitoring + human-audit plane. The bot token is read only
     # from the named environment variable and is never returned by the API.
     telegram_enabled: bool = False
     telegram_bot_token_env: str = "TELEGRAM_BOT_TOKEN"

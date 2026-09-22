@@ -229,7 +229,7 @@ oneplus_ssh_user: "u0_a202"
 oneplus_ssh_password_env: "ONEPLUS_SSH_PASSWORD"
 oneplus_control_script_path: "$HOME/bin/oneplus-llama-control"
 
-# Optional Telegram status/control plane. Keep the token in TELEGRAM_BOT_TOKEN,
+# Optional Telegram monitoring + human-audit plane. Keep the token in TELEGRAM_BOT_TOKEN,
 # not in this file. Only listed chat IDs are accepted.
 telegram_enabled: false
 telegram_bot_token_env: TELEGRAM_BOT_TOKEN

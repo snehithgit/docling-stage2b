@@ -7,3 +7,4 @@ Pillow==11.3.0
 PyMuPDF==1.26.4
 asyncssh>=2.14,<3
 numpy>=2.0,<3
+telegramify-markdown==1.2.0

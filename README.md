@@ -1,3 +1,16 @@
+## 2026.09.22.40.11D — Telegram mobile UX, safe formatting & alerting
+
+- Rebuilds Telegram command output for phone screens with semantic icons: 🔴 critical, 🟡 attention, 🟢 OK, ⚓ app identity, plus section/action icons.
+- Uses `telegramify-markdown==1.2.0` through its entity-based `convert()` + `split_entities()` path, replacing blind 3900-character slicing while preserving fenced monospace tables and safe formatting.
+- Makes `/status`, `/workers`, and `/errors` attention-first; `/books` and `/audit` are worst-first and paginated with explicit remaining counts.
+- Expands push alerts to conversion, Stage 2A/2B/2C/3, worker, quota, pipeline-sequence and verifier-circuit failures; recovery/routine events remain green.
+- Makes `telegram_controls` real: audit sessions and decision callbacks are blocked when disabled, while Stop remains safe.
+- Separates OnePlus SSH/llama.cpp state from verifier circuit/workload health in `/workers`.
+- Standardizes Telegram/app branding to **Docling Auto-Convert** in the identified live surfaces.
+- Preserves the existing authoritative Stage 2C human-decision paths; Telegram remains a transport, not a second data authority.
+- Source-tree regression suite: **535/535 tests pass**.
+- Full details: `docs/RELEASE_VALIDATION_2026.09.22.40.11D.md`.
+
 ## 2026.09.22.40.11C — Global human review queue & UI consistency
 
 - Extends the shared web text-review surface into a **global filtered queue** across books, with book/type/reason/state filters while retaining one-by-one Previous/Next, `N of M`, keyboard navigation and auto-advance.
