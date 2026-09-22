@@ -530,14 +530,17 @@ class Runtime:
             lambda: self.config, self.postprocess_store, self.events, self.groq_quota
         )
         self.stage2b_store = Stage2BStore(self.config.database_path)
-        self.stage2b_worker = Stage2BWorker(
-            lambda: self.config, self.stage2b_store, self.postprocess_store, self.events, self.groq_quota
-        )
         self.oneplus_controller = OnePlusController(lambda: self.config)
+        self.stage2b_worker = Stage2BWorker(
+            lambda: self.config, self.stage2b_store, self.postprocess_store, self.events,
+            self.groq_quota, self.oneplus_controller.restart,
+        )
         self.stage3_builder = Stage3ChunkBuilder(
             lambda: self.config, self.postprocess_store, self.client, self.events, self.stage2b_store
         )
-        self.telegram_bot = TelegramBotService(lambda: self.config, self.telegram_command, self.events.stream)
+        self.telegram_bot = TelegramBotService(
+            lambda: self.config, self.telegram_command, self.events.stream, self.telegram_audit
+        )
         self.pipeline_sequence_task: asyncio.Task | None = None
         self.pipeline_sequence_state: dict = {
             "status": "idle", "current_book": None, "current_stage": None,
@@ -905,6 +908,269 @@ class Runtime:
         if advanced:
             self.events.notify("pipeline_sequence_advanced")
 
+    @staticmethod
+    def _telegram_trim(value: object, limit: int = 240) -> str:
+        text = " ".join(str(value or "").split())
+        return text if len(text) <= limit else text[: max(1, limit - 1)].rstrip() + "…"
+
+    async def _telegram_audit_rows(self) -> list[dict]:
+        rows = (
+            await self.stage2b_store.list_results_raw("pi5", limit=5000)
+            + await self.stage2b_store.list_results_raw("oneplus", limit=5000)
+        )
+        rows.sort(key=lambda row: (
+            str(row.get("output_filename") or row.get("result_dir") or "").casefold(),
+            int(_audit_json(row.get("request_json")).get("page") or 0),
+            int(row.get("id") or 0),
+        ))
+        return rows
+
+    async def _telegram_next_text_audit(self) -> dict:
+        candidates: list[dict] = []
+        for row in await self._telegram_audit_rows():
+            source = _audit_json(row.get("source_json"))
+            if str(source.get("type") or "") == "picture" or str(row.get("status") or "") != "completed":
+                continue
+            result_dir_name = Path(str(row.get("result_dir") or "")).name
+            if not result_dir_name:
+                continue
+            result_dir = Path(self.config.processed_dir) / result_dir_name
+            ledger = await asyncio.to_thread(_load_json_file, result_dir / "correction_ledger.json")
+            entry_id = f"{row.get('generation')}:text:{row.get('route_id')}"
+            entry = next((item for item in (ledger.get("entries") or []) if str(item.get("entry_id") or "") == entry_id), None)
+            if not isinstance(entry, dict) or str(entry.get("status") or "") == "superseded" or entry.get("human_verified"):
+                continue
+            verdict = str(entry.get("verification_verdict") or row.get("verdict") or "").upper()
+            status = str(entry.get("status") or "")
+            if verdict not in {"LIKELY_CORRUPT", "UNCERTAIN"} and status not in {"pending", "proposed", "rejected"}:
+                continue
+            request = _audit_json(row.get("request_json"))
+            result = _audit_json(row.get("result_json"))
+            reconstruction = result.get("source_reconstruction") if isinstance(result.get("source_reconstruction"), dict) else {}
+            correction = result.get("correction") if isinstance(result.get("correction"), dict) else {}
+            original = str(entry.get("original_text") or request.get("suspect_text") or "").strip()
+            proposed = str(
+                entry.get("proposed_text")
+                or correction.get("proposed_text")
+                or reconstruction.get("corrected_text")
+                or ""
+            ).strip()
+            if not original:
+                continue
+            candidates.append({
+                "row": row,
+                "result_dir": result_dir_name,
+                "entry_id": entry_id,
+                "original": original,
+                "proposed": proposed,
+                "page": request.get("page") or entry.get("page"),
+                "reason": row.get("reason") or entry.get("status_reason") or entry.get("reason"),
+                "verdict": verdict or "UNCERTAIN",
+                "book": row.get("output_filename") or row.get("result_dir") or "Unknown book",
+            })
+        if not candidates:
+            return {"done": True, "remaining": 0}
+        item = candidates[0]
+        row = item["row"]
+        try:
+            image, mime, _ = await self.stage2b_worker.text_audit_image(int(row.get("id") or 0))
+        except (ValueError, FileNotFoundError, IndexError, KeyError):
+            image, mime = b"", "image/png"
+        proposed = item["proposed"]
+        options = []
+        if proposed and proposed != item["original"]:
+            options.append({"label": "✅ Apply verifier correction", "value": "apply"})
+        options.append({"label": "🛡 Keep original", "value": "keep_original"})
+        caption = (
+            "🔎 TEXT VERIFIER AUDIT\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"{self._telegram_trim(item['book'], 90)}\n"
+            f"Page {item['page'] or '—'} · {row.get('route_id') or 'route'}\n\n"
+            f"Verifier   {item['verdict']}\n"
+            f"Reason     {self._telegram_trim(item['reason'], 100) or '—'}\n\n"
+            f"ORIGINAL\n{self._telegram_trim(item['original'], 260)}\n"
+        )
+        if proposed:
+            caption += f"\nVERIFIER\n{self._telegram_trim(proposed, 260)}\n"
+        caption += f"\nRemaining   {len(candidates)}\nChoose one decision. The next image will be sent automatically."
+        return {
+            "done": False,
+            "remaining": len(candidates),
+            "key": {"row_id": int(row.get("id") or 0), "postprocess_job_id": int(row.get("postprocess_job_id") or 0), "result_dir": item["result_dir"], "entry_id": item["entry_id"]},
+            "image": image,
+            "mime_type": mime,
+            "caption": caption,
+            "options": options,
+        }
+
+    @staticmethod
+    def _telegram_is_artifact_sweep(row: dict) -> bool:
+        return str(row.get("code") or "") == "FULL_TECHNICAL_VISUAL" or bool(re.fullmatch(r"AV\d{6}", str(row.get("route_id") or "")))
+
+    async def _telegram_next_visual_audit(self, audit_type: str) -> dict:
+        candidates: list[dict] = []
+        for row in await self._telegram_audit_rows():
+            source = _audit_json(row.get("source_json"))
+            if str(source.get("type") or "") != "picture" or str(row.get("status") or "") != "completed":
+                continue
+            sweep = self._telegram_is_artifact_sweep(row)
+            if audit_type == "artifact" and not sweep:
+                continue
+            if audit_type == "vision" and sweep:
+                continue
+            result_dir_name = Path(str(row.get("result_dir") or "")).name
+            if not result_dir_name:
+                continue
+            result_dir = Path(self.config.processed_dir) / result_dir_name
+            ledger = await asyncio.to_thread(_load_json_file, result_dir / "correction_ledger.json")
+            entry_id = f"{row.get('generation')}:vision:{row.get('route_id')}"
+            entry = next((item for item in (ledger.get("entries") or []) if str(item.get("entry_id") or "") == entry_id), None)
+            if not isinstance(entry, dict) or str(entry.get("status") or "") == "superseded" or entry.get("human_visual_decision"):
+                continue
+            result = _audit_json(row.get("result_json"))
+            parsed = result.get("parsed") if isinstance(result.get("parsed"), dict) else {}
+            verdict = str(parsed.get("verdict") or row.get("verdict") or "").upper()
+            unresolved = bool(parsed.get("unresolved") or entry.get("unresolved"))
+            if verdict != "UNCERTAIN" and not unresolved and str(entry.get("status") or "") != "pending":
+                continue
+            request = _audit_json(row.get("request_json"))
+            candidates.append({
+                "row": row,
+                "result_dir": result_dir_name,
+                "entry_id": entry_id,
+                "book": row.get("output_filename") or row.get("result_dir") or "Unknown book",
+                "page": request.get("page") or entry.get("page"),
+                "verdict": verdict or "UNCERTAIN",
+                "confidence": parsed.get("confidence"),
+                "category": parsed.get("diagram_category") or entry.get("diagram_category") or "unknown",
+                "summary": parsed.get("summary") or entry.get("generated_summary") or "",
+                "labels": parsed.get("visible_text") or entry.get("visible_text") or [],
+                "reason": row.get("reason") or request.get("reason") or entry.get("status_reason") or "",
+            })
+        if not candidates:
+            return {"done": True, "remaining": 0}
+        item = candidates[0]
+        row = item["row"]
+        try:
+            image, mime, _ = await self.stage2b_worker.vision_audit_image(int(row.get("id") or 0), "full")
+        except (ValueError, FileNotFoundError, IndexError, KeyError):
+            image, mime = b"", "image/png"
+        confidence = item["confidence"]
+        confidence_text = f"{float(confidence) * 100:.0f}%" if isinstance(confidence, (int, float)) else "—"
+        labels = [self._telegram_trim(value, 55) for value in item["labels"][:6] if str(value).strip()]
+        title = "ARTIFACT VERIFIER AUDIT" if audit_type == "artifact" else "VISION VERIFIER AUDIT"
+        caption = (
+            f"🔎 {title}\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"{self._telegram_trim(item['book'], 90)}\n"
+            f"Page {item['page'] or '—'} · {row.get('route_id') or 'route'}\n\n"
+            f"AI verdict   {item['verdict']}\n"
+            f"Confidence   {confidence_text}\n"
+            f"Category     {self._telegram_trim(item['category'], 45)}\n"
+            f"Reason       {self._telegram_trim(item['reason'], 90) or '—'}\n"
+        )
+        if item["summary"]:
+            caption += f"\nSummary\n{self._telegram_trim(item['summary'], 180)}\n"
+        if labels:
+            caption += "\nVisible text\n" + "\n".join(f"• {value}" for value in labels) + "\n"
+        caption += f"\nRemaining   {len(candidates)}\nChoose one decision. The next image will be sent automatically."
+        options = (
+            [{"label": "✅ Technical", "value": "technical"}, {"label": "🚫 Decorative", "value": "decorative"}]
+            if audit_type == "artifact"
+            else [{"label": "✅ Useful", "value": "useful"}, {"label": "🚫 Not useful", "value": "not_useful"}]
+        )
+        return {
+            "done": False,
+            "remaining": len(candidates),
+            "key": {"row_id": int(row.get("id") or 0), "postprocess_job_id": int(row.get("postprocess_job_id") or 0), "result_dir": item["result_dir"], "entry_id": item["entry_id"]},
+            "image": image,
+            "mime_type": mime,
+            "caption": caption,
+            "options": options,
+        }
+
+    async def _telegram_apply_text_audit(self, key: dict, decision: str) -> dict:
+        if decision not in {"apply", "keep_original"}:
+            return {"ok": False, "error": "Unsupported text decision."}
+        result_dir = Path(self.config.processed_dir) / Path(str(key.get("result_dir") or "")).name
+        entry_id = str(key.get("entry_id") or "")
+        async with self.stage2b_worker._stage2c_ledger_lock:
+            ledger = await asyncio.to_thread(_load_json_file, result_dir / "correction_ledger.json")
+            entry = next((item for item in (ledger.get("entries") or []) if str(item.get("entry_id") or "") == entry_id), None)
+            if not isinstance(entry, dict):
+                return {"ok": False, "error": "Text audit entry no longer exists."}
+            if entry.get("human_verified"):
+                return {"ok": True, "message": "Already human reviewed."}
+            original = str(entry.get("original_text") or "").strip()
+            proposed = str(entry.get("proposed_text") or "").strip()
+            if decision == "apply" and not proposed:
+                row = await self.stage2b_store.get_job(int(key.get("row_id") or 0))
+                result = _audit_json((row or {}).get("result_json"))
+                correction = result.get("correction") if isinstance(result.get("correction"), dict) else {}
+                reconstruction = result.get("source_reconstruction") if isinstance(result.get("source_reconstruction"), dict) else {}
+                proposed = str(correction.get("proposed_text") or reconstruction.get("corrected_text") or "").strip()
+            if decision == "apply":
+                if not proposed:
+                    return {"ok": False, "error": "No verifier correction is available to apply."}
+                apply_human_correction_to_entry(entry, text=proposed, action="apply")
+                label = "Verifier correction accepted."
+            else:
+                if not original:
+                    return {"ok": False, "error": "Original text is unavailable."}
+                apply_human_correction_to_entry(entry, text=original, action="reject")
+                label = "Original text kept."
+            await asyncio.to_thread(
+                upsert_ledger_entry, result_dir, str(ledger.get("source_zip_sha256") or ""), entry
+            )
+        self.events.notify("stage2c_human_correction")
+        return {"ok": True, "message": label}
+
+    async def _telegram_apply_visual_audit(self, key: dict, decision: str) -> dict:
+        allowed = {"technical", "decorative", "useful", "not_useful"}
+        if decision not in allowed:
+            return {"ok": False, "error": "Unsupported visual decision."}
+        result_dir = Path(self.config.processed_dir) / Path(str(key.get("result_dir") or "")).name
+        entry_id = str(key.get("entry_id") or "")
+        try:
+            async with self.stage2b_worker._stage2c_ledger_lock:
+                entry = await asyncio.to_thread(apply_human_visual_decision, result_dir, entry_id, decision)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        recovery = None
+        if bool(entry.get("human_evidence_recovery_required")) and str(entry.get("human_visual_decision") or "") in {"technical", "useful"}:
+            verification_job_id = entry.get("verification_job_id") or key.get("row_id")
+            if verification_job_id is not None:
+                try:
+                    recovery = await self.stage2b_worker.start_human_visual_evidence_recovery(
+                        int(verification_job_id), str(entry.get("entry_id") or entry_id)
+                    )
+                except ValueError:
+                    recovery = None
+        self.events.notify("verifier_audit_decision")
+        suffix = " Evidence recovery queued." if isinstance(recovery, dict) and recovery.get("status") in {"queued", "pending", "started"} else ""
+        return {"ok": True, "message": f"Decision saved: {decision.replace('_', ' ')}.{suffix}"}
+
+    async def telegram_audit(self, action: str, audit_type: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Application-owned Telegram human audit workflow.
+
+        Telegram itself is only the transport. Every decision is committed by
+        the same Stage 2C functions used by the web audit, preserving human
+        authority, ledger reconciliation, downstream staleness and evidence
+        recovery semantics.
+        """
+        kind = str(audit_type or "").strip().lower()
+        if kind not in {"text", "vision", "artifact"}:
+            return {"done": True, "remaining": 0}
+        if action == "next":
+            return await (self._telegram_next_text_audit() if kind == "text" else self._telegram_next_visual_audit(kind))
+        if action == "decide":
+            key = payload.get("key") if isinstance(payload.get("key"), dict) else {}
+            decision = str(payload.get("decision") or "").strip().lower()
+            if kind == "text":
+                return await self._telegram_apply_text_audit(key, decision)
+            return await self._telegram_apply_visual_audit(key, decision)
+        return {"ok": False, "error": "Unsupported audit action."}
+
     async def telegram_command(self, command: str, args: list[str]) -> str:
         from datetime import datetime
 
@@ -926,11 +1192,15 @@ class Runtime:
             "/status    Pipeline overview",
             "/books     Per-book progress",
             "/workers   Pi5 / OnePlus health",
-            "/audit     Human audit workload",
-            "/errors    Current failures",
-            "/help      Show this message",
+            "/audit          Human audit workload",
+            "/textaudit      Review text crops one by one",
+            "/visionaudit    Review normal vision images one by one",
+            "/artifactaudit  Review artifact-sweep images one by one",
+            "/stopaudit      Stop the current Telegram audit",
+            "/errors         Current failures",
+            "/help           Show this message",
             "",
-            "Telegram is monitoring-only. Pipeline controls remain in the web app.",
+            "Telegram monitoring + human audit are enabled. Pipeline start/stop controls remain in the web app.",
         ]
         if command in {"/start", "/help"}:
             return "\n".join(help_lines)
@@ -1012,9 +1282,14 @@ class Runtime:
             for target, label in (("pi5", "Pi5"), ("oneplus", "OnePlus")):
                 st = self.stage2b_worker.worker_state.get(target, {})
                 circuit = st.get("endpoint_circuit") or {}
+                workload = st.get("workload") or {}
                 paused = bool(getattr(self.config, f"stage2b_{target}_paused", False))
                 active = st.get("active_job_id")
-                state = "Paused" if paused else ("Offline" if circuit.get("open") else ("Working" if active else "Ready"))
+                state = (
+                    "Paused" if paused else
+                    ("Cooling" if target == "oneplus" and workload.get("cooldown_active") else
+                     ("Offline" if circuit.get("open") else ("Working" if active else "Ready")))
+                )
                 lines.append(f"{label:<10}{state:<10}{('#' + str(active)) if active else ''}".rstrip())
             lines += ["", "No failures detected." if failed == 0 else f"⚠️ {failed} verification failure(s) require attention."]
             return "\n".join(lines)
@@ -1059,14 +1334,39 @@ class Runtime:
             for target, label in (("pi5", "Pi5"), ("oneplus", "OnePlus")):
                 st = self.stage2b_worker.worker_state.get(target, {})
                 circuit = st.get("endpoint_circuit") or {}
+                workload = st.get("workload") or {}
                 paused = bool(getattr(self.config, f"stage2b_{target}_paused", False))
                 active = st.get("active_job_id")
                 task = str(st.get("active_label") or st.get("active_task") or ("Artifact sweep" if active else "Idle"))
-                status = "Paused" if paused else ("Offline" if circuit.get("open") else ("Working" if active else "Ready"))
+                status = (
+                    "Paused" if paused else
+                    ("Cooling" if target == "oneplus" and workload.get("cooldown_active") else
+                     ("Offline" if circuit.get("open") else ("Working" if active else "Ready")))
+                )
                 if paused or circuit.get("open"):
                     healthy = False
-                lines += [divider, label, divider, "", row("Status", status, 9), row("Job", f"#{active}" if active else "—", 9), row("Task", task, 9), row("Circuit", "Open" if circuit.get("open") else "Closed", 9), ""]
-            lines.append("Both workers healthy." if healthy else "⚠️ One or more workers need attention.")
+                lines += [divider, label, divider, "", row("Status", status, 9), row("Job", f"#{active}" if active else "—", 9), row("Task", task, 9), row("Circuit", "Open" if circuit.get("open") else "Closed", 9)]
+                if target == "oneplus":
+                    work = f"{float(workload.get('busy_minutes') or 0):.1f} / {float(workload.get('budget_minutes') or 90):.0f} min"
+                    speed = workload.get("last_speed_tps")
+                    lines += [
+                        row("Work", work, 9),
+                        row("Speed", f"{float(speed):.2f} tok/s" if speed is not None else "—", 9),
+                    ]
+                    if workload.get("cooldown_active"):
+                        remaining = int(workload.get("cooldown_remaining_seconds") or 0)
+                        lines += [
+                            row("Cooldown", f"{remaining // 60}m {remaining % 60}s", 9),
+                            row("Reason", str(workload.get("cooldown_reason") or "thermal protection"), 9),
+                        ]
+                lines.append("")
+            oneplus_workload = self.stage2b_worker.worker_state.get("oneplus", {}).get("workload") or {}
+            if not healthy:
+                lines.append("⚠️ One or more workers need attention.")
+            elif oneplus_workload.get("cooldown_active"):
+                lines.append("OnePlus workload cooldown active; queued work is preserved.")
+            else:
+                lines.append("Both workers healthy.")
             return "\n".join(lines)
 
         if command == "/audit":
@@ -3539,7 +3839,9 @@ async def source_page(job_id: int, page: int, highlight: str | None = None):
 
 @app.get("/api/oneplus-control/status")
 async def oneplus_control_status() -> dict:
-    return await runtime.oneplus_controller.status()
+    status = await runtime.oneplus_controller.status()
+    status["workload"] = await runtime.stage2b_worker.oneplus_workload_status()
+    return status
 
 
 @app.post("/api/oneplus-control/install-script")

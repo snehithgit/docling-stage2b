@@ -144,11 +144,24 @@ stage2b_request_timeout_seconds: 240
 stage2b_pi5_job_timeout_seconds: 300
 # OnePlus vision streams output. Allow up to 20 minutes before the first generated
 # content, then require some stream activity at least every 5 minutes. A normal
-# request finishes immediately on finish_reason/[DONE]. Set job timeout to 0 so
-# there is no arbitrary total-duration ceiling; first-output/idle timers still detect a dead stream.
+# request finishes immediately on finish_reason/[DONE]. The 40-minute absolute
+# ceiling below is defense-in-depth for a continuously-active pathological stream.
 stage2b_oneplus_first_token_timeout_seconds: 1200
 stage2b_oneplus_stream_idle_timeout_seconds: 300
-stage2b_oneplus_job_timeout_seconds: 0
+# Absolute backstop; first-token and idle timers remain the normal liveness checks.
+stage2b_oneplus_job_timeout_seconds: 2400
+# Adaptive phone workload protection derived from real long-run OnePlus traces.
+# Budget is accumulated inference time, not request/image count.
+stage2b_oneplus_work_budget_seconds: 5400
+stage2b_oneplus_idle_reset_seconds: 1200
+stage2b_oneplus_scheduled_cooldown_seconds: 1200
+stage2b_oneplus_severe_cooldown_seconds: 1800
+stage2b_oneplus_warning_speed_tps: 7.0
+stage2b_oneplus_severe_speed_tps: 2.0
+stage2b_oneplus_recovery_speed_tps: 8.0
+stage2b_oneplus_warning_speed_consecutive: 2
+stage2b_oneplus_long_request_seconds: 600
+stage2b_oneplus_auto_restart_after_cooldown: true
 stage2b_retry_delay_seconds: 15
 stage2b_retry_max_delay_seconds: 300
 # Full technical-artifact sweeps use a shared Pi5 + OnePlus work-stealing pool.

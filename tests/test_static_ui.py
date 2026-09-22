@@ -113,6 +113,9 @@ def test_oneplus_page_is_llama_only_and_keeps_nonbusy_disabled_cursor():
     js = read("oneplus.js")
     css = read("styles.css")
     assert "Install / update llama control script" in html
+    assert 'id="workload-state"' in html
+    assert 'id="workload-detail"' in html
+    assert 'cooldown_remaining_seconds' in js
     assert '>Start<' in html
     assert '>Restart<' in html
     assert '>Stop<' in html

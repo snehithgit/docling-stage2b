@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 from .archive import select_docling_document
 from .artifact_sweep import build_artifact_sweep_plan
 from .verifier_checkpoint import CheckpointVerifier
+from .oneplus_workload import OnePlusCooldownActive, OnePlusWorkloadGovernor
 from .events import EventBroker
 from .groq_quota import CloudQuotaPausedError, GroqQuotaGuard
 from .postprocess_store import PostprocessStore
@@ -2461,6 +2462,7 @@ class Stage2BWorker:
         postprocess_store: PostprocessStore,
         events: EventBroker,
         groq_quota: GroqQuotaGuard | None = None,
+        oneplus_restart: Any | None = None,
     ) -> None:
         self._config_getter = config_getter
         self._store = store
@@ -2491,6 +2493,16 @@ class Stage2BWorker:
         # and CRC-scanned for every local-model call.
         self._doc_cache: dict[str, tuple[tuple[int, int], dict[str, Any]]] = {}
         self._device_locks = {"pi5": asyncio.Lock(), "oneplus": asyncio.Lock(), "groq": asyncio.Lock()}
+        # The provider lock above already guarantees one physical OnePlus
+        # inference at a time. The workload governor adds a persisted, adaptive
+        # time/throughput budget so long batches rest before the phone reaches
+        # the ~2h thermal/server cliff observed in real production traces.
+        self._oneplus_workload = OnePlusWorkloadGovernor(
+            config_getter,
+            restart_callback=oneplus_restart,
+            event_callback=(events.notify if events is not None else None),
+        )
+        self.worker_state["oneplus"]["workload"] = self._oneplus_workload.public_state
         self._model_cache: dict[str, tuple[str, str | None]] = {}
         # FULL_TECHNICAL_VISUAL uses one shared local work pool. Each idle
         # physical worker pulls the next row; there is no fixed ratio. A worker
@@ -2531,6 +2543,9 @@ class Stage2BWorker:
         # without changing the human decision or replacing the original audit.
         self._human_visual_recovery_tasks: dict[int, asyncio.Task[Any]] = {}
         self.human_visual_recovery_state: dict[int, dict[str, Any]] = {}
+
+    async def oneplus_workload_status(self) -> dict[str, Any]:
+        return await self._oneplus_workload.snapshot()
 
     def device_lock(self, provider: str) -> asyncio.Lock:
         """Share the physical-provider lock with explicit RAG generation.
@@ -3800,6 +3815,8 @@ class Stage2BWorker:
                     self.worker_state[target]["quota"] = quota
                     normal_role_available = not bool(quota.get("paused"))
                 normal_provider = self._selected_provider(target)
+                if normal_role_available and normal_provider == "oneplus":
+                    normal_role_available = await self._oneplus_workload.can_start()
                 if normal_role_available and normal_provider in self._endpoint_circuit:
                     normal_role_available = await self._endpoint_provider_ready(normal_provider)
 
@@ -3813,7 +3830,12 @@ class Stage2BWorker:
                     await self._run_job(target, job)
                     continue
 
-                if self._artifact_worker_available(target) and await self._endpoint_provider_ready(target):
+                artifact_ready = self._artifact_worker_available(target)
+                if artifact_ready and target == "oneplus":
+                    artifact_ready = await self._oneplus_workload.can_start()
+                if artifact_ready:
+                    artifact_ready = await self._endpoint_provider_ready(target)
+                if artifact_ready:
                     released = await self._store.release_ready_artifact_sweeps()
                     if released:
                         self._events.notify("stage2b_artifact_sweep_released")
@@ -3822,6 +3844,19 @@ class Stage2BWorker:
                         artifact_job["_artifact_worker"] = target
                         await self._run_job(target, artifact_job, preclaimed=True, run_mode_override="artifact_shared")
                         continue
+
+                # Evidence-recovery jobs are background tasks rather than queue
+                # rows. Resume them only after the same physical-phone cooldown
+                # has expired; the provider lock still guarantees single-flight.
+                if target == "oneplus" and await self._oneplus_workload.can_start():
+                    if any(
+                        state.get("status") == "waiting_for_device"
+                        for state in self.human_visual_recovery_state.values()
+                    ):
+                        asyncio.create_task(
+                            self._resume_waiting_human_visual_recoveries(),
+                            name="resume-human-visual-after-oneplus-cooldown",
+                        )
 
                 await asyncio.sleep(self._config_getter().stage2b_poll_interval_seconds)
             except asyncio.CancelledError:
@@ -3925,10 +3960,10 @@ class Stage2BWorker:
                 if target == "pi5" else config.stage2b_oneplus_job_timeout_seconds
             )
             # Pi5 timeout is enforced per inference request after acquiring the
-            # shared device gate, so queue wait and later correction do not
-            # discard completed triage. OnePlus can have no total-duration limit
-            # (0 => None). Its streaming client still enforces first-output and
-            # post-output idle timers, so a dead connection is not infinite.
+            # shared device gate. OnePlus normally uses a 40-minute absolute
+            # defense-in-depth ceiling in addition to its first-output and
+            # stream-idle liveness timers; 0 remains supported as an explicit
+            # legacy/custom disable value.
             route_timeout = None if target == "pi5" or int(route_timeout_value) == 0 else route_timeout_value
             async with asyncio.timeout(route_timeout):
                 try:
@@ -3983,6 +4018,17 @@ class Stage2BWorker:
                 if released:
                     self._events.notify("stage2b_artifact_sweep_released")
             await self._maybe_auto_finalize_book(int(job["postprocess_job_id"]))
+        except OnePlusCooldownActive as exc:
+            seconds = time.monotonic() - started
+            await self._store.mark_deferred(
+                int(job["id"]), "OnePlusCooldown", str(exc),
+                delay_seconds=int(exc.retry_after_seconds),
+            )
+            logger.info(
+                "Stage 2B job %s deferred without retry penalty for OnePlus workload cooldown (%ss, %s)",
+                job.get("id"), exc.retry_after_seconds, exc.reason,
+            )
+            self._events.notify("stage2b_oneplus_workload_deferred")
         except CloudQuotaPausedError as exc:
             seconds = time.monotonic() - started
             snap = dict(getattr(exc, "snapshot", {}) or {})
@@ -4028,6 +4074,12 @@ class Stage2BWorker:
                 (job.get("_artifact_worker") if is_artifact_sweep else self._selected_provider(target))
                 or target
             ).lower()
+            # A built-in TimeoutError here is the outer absolute OnePlus job
+            # watchdog. Per-request httpx timeouts are already accounted for
+            # inside the governed client. Schedule a severe cooldown without
+            # double-counting the full logical-job duration.
+            if provider == "oneplus" and type(exc) is TimeoutError:
+                await self._oneplus_workload.trigger_severe_cooldown("absolute_job_timeout")
             if self._is_endpoint_connection_failure(exc) and provider in self._endpoint_circuit:
                 delay = await self._open_endpoint_circuit(provider, f"{type(exc).__name__}: {exc}")
                 await self._store.mark_deferred(
@@ -4286,6 +4338,7 @@ class Stage2BWorker:
             self._checkpoint_path(job),
             identity,
             timeout=timeout,
+            governor=self._oneplus_workload if provider == "oneplus" else None,
         )
         wrapped.endpoint = endpoint
         wrapped.provider = provider
@@ -4341,6 +4394,7 @@ class Stage2BWorker:
             self._checkpoint_path(job),
             identity,
             timeout=timeout,
+            governor=self._oneplus_workload if provider == "oneplus" else None,
         )
         wrapped.endpoint = endpoint
         wrapped.provider = provider
@@ -4854,6 +4908,14 @@ class Stage2BWorker:
         except asyncio.CancelledError:
             state["status"] = "cancelled"
             raise
+        except OnePlusCooldownActive as exc:
+            state.update({
+                "status": "waiting_for_device",
+                "completed_at_epoch": None,
+                "error": str(exc)[:1000],
+                "retry_after_seconds": int(exc.retry_after_seconds),
+            })
+            self._events.notify("human_visual_evidence_recovery_waiting")
         except (httpx.TransportError, TimeoutError, ConnectionError) as exc:
             state.update({
                 "status": "waiting_for_device",

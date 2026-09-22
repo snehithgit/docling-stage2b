@@ -34,7 +34,7 @@ class ConfigTests(unittest.TestCase):
             AppConfig(to_formats=["pdf"]).validate()
 
 
-def test_old_oneplus_timeout_config_migrates_to_streaming_no_total_ceiling():
+def test_old_oneplus_timeout_config_migrates_to_streaming_watchdog():
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "config.yaml"
         path.write_text(
@@ -45,7 +45,7 @@ def test_old_oneplus_timeout_config_migrates_to_streaming_no_total_ceiling():
             encoding="utf-8",
         )
         loaded = load_config(path)
-        assert loaded.stage2b_oneplus_job_timeout_seconds == 0
+        assert loaded.stage2b_oneplus_job_timeout_seconds == 2400
         assert loaded.stage2b_oneplus_first_token_timeout_seconds == 1200
         assert loaded.stage2b_oneplus_stream_idle_timeout_seconds == 300
 
@@ -171,6 +171,14 @@ def test_verifier_defaults_keep_local_processors_and_automatic_stage2c():
     assert config.stage2c_cloud_auto_apply is True
     assert config.stage2b_text_target_crop_scale == 2.5
     assert config.stage2b_text_allow_full_page_fallback is False
+    assert config.stage2b_oneplus_job_timeout_seconds == 2400
+    assert config.stage2b_oneplus_work_budget_seconds == 5400
+    assert config.stage2b_oneplus_idle_reset_seconds == 1200
+    assert config.stage2b_oneplus_scheduled_cooldown_seconds == 1200
+    assert config.stage2b_oneplus_severe_cooldown_seconds == 1800
+    assert config.stage2b_oneplus_warning_speed_tps == 7.0
+    assert config.stage2b_oneplus_severe_speed_tps == 2.0
+    assert config.stage2b_oneplus_recovery_speed_tps == 8.0
 
 
 def test_text_and_vision_accept_all_three_explicit_processors():

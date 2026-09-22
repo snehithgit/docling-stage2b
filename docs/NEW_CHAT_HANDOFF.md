@@ -1,6 +1,15 @@
-# `.40.9` handoff
+# `.40.10.1` handoff
 
-`2026.09.21.40.9` is the current implementation baseline.
+`2026.09.22.40.10.1` is the current implementation baseline.
+
+## `.40.10.1` OnePlus stability behavior
+
+- Use accumulated active inference time, not image/request count, to schedule rest.
+- 90 min active work -> 20 min cooldown; 20 min natural idle resets the budget.
+- Two <7 tok/s results -> scheduled cooldown; one <2 tok/s, one >=10 min request, or a transport outage -> 30 min severe cooldown.
+- After cooldown, restart the canonical OnePlus llama.cpp service when available and require >=8 tok/s on the next real request to clear recovery probation.
+- All work stays pending/deferred; cooldown does not downgrade evidence or consume retry budget.
+- State is persisted in `/data/db/oneplus_workload.json`.
 
 ## What is closed
 

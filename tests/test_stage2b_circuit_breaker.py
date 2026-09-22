@@ -96,3 +96,37 @@ def test_old_connecterror_failures_are_requeued_for_outage_recovery(tmp_path: Pa
         assert recovered["error_type"] is None
 
     asyncio.run(run())
+
+
+def test_oneplus_workload_cooldown_defers_without_retry_budget(tmp_path: Path):
+    from app.oneplus_workload import OnePlusCooldownActive
+
+    async def run():
+        store = Stage2BStore(str(tmp_path / "jobs.db"))
+        await store.initialize()
+        await store.sync_routes(9, 1, "g", [
+            {"route_id": "V1", "target": "oneplus", "code": "LOW_CONFIDENCE_VISUAL", "source": {"type": "picture", "index": 1}},
+        ], "book__job9", "book.zip")
+        await store.start_manual_book(9)
+        cfg = AppConfig(
+            processed_dir=str(tmp_path / "processed"),
+            database_path=str(tmp_path / "jobs.db"),
+        )
+        events = Events()
+        worker = Stage2BWorker(lambda: cfg, store, PostprocessStoreStub(), events)
+
+        async def cooling(*_args, **_kwargs):
+            raise OnePlusCooldownActive(1200, "active_inference_budget_reached")
+
+        worker._run_oneplus = cooling
+        row = await store.next_runnable("oneplus", False)
+        assert row is not None
+        await worker._run_job("oneplus", row)
+        saved = (await store.list_book_jobs_raw(9))[0]
+        assert saved["status"] == "pending"
+        assert saved["retry_count"] == 0
+        assert saved["error_type"] == "OnePlusCooldown"
+        assert "workload cooldown" in str(saved["error_message"])
+        assert "stage2b_oneplus_workload_deferred" in events.names
+
+    asyncio.run(run())

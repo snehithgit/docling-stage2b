@@ -181,7 +181,24 @@ class AppConfig:
     # an arbitrary total-duration ceiling; completion comes from finish_reason/[DONE].
     stage2b_oneplus_first_token_timeout_seconds: int = 1200
     stage2b_oneplus_stream_idle_timeout_seconds: int = 300
-    stage2b_oneplus_job_timeout_seconds: int = 0
+    # Absolute defense-in-depth watchdog. Streaming first-output/idle timers are
+    # still the normal liveness checks; 40 minutes only catches pathological
+    # continuously-active streams that would otherwise never end.
+    stage2b_oneplus_job_timeout_seconds: int = 2400
+    # Real OnePlus batch history shows a repeatable thermal/server cliff after
+    # roughly two hours of near-100% inference duty. Keep a 30-minute safety
+    # margin and adapt early when throughput collapses. These limits govern
+    # inference time, not number of documents/images.
+    stage2b_oneplus_work_budget_seconds: int = 5400
+    stage2b_oneplus_idle_reset_seconds: int = 1200
+    stage2b_oneplus_scheduled_cooldown_seconds: int = 1200
+    stage2b_oneplus_severe_cooldown_seconds: int = 1800
+    stage2b_oneplus_warning_speed_tps: float = 7.0
+    stage2b_oneplus_severe_speed_tps: float = 2.0
+    stage2b_oneplus_recovery_speed_tps: float = 8.0
+    stage2b_oneplus_warning_speed_consecutive: int = 2
+    stage2b_oneplus_long_request_seconds: int = 600
+    stage2b_oneplus_auto_restart_after_cooldown: bool = True
     stage2b_retry_delay_seconds: int = 15
     stage2b_retry_max_delay_seconds: int = 300
     # Local endpoint connection failures are infrastructure outages, not bad jobs.
@@ -408,6 +425,20 @@ class AppConfig:
             raise ValueError("OnePlus stream idle timeout must be at least 30 seconds")
         if self.stage2b_oneplus_job_timeout_seconds != 0 and self.stage2b_oneplus_job_timeout_seconds < self.stage2b_oneplus_first_token_timeout_seconds:
             raise ValueError("OnePlus job timeout must be 0 (disabled) or >= OnePlus first-token timeout")
+        if self.stage2b_oneplus_work_budget_seconds < 300:
+            raise ValueError("OnePlus work budget must be at least 300 seconds")
+        if self.stage2b_oneplus_idle_reset_seconds < 60:
+            raise ValueError("OnePlus idle budget reset must be at least 60 seconds")
+        if self.stage2b_oneplus_scheduled_cooldown_seconds < 60:
+            raise ValueError("OnePlus scheduled cooldown must be at least 60 seconds")
+        if self.stage2b_oneplus_severe_cooldown_seconds < self.stage2b_oneplus_scheduled_cooldown_seconds:
+            raise ValueError("OnePlus severe cooldown must be >= scheduled cooldown")
+        if not 0 < self.stage2b_oneplus_severe_speed_tps < self.stage2b_oneplus_warning_speed_tps <= self.stage2b_oneplus_recovery_speed_tps:
+            raise ValueError("OnePlus speed thresholds must satisfy severe < warning <= recovery")
+        if self.stage2b_oneplus_warning_speed_consecutive < 1:
+            raise ValueError("OnePlus warning-speed consecutive count must be at least one")
+        if self.stage2b_oneplus_long_request_seconds < 60:
+            raise ValueError("OnePlus long-request threshold must be at least 60 seconds")
         if self.stage2b_retry_delay_seconds < 1:
             raise ValueError("Stage 2B retry delay must be at least one second")
         if self.stage2b_retry_max_delay_seconds < self.stage2b_retry_delay_seconds:
@@ -578,7 +609,12 @@ def load_config(path: Path) -> AppConfig:
         "stage2b_oneplus_first_token_timeout_seconds" not in values
         and "stage2b_oneplus_stream_idle_timeout_seconds" not in values
     ):
-        values["stage2b_oneplus_job_timeout_seconds"] = 0
+        values["stage2b_oneplus_job_timeout_seconds"] = 2400
+    # 0 was the streaming-era no-total-ceiling default. Real long-run phone
+    # testing now uses a 40-minute defense-in-depth watchdog while retaining
+    # the independent first-token and idle timers.
+    if values.get("stage2b_oneplus_job_timeout_seconds") == 0:
+        values["stage2b_oneplus_job_timeout_seconds"] = 2400
     # 240/384 were historical OnePlus vision output budgets. Real technical
     # drawings demonstrated valid responses being cut at those ceilings. The
     # compact/partial-recovery path prevents 512 from becoming permission for

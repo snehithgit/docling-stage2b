@@ -73,6 +73,22 @@ async function loadStatus() {
     badge("llama-badge", llama.running ? "auto" : "paused", llama.running ? "Running" : "Stopped");
     document.getElementById("llama-detail").textContent = llama.status || "Unknown";
 
+    const workload = d.workload || {};
+    const cooling = !!workload.cooldown_active;
+    const busyMin = Number(workload.busy_minutes || 0);
+    const budgetMin = Number(workload.budget_minutes || 90);
+    const speed = workload.last_speed_tps == null ? null : Number(workload.last_speed_tps);
+    document.getElementById("workload-state").textContent = cooling ? "Cooling" : "Ready";
+    badge("workload-badge", cooling ? "paused" : "auto", cooling ? "Cooldown" : "Protected");
+    const pieces = [`${busyMin.toFixed(1)} / ${budgetMin.toFixed(0)} min active inference`];
+    if (speed != null && Number.isFinite(speed)) pieces.push(`${speed.toFixed(2)} tok/s last generation`);
+    if (cooling) {
+      const remain = Number(workload.cooldown_remaining_seconds || 0);
+      pieces.push(`${Math.floor(remain/60)}m ${Math.floor(remain%60)}s remaining`);
+      if (workload.cooldown_reason) pieces.push(String(workload.cooldown_reason));
+    }
+    document.getElementById("workload-detail").textContent = pieces.join(" · ");
+
     const canRun = ssh.reachable && d.password_configured && d.script_ready;
     document.getElementById("start-server").disabled = !canRun;
     document.getElementById("restart-server").disabled = !canRun;

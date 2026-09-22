@@ -1,4 +1,24 @@
-# Current release — 2026.09.21.40.9.4
+# Current release — 2026.09.22.40.10.1
+
+## `.40.10.1` complete — adaptive OnePlus workload protection
+
+- [x] Existing shared OnePlus provider lock remains the global single-flight boundary.
+- [x] 90-minute accumulated real-inference budget with 20-minute scheduled cooldown.
+- [x] 20-minute natural idle reset.
+- [x] Throughput protection: two <7 tok/s warnings; one <2 tok/s severe throttle.
+- [x] Single request >=10 minutes triggers severe protection.
+- [x] Transport/timeout outage triggers 30-minute cooldown.
+- [x] Post-cooldown canonical llama-server restart + >=8 tok/s recovery probation.
+- [x] Persistent workload/cooldown state; no lost or failed verification work during cooling.
+- [x] OnePlus status UI + Telegram workload visibility.
+- [x] 40-minute absolute OnePlus logical-job watchdog retained as defense in depth.
+
+# Previous release — 2026.09.21.40.10
+## `.40.10` complete — Telegram human audit workflow
+
+- Text, normal Vision, and Artifact-sweep human audit can be completed from Telegram one item at a time.
+- Decisions immediately advance to the next unresolved item; Stop ends only the Telegram audit session.
+- Pipeline controls remain web-only.
 
 ## `.40.9.4` complete — visual truncation/crop recovery and human-authority evidence
 - [x] Length-truncated vision JSON salvages closed classification/evidence fields instead of becoming empty evidence.
@@ -118,7 +138,7 @@ Deployment acceptance pending: complete the still-open transactional retrieval/f
 # Docling Visual RAG — Project tracker
 
 Last updated: 2026-09-21
-Current release: `2026.09.21.40.9`
+Current release: `2026.09.22.40.10.1`
 Current phase: **`.40.9` September 21 audit backlog closure implemented and release-validated**
 Next phase: **separately tracked retrieval transaction/freshness + Docling dead-task recovery, then Revalidate all + rebuild and fresh N150 benchmarking**
 

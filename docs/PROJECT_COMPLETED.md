@@ -1,4 +1,18 @@
-# Current release — 2026.09.21.40.9.4
+# Current release — 2026.09.22.40.10.1
+
+## `.40.10.1` complete — adaptive OnePlus workload protection
+
+- Added persisted time/throughput governor for the physical OnePlus verifier.
+- Kept one physical inference at a time across all OnePlus workloads.
+- Added scheduled and severe cooldowns, restart/recovery probation, no-retry deferral, web/Telegram visibility and direct regression coverage.
+- No verifier prompt or evidence-quality rule was weakened.
+
+# Previous release — 2026.09.21.40.10
+## `.40.10` complete — Telegram one-by-one audit
+
+- Added interactive Telegram human decisions for Text, Vision, and Artifact audit queues.
+- Reused authoritative Stage 2C decision paths and visual evidence recovery.
+- Added regression tests for session sequencing, stop behavior, and queue separation.
 
 ## `.40.9.4` complete — vision evidence recovery
 - [x] Preserve usable leading fields from max-token-truncated vision JSON.
@@ -143,7 +157,7 @@
 # Project completed implementation
 
 Last updated: 2026-09-21  
-Current release: `2026.09.21.40.9`
+Current release: `2026.09.22.40.10.1`
 
 Do not redesign/reacquire these items without a specific regression or requirement.
 

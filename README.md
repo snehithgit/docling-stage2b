@@ -1,3 +1,26 @@
+## 2026.09.22.40.10.1 — Adaptive OnePlus workload protection
+
+- Uses real OnePlus inference time and measured llama.cpp generation throughput instead of an arbitrary request-count cooldown.
+- Keeps all OnePlus inference single-flight across normal vision, artifact sweep and evidence recovery.
+- 90 minutes active inference → 20 minute scheduled cooldown; 20 minutes natural idle resets the budget.
+- Two requests below 7 tok/s, one below 2 tok/s, a request over 10 minutes, or a transport outage trigger adaptive protection. Severe events use a 30 minute cooldown.
+- After cooldown the canonical OnePlus llama.cpp service is restarted when the SSH control bridge is available; the first real request must recover to at least 8 tok/s.
+- Cooldowns persist in `/data/db/oneplus_workload.json`; queued work is deferred, never discarded and does not consume retry budget.
+- OnePlus web status and Telegram monitoring expose budget, speed and cooldown state.
+- Full details: `docs/RELEASE_VALIDATION_2026.09.22.40.10.1.md`.
+- Pre-package regression suite: **517/517 tests pass**.
+
+## 2026.09.21.40.10 — Telegram one-by-one human verifier audit
+
+- Telegram can now perform the human audit gate directly, one image at a time, while all pipeline start/stop controls remain web-only.
+- `/textaudit` (also `/text audit`) sends the exact text target crop with **Apply verifier correction**, **Keep original**, and **Stop verify audit**. After a decision, the next unresolved crop is sent automatically.
+- `/visionaudit` / `/visual audit` sends normal vision-review images with **Useful**, **Not useful**, and **Stop verify audit**. Accepted images reuse the existing evidence-recovery path when the original verifier evidence is incomplete.
+- `/artifactaudit` (plus `/artifact audit`, `/articleaudit`, `/article audit`) sends FULL_TECHNICAL_VISUAL sweep images with **Technical**, **Decorative**, and **Stop verify audit**.
+- Telegram is transport only: decisions are committed through the same Stage 2C human-authority functions and shared ledger lock used by the application; the bot never writes SQLite or ledger files directly.
+- Audit sessions are per allowed Telegram chat. Old/stale buttons are rejected, and `/stopaudit` stops further audit images without changing unresolved items.
+- Regression coverage includes command aliases, one-card-at-a-time sequencing, stop behavior, human text authority, human visual authority/evidence recovery, and strict separation of normal Vision vs Artifact-sweep queues.
+- Validation before packaging: **507/507 tests pass**.
+
 ## 2026.09.21.40.9.4 — Vision truncation recovery + human-authority evidence
 
 - A length-truncated full-image vision response no longer discards useful leading evidence or suppresses crops. Closed fields/labels are conservatively recovered, marked incomplete, and the configured crop regions are allowed to rescue the route.

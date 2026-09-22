@@ -6,9 +6,10 @@ from pathlib import Path
 
 
 class CheckpointVerifier:
-    def __init__(self, client, lock: asyncio.Lock, path: Path, identity: str, timeout=None):
+    def __init__(self, client, lock: asyncio.Lock, path: Path, identity: str, timeout=None, governor=None):
         self.client, self.lock, self.path = client, lock, path
         self.identity, self.timeout = identity, timeout
+        self.governor = governor
         self.supports_strict_json_schema = bool(getattr(client, "supports_strict_json_schema", False))
 
     async def health(self):
@@ -34,8 +35,18 @@ class CheckpointVerifier:
                 saved = {}
             if key in saved and isinstance(saved[key], dict):
                 return {**saved[key], '_checkpoint_reused': True}
-            async with asyncio.timeout(self.timeout):
-                result = await getattr(self.client, method)(*args, **kwargs)
+            if self.governor is not None:
+                await self.governor.before_inference()
+            started = asyncio.get_running_loop().time()
+            try:
+                async with asyncio.timeout(self.timeout):
+                    result = await getattr(self.client, method)(*args, **kwargs)
+            except BaseException as exc:
+                if self.governor is not None:
+                    await self.governor.after_error(exc, asyncio.get_running_loop().time() - started)
+                raise
+            if self.governor is not None:
+                await self.governor.after_inference(result, asyncio.get_running_loop().time() - started)
             self.path.parent.mkdir(parents=True, exist_ok=True)
             saved[key] = result
             temporary = self.path.with_suffix('.tmp')

@@ -41,8 +41,8 @@
 
 # Project acquired state
 
-Last updated: 2026-09-21
-Current code release: `2026.09.21.40.9`
+Last updated: 2026-09-22
+Current code release: `2026.09.22.40.10.1`
 
 ## Already acquired — do not rebuild unnecessarily
 
@@ -63,6 +63,14 @@ Current code release: `2026.09.21.40.9`
 - Chunk Viewer/source-page inspection;
 - frozen 133-question benchmark and historical benchmark/replay records;
 - canonical user-confirmed `mobile/oneplus-llama-control` script: CPU affinity `4,5,6,7`, `nice -n 10`, `-t 4 -tb 4`; this is the canonical OnePlus launch profile for subsequent releases.
+
+## OnePlus workload protection acquired state
+
+- OnePlus inference is single-flight through the existing shared provider lock.
+- Persisted workload governor uses actual inference seconds and llama.cpp generation throughput, not request count.
+- Policy defaults: 90 min work budget, 20 min natural-idle reset, 20 min scheduled cooldown, 30 min severe cooldown, warning <7 tok/s twice, severe <2 tok/s once, recovery >=8 tok/s, long-request threshold 10 min.
+- Cooldown/recovery state lives beside `jobs.db` in `oneplus_workload.json`; queued work is deferred without retry penalty.
+- Canonical `mobile/oneplus-llama-control` remains unchanged and is used for post-cooldown restart.
 
 ## Important invariants
 
