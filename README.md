@@ -1,3 +1,13 @@
+## 2026.09.22.40.11H — authoritative human-review queues + inline Text decisions
+
+- Fixes reviewed visual evidence resurfacing after reruns: Text/Vision/Artifact audit surfaces resolve against the **current post-process result directory/current correction ledger**, not historical Stage 2B result directories.
+- Treats one physical picture as one human-review subject across normal Vision, artifact sweep and rerun entries; an existing human decision wins over duplicate pending routes.
+- Carries human Text authority across reruns by stable Docling source identity, including **table-cell corrections**.
+- Adds visible **Accept correction**, **Keep original**, and **Edit / inspect context** controls directly to the Text audit card. Decisions use the existing Stage 2C human-correction endpoint and immediately advance the Human review queue.
+- Validated against the uploaded processed snapshot: MacGregor current `run8` has 57 reviewed visual entries and **0 unresolved visual review items**, while historical `run6` still contains 116 unresolved entries; historical rows are no longer allowed to reopen the current review queue.
+- Regression suite: **542 passed, 1 optional external formatter integration test skipped**.
+- Full details: `docs/RELEASE_VALIDATION_2026.09.22.40.11H.md`.
+
 ## 2026.09.22.40.11E — Telegram actionable alerts, native command menu & formatter contract guard
 
 - Adds Telegram's native command menu and forces the private-chat Menu button to show commands: `/start`, `/status`, `/books`, `/workers`, `/audit`, `/errors`, `/help`, plus `/textaudit`, `/visionaudit`, `/artifactaudit`, `/stopaudit` when `telegram_controls` is enabled.

@@ -46,7 +46,7 @@ function artifactState(job) {
 function artifactNeedsHumanReview(job) {
   const verification = job.verification || {};
   const downstream = job.downstream || {};
-  if (!downstream.entry_id || downstream.human_visual_decision) return false;
+  if (!downstream.entry_id || !downstream.current_authoritative || downstream.human_visual_decision) return false;
   return String(verification.verdict || "").toUpperCase() === "UNCERTAIN" || downstream.unresolved === true || String(downstream.status || "").toLowerCase() === "pending";
 }
 

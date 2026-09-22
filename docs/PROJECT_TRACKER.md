@@ -1,3 +1,14 @@
+# Current release — 2026.09.22.40.11H
+
+## `.40.11H` complete — review authority + faster Text decisions
+
+- [x] Current-ledger-only Human review queues for Text/Vision/Artifact.
+- [x] Physical-image authority prevents duplicate/rerun visual rows from reopening reviewed work.
+- [x] Stable source identity preserves human Text/table-cell authority across generations.
+- [x] Inline Text Accept correction / Keep original actions auto-advance unresolved review.
+- [x] Uploaded MacGregor snapshot regression: current run8 resolves to 0 unresolved visual review items despite historical run6 backlog.
+- [x] Source regression suite: 542 passed, 1 optional formatter integration test skipped.
+
 # Current release — 2026.09.22.40.11G
 
 ## `.40.11G` complete — review focus + Telegram mobile UX
@@ -210,8 +221,8 @@ Deployment acceptance pending: complete the still-open transactional retrieval/f
 # Docling Visual RAG — Project tracker
 
 Last updated: 2026-09-22
-Current release: `2026.09.22.40.11E`
-Current phase: **`.40.11E` Telegram actionable alerts, formatter guard and native command menu implemented and release-validated**
+Current release: `2026.09.22.40.11H`
+Current phase: **`.40.11H` authoritative human-review queues and inline Text decisions implemented and release-validated**
 Next phase: **separately tracked retrieval transaction/freshness + Docling dead-task recovery, then Revalidate all + rebuild and fresh N150 benchmarking**
 
 ## Non-negotiable architecture

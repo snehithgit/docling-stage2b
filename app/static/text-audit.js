@@ -70,7 +70,7 @@ function renderJob(job) {
   const alignment = scope.alignment_safety || {};
   const downstream = job.downstream || {};
   const target = request.suspect_text || "";
-  const proposed = correction.proposed_text || reconstruction.corrected_text || job.parsed?.source_image_reconstruction || "";
+  const proposed = downstream.proposed_text || correction.proposed_text || reconstruction.corrected_text || job.parsed?.source_image_reconstruction || "";
   const rejected = scope.accepted === false;
   const pipeline = downstream.status === "applied" ? "Stage 2C overlay applied" : downstream.status === "pending" ? "Held for review; original preserved" : downstream.status ? `Stage 2C: ${downstream.status}` : job.disposition === "verified_original" ? "No overlay needed; original kept" : job.disposition === "pending" ? "No overlay; original preserved" : "No Stage 2C entry recorded";
   const page = request.page ?? job.source?.page ?? "—";
@@ -101,6 +101,7 @@ function renderJob(job) {
         ${job.status === "failed" ? `<section><div class="vision-audit-section-label">Failure</div><p class="queue-error">${esc(job.error_type || "Error")}: ${esc(job.error_message || "Verification failed")}</p></section>` : `<section><div class="vision-audit-section-label">Verifier transcription</div><p class="audit-transcription">${esc(proposed || "No readable transcription")}</p></section>`}
         <section class="${rejected ? "vision-audit-override" : ""}"><div class="vision-audit-section-label">Safety decision</div><p><strong>${esc(rejected ? "Rejected — original preserved" : correction.status === "applied" ? "Accepted" : correction.reason || "No correction needed")}</strong></p>${metrics.length ? `<div class="vision-audit-kv">${metrics.map(([name,value]) => `<span>${esc(name)}</span><strong>${Number(value).toFixed(3)}</strong>`).join("")}</div>` : ""}${(scope.reasons || []).length ? `<div class="vision-audit-tags">${scope.reasons.map(x => `<span title="${esc(x)}">${esc(friendlyReason(x))}</span>`).join("")}</div>` : ""}</section>
         <section><div class="vision-audit-section-label">What the pipeline did</div><p><strong>${esc(pipeline)}</strong></p>${downstream.status_reason ? `<p class="format-note">${esc(downstream.status_reason)}</p>` : ""}</section>
+        ${job.human_review_required ? `<div class="vision-audit-primary-actions text-audit-inline-review"><strong>Human decision required</strong><p class="format-note">Accept the verifier text if it is correct, keep the immutable Docling original, or open the full editor when you need to change the wording.</p><div class="document-actions">${proposed.trim() ? `<button class="primary-button text-audit-decision" data-job="${job.id}" data-action="apply">Accept correction</button>` : ""}<button class="secondary-button text-audit-decision" data-job="${job.id}" data-action="reject">Keep original</button><a class="mini-action" href="${esc(reviewDecisionUrl(job, page))}">Edit / inspect context</a></div></div>` : downstream.human_verified ? `<div class="vision-audit-human-state"><strong>Human reviewed</strong><span>Authoritative</span></div>` : ""}
       </div>
     </div>
 
@@ -170,6 +171,55 @@ async function loadAudit() {
     feedback(`Could not load text audit: ${error.message}`, "warning");
   } finally { button.disabled = false; }
 }
+
+
+async function applyInlineDecision(jobId, action) {
+  const job = auditJobs.find(item => String(item.id) === String(jobId));
+  const downstream = job?.downstream || {};
+  const entryId = downstream.entry_id;
+  if (!job || !entryId || !job.human_review_required) {
+    feedback("This item is no longer waiting for human review. Refreshing the queue…", "warning");
+    await loadAudit();
+    return;
+  }
+  const request = job.request || {};
+  const correction = job.correction || {};
+  const reconstruction = job.reconstruction || {};
+  const original = String(request.suspect_text || "");
+  const proposed = String(downstream.proposed_text || correction.proposed_text || reconstruction.corrected_text || job.parsed?.source_image_reconstruction || "").trim();
+  if (action === "apply" && !proposed) {
+    feedback("No verifier correction is available to accept. Open Edit / inspect context instead.", "warning");
+    return;
+  }
+  const buttons = [...document.querySelectorAll(".text-audit-decision")];
+  buttons.forEach(button => { button.disabled = true; });
+  feedback(action === "apply" ? "Saving accepted correction…" : "Saving decision to keep the original…");
+  try {
+    const response = await fetch(`/api/postprocess/jobs/${job.postprocess_job_id}/corrections/${encodeURIComponent(entryId)}`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({text: action === "apply" ? proposed : (original || "[UNREADABLE]"), action}),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "Could not save the human decision.");
+    feedback(action === "apply" ? "Accepted. Opening the next human-review item…" : "Original kept. Opening the next human-review item…", "success");
+    await loadAudit();
+    const pages = Math.max(1, Math.ceil(totalFiltered / PAGE_SIZE));
+    if (!auditJobs.length && totalFiltered > 0 && auditPage > pages) {
+      auditPage = pages;
+      await loadAudit();
+    }
+  } catch (error) {
+    feedback(error.message || "Could not save the human decision.", "warning");
+    buttons.forEach(button => { button.disabled = false; });
+  }
+}
+
+$("ta-results").addEventListener("click", event => {
+  const button = event.target.closest(".text-audit-decision");
+  if (!button) return;
+  applyInlineDecision(button.dataset.job, button.dataset.action);
+});
 
 function reloadFromFirstPage() { auditPage = 1; loadAudit(); }
 $("refresh-audit").addEventListener("click", loadAudit);

@@ -1,3 +1,15 @@
+# `.40.11H` handoff
+
+`2026.09.22.40.11H` is the current implementation baseline.
+
+## `.40.11H` human-review authority behavior
+
+- Human-review audit pages resolve against the current book result directory/current Stage 2C correction ledger; historical Stage 2B rows cannot reopen already-reviewed work.
+- Visual human authority is physical-image scoped across duplicate normal-Vision/artifact-sweep/rerun entries. If any current duplicate has an authoritative human decision, that decision wins for the image.
+- Text human authority follows stable Docling source identity across reruns, including table-cell corrections.
+- Text audit exposes inline **Accept correction**, **Keep original**, and **Edit / inspect context** actions outside Technical details; these call the existing Stage 2C human-correction endpoint and advance the Human review queue.
+- No second approval store or bulk approval path was added.
+
 # `.40.11G` handoff
 
 `2026.09.22.40.11G` is the current implementation baseline.

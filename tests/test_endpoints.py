@@ -265,6 +265,69 @@ class VerificationEndpointTests(unittest.TestCase):
             self.assertTrue(body["jobs"][0]["raw_docling_immutable"])
         self.main.runtime.stage2b_worker.sync_routes_once.assert_not_awaited()
 
+    def test_human_review_authority_survives_duplicate_visual_and_text_entries(self):
+        visual_ledger = {
+            "entries": [
+                {
+                    "entry_id": "g1:vision:R1", "entry_type": "vision_enrichment",
+                    "source_index": 12, "status": "pending", "verification_verdict": "UNCERTAIN",
+                    "created_at_epoch": 1,
+                },
+                {
+                    "entry_id": "g2:vision:R2", "entry_type": "vision_enrichment",
+                    "source_index": 12, "status": "applied", "verification_verdict": "UNCERTAIN",
+                    "human_verified": True, "human_visual_decision": "useful",
+                    "human_visual_decided_at_epoch": 2,
+                },
+            ]
+        }
+        selected_visual = self.main._authoritative_visual_entry(
+            visual_ledger, entry_id="g1:vision:R1", source_index=12
+        )
+        self.assertEqual(selected_visual["entry_id"], "g2:vision:R2")
+        self.assertEqual(selected_visual["human_visual_decision"], "useful")
+
+        text_ledger = {
+            "entries": [
+                {
+                    "entry_id": "g1:text:T1", "entry_type": "text_correction",
+                    "source_type": "text", "source_index": 7, "status": "pending",
+                    "verification_verdict": "UNCERTAIN", "created_at_epoch": 1,
+                },
+                {
+                    "entry_id": "g2:text:T2", "entry_type": "text_correction",
+                    "source_type": "text", "source_index": 7, "status": "rejected",
+                    "verification_verdict": "UNCERTAIN", "human_verified": True,
+                    "human_review": {"decided_at_epoch": 2},
+                },
+            ]
+        }
+        selected_text = self.main._authoritative_text_entry(text_ledger, "g1:text:T1")
+        self.assertEqual(selected_text["entry_id"], "g2:text:T2")
+        self.assertTrue(selected_text["human_verified"])
+
+        table_ledger = {
+            "entries": [
+                {
+                    "entry_id": "g1:text:C1", "entry_type": "table_cell_correction",
+                    "source_type": "table_cell", "table_index": 2, "cell_index": 9,
+                    "row_start": 3, "row_end": 3, "col_start": 1, "col_end": 1,
+                    "status": "pending", "verification_verdict": "LIKELY_CORRUPT",
+                    "created_at_epoch": 1,
+                },
+                {
+                    "entry_id": "g2:text:C2", "entry_type": "table_cell_correction",
+                    "source_type": "table_cell", "table_index": 2, "cell_index": 9,
+                    "row_start": 3, "row_end": 3, "col_start": 1, "col_end": 1,
+                    "status": "rejected", "verification_verdict": "LIKELY_CORRUPT",
+                    "human_verified": True, "human_review": {"saved_at_epoch": 4},
+                },
+            ]
+        }
+        selected_table = self.main._authoritative_text_entry(table_ledger, "g1:text:C1")
+        self.assertEqual(selected_table["entry_id"], "g2:text:C2")
+        self.assertTrue(selected_table["human_verified"])
+
     def test_text_audit_page_and_read_only_audit_endpoint(self):
         routes = [
             {"route_id": "TA1", "target": "pi5", "code": "OCR_GARBLE", "priority": "medium", "reason": "suspicious OCR", "source": {"type": "text", "index": 7, "page": 8}},

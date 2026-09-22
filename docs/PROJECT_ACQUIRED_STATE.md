@@ -1,3 +1,10 @@
+## .40.11H acquired state
+
+- Human-review state is not inferred from historical verifier rows. The current post-process result directory/current Stage 2C correction ledger is authoritative.
+- Human visual decisions are source-image authority and dominate duplicate normal Vision/artifact-sweep/rerun entries for the same Docling picture.
+- Human Text decisions carry across reruns by stable source identity, including table cells.
+- The Text audit card may commit Accept correction / Keep original directly, but it uses the same existing Stage 2C correction endpoint and ledger; there is no second decision store.
+
 ## .40.11G acquired state
 
 Current UI baseline includes focused unresolved Human review queues for Text/Vision/Artifact and compact phone-first Telegram monitoring messages. Do not reintroduce routine preformatted status tables that render as Telegram `COPY CODE` cards.
@@ -67,7 +74,7 @@ Current UI baseline includes focused unresolved Human review queues for Text/Vis
 # Project acquired state
 
 Last updated: 2026-09-22
-Current code release: `2026.09.22.40.11E`
+Current code release: `2026.09.22.40.11H`
 
 ## Already acquired — do not rebuild unnecessarily
 

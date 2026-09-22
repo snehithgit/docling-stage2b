@@ -1,3 +1,12 @@
+## `.40.11H` human-review authority follow-up — closed
+
+- [x] Stop historical/superseded verifier rows from resurfacing already-reviewed items.
+- [x] Collapse duplicate visual routes/reruns by physical Docling picture for review authority.
+- [x] Preserve Text/table-cell human authority across rerun generations.
+- [x] Add direct Text Accept correction / Keep original controls on the audit card.
+- [x] Keep full editor/context path for corrections that need manual wording changes.
+- [x] Regress against the uploaded processed snapshot and full automated suite.
+
 ## `.40.11E` Telegram follow-up — closed
 
 - [x] Add native `/start`, `/help`, `/status`, `/books`, `/workers`, `/audit`, `/errors` Telegram command menu.

@@ -665,11 +665,19 @@ def test_4011b_review_queue_is_global_filterable_and_audits_are_one_by_one():
     assert 'id="aa-decision"' in read("artifact-audit.html")
     assert 'value="human_review">Human review</option>' in read("artifact-audit.html")
     assert "needsHumanReview(job)" in vision_js
+    assert "downstream.current_authoritative" in vision_js
+    assert "visualSubjectKey(job)" in vision_js
     assert "artifactNeedsHumanReview(job)" in artifact_js
+    assert "downstream.current_authoritative" in artifact_js
     assert ".artifact-decision" in artifact_js
     assert 'event.altKey && event.key === "ArrowRight"' in text_js
     assert 'event.altKey && event.key === "ArrowRight"' in vision_js
     assert 'event.altKey && event.key === "ArrowRight"' in artifact_js
+    assert "text-audit-decision" in text_js
+    assert "Accept correction" in text_js
+    assert "Keep original" in text_js
+    assert "/corrections/${encodeURIComponent(entryId)}" in text_js
+    assert "await loadAudit()" in text_js  # inline text decisions advance the filtered queue
 
 
 def test_4011c_shared_attention_terminology_and_polling_feedback_are_consistent():

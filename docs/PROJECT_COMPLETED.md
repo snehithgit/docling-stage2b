@@ -1,3 +1,14 @@
+# Current release — 2026.09.22.40.11H
+
+## `.40.11H` complete — current-authority review queues
+
+- [x] Historical Stage 2B rows cannot reopen current Text/Vision/Artifact human review.
+- [x] Duplicate visual routes for the same physical image collapse to one authoritative human state.
+- [x] Human Text decisions survive rerun identity changes, including table-cell corrections.
+- [x] Text audit card has direct Accept correction / Keep original controls plus full-editor fallback.
+- [x] Human-review decisions continue to use the existing Stage 2C ledger authority.
+- [x] Regression suite: 542 passed; 1 optional formatter integration test skipped.
+
 # Current release — 2026.09.22.40.11G
 
 ## `.40.11G` complete — focused human review + phone-first Telegram layout
@@ -236,7 +247,7 @@
 # Project completed implementation
 
 Last updated: 2026-09-22  
-Current release: `2026.09.22.40.11E`
+Current release: `2026.09.22.40.11H`
 
 Do not redesign/reacquire these items without a specific regression or requirement.
 

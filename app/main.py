@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import json
 import re
+import sqlite3
 import time
 import uuid
 import zipfile
@@ -80,6 +81,110 @@ def _load_json_file(path: Path) -> dict:
         return data if isinstance(data, dict) else {}
     except (OSError, json.JSONDecodeError, TypeError):
         return {}
+
+
+def _entry_source_identity(entry: dict) -> tuple:
+    """Stable source identity used to carry human authority across reruns/routes."""
+    return (
+        str(entry.get("source_type") or ""),
+        entry.get("source_index"),
+        entry.get("table_index"),
+        entry.get("cell_index"),
+        entry.get("row_start"),
+        entry.get("row_end"),
+        entry.get("col_start"),
+        entry.get("col_end"),
+    )
+
+
+def _authoritative_text_entry(ledger: dict, entry_id: str) -> dict | None:
+    """Resolve a text audit row against the current ledger only.
+
+    Exact current entries are preferred, but a human-reviewed entry for the
+    same Docling source target wins across a rerun/generation boundary. Old
+    verification rows whose entry is no longer present in the current ledger
+    are not allowed to reopen human review.
+    """
+    entries = [
+        item for item in (ledger.get("entries") or [])
+        if isinstance(item, dict)
+        and item.get("entry_type") in {"text_correction", "table_cell_correction"}
+        and str(item.get("status") or "") != "superseded"
+    ]
+    exact = next((item for item in entries if str(item.get("entry_id") or "") == str(entry_id)), None)
+    if exact is None:
+        return None
+    identity = _entry_source_identity(exact)
+    reviewed = [item for item in entries if _entry_source_identity(item) == identity and bool(item.get("human_verified"))]
+    if reviewed:
+        return max(reviewed, key=lambda item: float((item.get("human_review") or {}).get("saved_at_epoch") or (item.get("human_review") or {}).get("decided_at_epoch") or item.get("updated_at_epoch") or item.get("created_at_epoch") or 0))
+    return exact
+
+
+def _authoritative_visual_entry(
+    ledger: dict,
+    *,
+    entry_id: str | None = None,
+    source_index: int | None = None,
+) -> dict | None:
+    """Return one authoritative visual state for a physical Docling picture.
+
+    Human visual decisions are image-level authority. If duplicate normal
+    Vision / artifact-sweep / rerun entries exist for the same source image,
+    any human-reviewed entry wins so a reviewed picture cannot reappear as an
+    unresolved duplicate. Without a human decision the exact route entry wins,
+    then the newest current entry is used as a deterministic fallback.
+    """
+    entries = [
+        item for item in (ledger.get("entries") or [])
+        if isinstance(item, dict)
+        and item.get("entry_type") == "vision_enrichment"
+        and str(item.get("status") or "") != "superseded"
+    ]
+    exact = next((item for item in entries if entry_id and str(item.get("entry_id") or "") == str(entry_id)), None)
+    if source_index is None and exact is not None:
+        try:
+            source_index = int(exact.get("source_index"))
+        except (TypeError, ValueError):
+            source_index = None
+    candidates = entries
+    if source_index is not None:
+        candidates = []
+        for item in entries:
+            try:
+                if int(item.get("source_index")) == int(source_index):
+                    candidates.append(item)
+            except (TypeError, ValueError):
+                continue
+    reviewed = [
+        item for item in candidates
+        if bool(item.get("human_verified"))
+        and str(item.get("human_visual_decision") or "") in {"technical", "decorative", "useful", "not_useful"}
+    ]
+    if reviewed:
+        return max(reviewed, key=lambda item: float(item.get("human_visual_decided_at_epoch") or item.get("created_at_epoch") or 0))
+    if exact is not None and exact in candidates:
+        return exact
+    if candidates:
+        return max(candidates, key=lambda item: float(item.get("created_at_epoch") or 0))
+    return None
+
+
+async def _current_audit_result_dirs() -> dict[int, str]:
+    """Return current post-process result directories when the lifecycle table exists.
+
+    Audit endpoints also remain readable during partial test/upgrade states where
+    only the verification table has been initialized; in that case callers
+    safely fall back to the verification row's persisted result_dir.
+    """
+    try:
+        rows = await runtime.postprocess_store.list_jobs(limit=5000)
+    except sqlite3.OperationalError:
+        return {}
+    return {
+        int(item.get("id") or 0): Path(str(item.get("result_dir") or "")).name
+        for item in rows if item.get("result_dir")
+    }
 
 
 def _render_pdf_page_png(
@@ -545,15 +650,19 @@ def _artifact_inventory_for_book(job: dict, verification_rows: list[dict], proce
         }
 
     ledger_by_index: dict[int, dict] = {}
+    current_visual_indexes: set[int] = set()
     for entry in ledger.get("entries") or []:
         if (not isinstance(entry, dict) or entry.get("entry_type") != "vision_enrichment"
                 or str(entry.get("status") or "") == "superseded"):
             continue
         try:
-            source_index = int(entry.get("source_index"))
+            current_visual_indexes.add(int(entry.get("source_index")))
         except (TypeError, ValueError):
             continue
-        ledger_by_index[source_index] = entry
+    for source_index in current_visual_indexes:
+        authoritative = _authoritative_visual_entry(ledger, source_index=source_index)
+        if authoritative is not None:
+            ledger_by_index[source_index] = authoritative
 
     book_name = str(job.get("source_filename") or job.get("output_filename") or result_dir.name)
     items: list[dict] = []
@@ -600,6 +709,7 @@ def _artifact_inventory_for_book(job: dict, verification_rows: list[dict], proce
                 "entry_id": downstream.get("entry_id") if downstream else None,
                 "human_visual_decision": downstream.get("human_visual_decision") if downstream else None,
                 "human_verified": bool(downstream.get("human_verified")) if downstream else False,
+                "current_authoritative": True,
                 "human_evidence_recovery_required": bool(downstream.get("human_evidence_recovery_required")) if downstream else False,
                 "rag_eligible": visual_rag.get("rag_eligible") if visual_rag else False,
                 "rag_eligibility_reason": visual_rag.get("rag_eligibility_reason") if visual_rag else None,
@@ -2680,6 +2790,7 @@ async def stage2b_text_audit(
     if postprocess_job_id is not None:
         rows = [row for row in rows if int(row.get("postprocess_job_id") or 0) == int(postprocess_job_id)]
 
+    current_result_dirs = await _current_audit_result_dirs()
     ledger_cache: dict[str, dict] = {}
     jobs: list[dict] = []
     for row in rows:
@@ -2693,17 +2804,15 @@ async def stage2b_text_audit(
         if not scope_guard and isinstance(reconstruction.get("scope_guard"), dict):
             scope_guard = reconstruction.get("scope_guard") or {}
 
-        result_dir_name = Path(str(row.get("result_dir") or "")).name
+        postprocess_id = int(row.get("postprocess_job_id") or 0)
+        result_dir_name = current_result_dirs.get(postprocess_id) or Path(str(row.get("result_dir") or "")).name
         downstream = None
         if result_dir_name:
             if result_dir_name not in ledger_cache:
                 ledger_path = Path(runtime.config.processed_dir) / result_dir_name / "correction_ledger.json"
-                try:
-                    ledger_cache[result_dir_name] = await asyncio.to_thread(_load_json_file, ledger_path)
-                except (OSError, json.JSONDecodeError):
-                    ledger_cache[result_dir_name] = {}
+                ledger_cache[result_dir_name] = await asyncio.to_thread(_load_json_file, ledger_path)
             entry_id = f"{row.get('generation')}:text:{row.get('route_id')}"
-            entry = next((item for item in (ledger_cache[result_dir_name].get("entries") or []) if str(item.get("entry_id")) == entry_id), None)
+            entry = _authoritative_text_entry(ledger_cache[result_dir_name], entry_id)
             if isinstance(entry, dict):
                 downstream = {
                     "status": entry.get("status"),
@@ -2713,9 +2822,8 @@ async def stage2b_text_audit(
                     "proposed_text": entry.get("proposed_text"),
                     "raw_docling_immutable": entry.get("raw_docling_immutable", True),
                     "entry_id": entry.get("entry_id"),
-                    "human_visual_decision": entry.get("human_visual_decision"),
-                    "human_verified": bool(entry.get("human_verified")),
                     "verification_verdict": entry.get("verification_verdict"),
+                    "current_authoritative": True,
                 }
 
         disposition = "failed" if row.get("status") == "failed" else str(correction.get("status") or "verified_original")
@@ -2850,6 +2958,7 @@ async def stage2b_vision_audit(postprocess_job_id: int | None = None, limit: int
     if postprocess_job_id is not None:
         rows = [row for row in rows if int(row.get("postprocess_job_id") or 0) == int(postprocess_job_id)]
 
+    current_result_dirs = await _current_audit_result_dirs()
     ledger_cache: dict[str, dict] = {}
     jobs: list[dict] = []
     for row in rows:
@@ -2858,17 +2967,26 @@ async def stage2b_vision_audit(postprocess_job_id: int | None = None, limit: int
         result = _audit_json(row.get("result_json"))
         parsed = result.get("parsed") if isinstance(result.get("parsed"), dict) else {}
         crop_audit = result.get("crop_audit") if isinstance(result.get("crop_audit"), list) else []
-        result_dir_name = Path(str(row.get("result_dir") or "")).name
+        postprocess_id = int(row.get("postprocess_job_id") or 0)
+        result_dir_name = current_result_dirs.get(postprocess_id) or Path(str(row.get("result_dir") or "")).name
         downstream = None
         if result_dir_name:
             if result_dir_name not in ledger_cache:
                 ledger_path = Path(runtime.config.processed_dir) / result_dir_name / "correction_ledger.json"
-                try:
-                    ledger_cache[result_dir_name] = await asyncio.to_thread(_load_json_file, ledger_path)
-                except (OSError, json.JSONDecodeError):
-                    ledger_cache[result_dir_name] = {}
+                ledger_cache[result_dir_name] = await asyncio.to_thread(_load_json_file, ledger_path)
             entry_id = f"{row.get('generation')}:vision:{row.get('route_id')}"
-            entry = next((item for item in (ledger_cache[result_dir_name].get("entries") or []) if str(item.get("entry_id")) == entry_id), None)
+            source_index_value = source.get("index")
+            if source_index_value is None:
+                source_index_value = source.get("picture_index")
+            if source_index_value is None:
+                source_index_value = source.get("source_index")
+            try:
+                source_index_value = int(source_index_value)
+            except (TypeError, ValueError):
+                source_index_value = None
+            entry = _authoritative_visual_entry(
+                ledger_cache[result_dir_name], entry_id=entry_id, source_index=source_index_value
+            )
             if isinstance(entry, dict):
                 downstream = {
                     "status": entry.get("status"),
@@ -2883,6 +3001,7 @@ async def stage2b_vision_audit(postprocess_job_id: int | None = None, limit: int
                     "entry_id": entry.get("entry_id"),
                     "human_visual_decision": entry.get("human_visual_decision"),
                     "human_verified": bool(entry.get("human_verified")),
+                    "current_authoritative": True,
                     "human_evidence_recovery_required": bool(
                         entry.get("human_evidence_recovery_required")
                         or (
@@ -2972,9 +3091,9 @@ async def stage2b_vision_audit(postprocess_job_id: int | None = None, limit: int
         "with_crops": sum(1 for j in jobs if j.get("crop_regions")),
         "applied_enrichment": sum(1 for j in jobs if (j.get("downstream") or {}).get("status") == "applied"),
         "excluded": sum(1 for j in jobs if (j.get("downstream") or {}).get("status") == "excluded"),
-        "human_review_required": sum(1 for j in jobs if not (j.get("downstream") or {}).get("human_visual_decision") and (str((j.get("classification") or {}).get("verdict") or j.get("verdict") or "").upper() == "UNCERTAIN" or bool((j.get("classification") or {}).get("unresolved")) or (j.get("downstream") or {}).get("status") == "pending")),
-        "evidence_recovery_required": sum(1 for j in jobs if (j.get("downstream") or {}).get("human_evidence_recovery_required")),
-        "human_reviewed": sum(1 for j in jobs if (j.get("downstream") or {}).get("human_visual_decision")),
+        "human_review_required": sum(1 for j in jobs if (j.get("downstream") or {}).get("current_authoritative") and not (j.get("downstream") or {}).get("human_visual_decision") and (str((j.get("classification") or {}).get("verdict") or j.get("verdict") or "").upper() == "UNCERTAIN" or bool((j.get("classification") or {}).get("unresolved")) or (j.get("downstream") or {}).get("status") == "pending")),
+        "evidence_recovery_required": sum(1 for j in jobs if (j.get("downstream") or {}).get("current_authoritative") and (j.get("downstream") or {}).get("human_evidence_recovery_required")),
+        "human_reviewed": sum(1 for j in jobs if (j.get("downstream") or {}).get("current_authoritative") and (j.get("downstream") or {}).get("human_visual_decision")),
     }
     return {"schema": "docling-vision-verifier-audit/v1", "summary": summary, "jobs": jobs}
 

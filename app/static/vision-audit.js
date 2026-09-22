@@ -119,8 +119,15 @@ function fillBookFilter() {
 function needsHumanReview(job) {
   const c = job.classification || {};
   const downstream = job.downstream || {};
-  if (job.status === "failed" || downstream.human_visual_decision) return false;
+  if (job.status === "failed" || !downstream.current_authoritative || downstream.human_visual_decision) return false;
   return (c.verdict || job.verdict) === "UNCERTAIN" || c.unresolved === true || downstream.status === "pending";
+}
+
+function visualSubjectKey(job) {
+  const source = job.source || {};
+  const request = job.request || {};
+  const index = source.index ?? source.picture_index ?? source.source_index ?? request.picture_index ?? job.route_id ?? job.id;
+  return `${job.postprocess_job_id}:${index}`;
 }
 
 function applyFilters(resetPage=true) {
@@ -132,7 +139,7 @@ function applyFilters(resetPage=true) {
     if (requestedJobId && !book && !verdict && !query && String(job.id) !== String(requestedJobId)) return false;
     if (book && job.book !== book) return false;
     if (verdict === "HUMAN_REVIEW" && !needsHumanReview(job)) return false;
-    if (verdict === "HUMAN_REVIEWED" && !job.downstream?.human_visual_decision) return false;
+    if (verdict === "HUMAN_REVIEWED" && !(job.downstream?.current_authoritative && job.downstream?.human_visual_decision)) return false;
     if (verdict === "FAILED" && job.status !== "failed") return false;
     if (verdict && !["FAILED", "HUMAN_REVIEW", "HUMAN_REVIEWED"].includes(verdict) && (job.classification?.verdict || job.verdict) !== verdict) return false;
     if (query) {
@@ -141,6 +148,15 @@ function applyFilters(resetPage=true) {
     }
     return true;
   });
+  if (["HUMAN_REVIEW", "HUMAN_REVIEWED"].includes(verdict)) {
+    const seen = new Set();
+    filteredJobs = filteredJobs.filter(job => {
+      const key = visualSubjectKey(job);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
   if (resetPage) auditPage = 1;
   renderPage();
 }
