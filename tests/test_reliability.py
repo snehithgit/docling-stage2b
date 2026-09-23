@@ -410,3 +410,35 @@ class ReliabilityTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    async def test_unexpected_error_after_stage1_processing_does_not_orphan_job(self):
+        """Regression: a post-submit persistence error must leave Stage 1 terminal."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            input_dir.mkdir()
+            config = AppConfig(
+                input_dir=str(input_dir),
+                output_dir=str(output_dir),
+                database_path=str(root / "jobs.db"),
+            )
+            store = JobStore(config.database_path)
+            await store.initialize()
+            worker = ConversionWorker(lambda: config, store, SuccessfulClient(), EventBroker())
+
+            source = input_dir / "manual.pdf"
+            source.write_bytes(b"stage1-regression")
+            await self._stable_discover(worker, input_dir)
+
+            async def fail_set_task_id(_job_id, _task_id):
+                raise sqlite3.OperationalError("database is locked")
+
+            store.set_task_id = fail_set_task_id
+            await worker._process_one()
+
+            counts = await store.counts()
+            self.assertEqual(counts["processing"], 0)
+            self.assertEqual(counts["failed"], 1)
+            failed = (await store.list_jobs(failures_only=True))[0]
+            self.assertEqual(failed["error_type"], "OperationalError")

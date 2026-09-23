@@ -1489,3 +1489,44 @@ def test_scope_filter_rejects_table_cell_neighbor_contamination():
     result = _scope_target_transcription(candidate, original, [], [], source_type="table_cell")
     assert result["accepted"] is False
     assert "TABLE_CELL_CONTEXT_CONTAMINATION" in result["reasons"]
+
+class Stage2BClaimCleanupRegressionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_preclaimed_artifact_is_not_left_processing_when_started_event_raises(self):
+        """Regression: exceptions after atomic artifact claim must terminate the row."""
+        from app.config import AppConfig
+        from app.stage2b import Stage2BWorker
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = Stage2BStore(str(root / "jobs.db"))
+            await store.initialize()
+            await store.sync_routes(
+                41, 41, "g", [route("AV-claim-cleanup", "oneplus")],
+                "book__job41", "book.zip",
+            )
+            await store.start_manual_book(41)
+            row = (await store.list_book_jobs_raw(41))[0]
+            # Reproduce the artifact-sweep atomic-claim state: the row reaches
+            # _run_job already marked processing.
+            await store.mark_processing(row["id"], "artifact_shared")
+            row = (await store.list_book_jobs_raw(41))[0]
+
+            class RaisingEvents:
+                def notify(self, name, **_kwargs):
+                    if name == "stage2b_oneplus_started":
+                        raise RuntimeError("injected post-claim event failure")
+
+            cfg = AppConfig(
+                processed_dir=str(root / "processed"),
+                database_path=str(root / "jobs.db"),
+            )
+            worker = Stage2BWorker(lambda: cfg, store, SimpleNamespace(), RaisingEvents())
+            await worker._run_job(
+                "oneplus", row, preclaimed=True, run_mode_override="artifact_shared"
+            )
+
+            recovered = (await store.list_book_jobs_raw(41))[0]
+            self.assertNotEqual(recovered["status"], "processing")
+            self.assertEqual(recovered["status"], "failed")
+            self.assertEqual(recovered["error_type"], "RuntimeError")
+            self.assertIsNone(worker.worker_state["oneplus"]["active_job_id"])

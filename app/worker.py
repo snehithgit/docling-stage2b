@@ -499,7 +499,10 @@ class ConversionWorker:
                 job_id=job.get("id"),
                 error=f"TimeoutError: {exc}",
             )
-        except (DoclingApiError, OSError, KeyError, zipfile.BadZipFile) as exc:
+        except Exception as exc:
+            # Once a Stage 1 row has entered processing, no unexpected local
+            # exception (including SQLite OperationalError) may strand it there
+            # until restart. CancelledError is not swallowed by this handler.
             await self._store.mark_failed(
                 job["id"],
                 type(exc).__name__,

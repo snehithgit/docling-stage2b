@@ -3990,17 +3990,22 @@ class Stage2BWorker:
         config = self._config_getter()
         is_artifact_sweep = self._is_artifact_sweep_job(job)
         run_mode = run_mode_override or ("auto" if self._auto_run(target) else "manual")
-        if not is_artifact_sweep:
-            await self._store.arm_artifact_sweep_for_book(int(job["postprocess_job_id"]))
-        if not preclaimed:
-            await self._store.mark_processing(int(job["id"]), run_mode)
-        job["run_mode"] = run_mode
-        job["_active_stage"] = "starting"
-        self.worker_state[target]["active_job_id"] = int(job["id"])
-        self.worker_state[target]["active_stage"] = "starting"
-        self._events.notify(f"stage2b_{target}_started")
         started = time.monotonic()
+        # IMPORTANT: a preclaimed artifact row is already status='processing'.
+        # Keep *all* setup after that claim inside this protected region so an
+        # exception cannot escape to _device_loop and orphan the row forever.
+        # The same boundary also protects ordinary jobs immediately after
+        # mark_processing().
         try:
+            if not is_artifact_sweep:
+                await self._store.arm_artifact_sweep_for_book(int(job["postprocess_job_id"]))
+            if not preclaimed:
+                await self._store.mark_processing(int(job["id"]), run_mode)
+            job["run_mode"] = run_mode
+            job["_active_stage"] = "starting"
+            self.worker_state[target]["active_job_id"] = int(job["id"])
+            self.worker_state[target]["active_stage"] = "starting"
+            self._events.notify(f"stage2b_{target}_started")
             route_timeout_value = (
                 config.stage2b_pi5_job_timeout_seconds
                 if target == "pi5" else config.stage2b_oneplus_job_timeout_seconds

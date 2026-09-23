@@ -3211,7 +3211,13 @@ async def vision_audit_human_decision(job_id: int, entry_id: str, request: Visua
         raise HTTPException(status_code=404, detail="Post-process job not found.")
     result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
     try:
-        entry = await asyncio.to_thread(apply_human_visual_decision, result_dir, entry_id, request.decision)
+        # Serialize human review with every automated Stage 2C ledger writer.
+        # The decision helper performs a read-modify-write of correction_ledger.json,
+        # so running it outside this lock can clobber a concurrent verifier update.
+        async with runtime.stage2b_worker._stage2c_ledger_lock:
+            entry = await asyncio.to_thread(
+                apply_human_visual_decision, result_dir, entry_id, request.decision
+            )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     runtime.events.notify("verifier_audit_decision")
@@ -4837,14 +4843,20 @@ async def update_human_correction(job_id: int, entry_id: str, update: HumanCorre
         raise HTTPException(status_code=404, detail="Post-process job not found.")
     result_dir = Path(runtime.config.processed_dir) / Path(job["result_dir"]).name
     ledger_path = result_dir / "correction_ledger.json"
-    ledger = await asyncio.to_thread(_load_json_file, ledger_path)
-    if not ledger:
-        raise HTTPException(status_code=404, detail="Correction ledger not found.")
-    entry = next((item for item in ledger.get("entries", []) if str(item.get("entry_id")) == entry_id), None)
-    if not entry:
-        raise HTTPException(status_code=404, detail="Correction entry not found.")
-    apply_human_correction_to_entry(entry, text=update.text, action=update.action)
-    await asyncio.to_thread(upsert_ledger_entry, result_dir, str(ledger.get("source_zip_sha256") or ""), entry)
+    # Keep the complete ledger read-modify-write transaction under the same
+    # lock used by Stage 2B/2C automated writers. Human review is authoritative
+    # and must never race with a verifier completion.
+    async with runtime.stage2b_worker._stage2c_ledger_lock:
+        ledger = await asyncio.to_thread(_load_json_file, ledger_path)
+        if not ledger:
+            raise HTTPException(status_code=404, detail="Correction ledger not found.")
+        entry = next((item for item in ledger.get("entries", []) if str(item.get("entry_id")) == entry_id), None)
+        if not entry:
+            raise HTTPException(status_code=404, detail="Correction entry not found.")
+        apply_human_correction_to_entry(entry, text=update.text, action=update.action)
+        await asyncio.to_thread(
+            upsert_ledger_entry, result_dir, str(ledger.get("source_zip_sha256") or ""), entry
+        )
     runtime.events.notify("stage2c_human_correction")
     return {"saved": True, "entry_id": entry_id, "status": entry["status"]}
 
