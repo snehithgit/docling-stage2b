@@ -151,6 +151,18 @@ class ConversionWorker:
             "order": "smallest_first",
         }
 
+    async def authorize_retry_if_batch_active(self, job_id: int) -> bool:
+        """Attach a newly-pending retry to the current manual batch, if one exists."""
+        if self._config_getter().watcher_auto_run:
+            self._batch_wakeup.set()
+            return True
+        async with self._batch_lock:
+            if not self._authorized_job_ids:
+                return False
+            self._authorized_job_ids.add(int(job_id))
+            self._batch_wakeup.set()
+            return True
+
     async def set_auto_run(self, enabled: bool) -> None:
         """Switch execution mode without interrupting an in-flight Docling task.
 

@@ -110,6 +110,8 @@ def test_citation_audit_warns_when_model_omits_or_invents_source_labels():
     sources = prepare_sources(_rows(), max_sources=1)
     missing = citation_audit("Neutral output is approximately +6 V.", sources)
     assert missing["grounding_warning"]
+    assert missing["grounding_passed"] is False
+    assert missing["answer_usable"] is False
     invented = citation_audit("Neutral output is approximately +6 V [S9].", sources)
     assert invented["invalid_citation_labels"] == ["S9"]
     good = citation_audit("Neutral output is approximately +6 V [S1].", sources)

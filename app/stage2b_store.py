@@ -104,6 +104,10 @@ class Stage2BStore:
                 conn.execute("ALTER TABLE verification_jobs ADD COLUMN priority_score INTEGER NOT NULL DEFAULT 0")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_verification_runnable ON verification_jobs(target, is_current, status, authorized, next_attempt_at)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_verification_postprocess ON verification_jobs(postprocess_job_id, is_current)")
+            conn.execute("""CREATE TABLE IF NOT EXISTS stage2b_migrations (
+                name TEXT PRIMARY KEY,
+                applied_at TEXT NOT NULL
+            )""")
 
     async def recover_interrupted(self) -> int:
         return await self._run(self._recover_interrupted_sync)
@@ -127,6 +131,9 @@ class Stage2BStore:
         outage_types = ("ConnectError", "ConnectTimeout", "ConnectionError", "NetworkError")
         placeholders = ",".join("?" for _ in outage_types)
         with self._connection() as conn:
+            migration_name = "endpoint_outage_recovery_v1"
+            if conn.execute("SELECT 1 FROM stage2b_migrations WHERE name=?", (migration_name,)).fetchone():
+                return 0
             cursor = conn.execute(
                 f"""UPDATE verification_jobs
                     SET status='pending', authorized=1, run_mode='outage_recovery',
@@ -134,6 +141,10 @@ class Stage2BStore:
                         error_type=NULL, error_message=NULL
                     WHERE is_current=1 AND status='failed' AND error_type IN ({placeholders})""",
                 outage_types,
+            )
+            conn.execute(
+                "INSERT INTO stage2b_migrations(name, applied_at) VALUES (?, ?)",
+                (migration_name, utcnow()),
             )
             return int(cursor.rowcount)
 
@@ -465,19 +476,20 @@ class Stage2BStore:
             claimed["_preclaimed_processing"] = True
             return claimed
 
-    async def mark_processing(self, job_id: int, run_mode: str) -> None:
-        await self._run(self._mark_processing_sync, job_id, run_mode)
+    async def mark_processing(self, job_id: int, run_mode: str) -> bool:
+        return await self._run(self._mark_processing_sync, job_id, run_mode)
 
-    def _mark_processing_sync(self, job_id: int, run_mode: str) -> None:
+    def _mark_processing_sync(self, job_id: int, run_mode: str) -> bool:
         with self._connection() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """UPDATE verification_jobs
                    SET status='processing', started_at=?, completed_at=NULL,
                        attempt_count=attempt_count+1, run_mode=?, next_attempt_at=NULL,
                        error_type=NULL, error_message=NULL
-                   WHERE id=?""",
+                   WHERE id=? AND status='pending'""",
                 (utcnow(), run_mode, job_id),
             )
+            return cursor.rowcount == 1
 
     async def mark_completed(
         self,

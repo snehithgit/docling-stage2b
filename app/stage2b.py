@@ -3684,8 +3684,8 @@ class Stage2BWorker:
                 continue
             try:
                 await self.start_stage2c_backfill(int(postprocess_job_id))
-            except ValueError as exc:
-                logger.info("Deferred Stage 2C backfill for book %s was not resumed: %s", postprocess_job_id, exc)
+            except Exception as exc:
+                logger.exception("Deferred Stage 2C backfill for book %s was not resumed: %s", postprocess_job_id, exc)
 
         for postprocess_job_id, state in list(self.correction_suggestion_state.items()):
             if state.get("status") != "waiting_for_pi5":
@@ -3695,8 +3695,8 @@ class Stage2BWorker:
                 continue
             try:
                 await self.start_correction_suggestion_backfill(int(postprocess_job_id))
-            except ValueError as exc:
-                logger.info("Deferred correction-suggestion backfill for book %s was not resumed: %s", postprocess_job_id, exc)
+            except Exception as exc:
+                logger.exception("Deferred correction-suggestion backfill for book %s was not resumed: %s", postprocess_job_id, exc)
 
     def _sync_endpoint_circuit_state(self, provider: str) -> None:
         if provider in self.worker_state:
@@ -3911,7 +3911,7 @@ class Stage2BWorker:
 
     def _retry_delay(self, job: dict[str, Any]) -> int:
         config = self._config_getter()
-        attempt = max(1, int(job.get("attempt_count") or 0) + 1)
+        attempt = max(1, int(job.get("attempt_count") or 0) + (0 if job.get("_preclaimed_processing") else 1))
         delay = int(config.stage2b_retry_delay_seconds * (2 ** min(attempt - 1, 5)))
         return min(delay, int(config.stage2b_retry_max_delay_seconds))
 
@@ -4000,7 +4000,9 @@ class Stage2BWorker:
             if not is_artifact_sweep:
                 await self._store.arm_artifact_sweep_for_book(int(job["postprocess_job_id"]))
             if not preclaimed:
-                await self._store.mark_processing(int(job["id"]), run_mode)
+                claimed = await self._store.mark_processing(int(job["id"]), run_mode)
+                if not claimed:
+                    raise RuntimeError(f"Stage 2B job {job['id']} was no longer pending when claimed")
             job["run_mode"] = run_mode
             job["_active_stage"] = "starting"
             self.worker_state[target]["active_job_id"] = int(job["id"])
@@ -4015,7 +4017,7 @@ class Stage2BWorker:
             # defense-in-depth ceiling in addition to its first-output and
             # stream-idle liveness timers; 0 remains supported as an explicit
             # legacy/custom disable value.
-            route_timeout = None if target == "pi5" or int(route_timeout_value) == 0 else route_timeout_value
+            route_timeout = None if int(route_timeout_value) == 0 else route_timeout_value
             async with asyncio.timeout(route_timeout):
                 try:
                     route_source = json.loads(job.get("source_json") or "{}")
@@ -4839,7 +4841,7 @@ class Stage2BWorker:
         for job_id, entry_id in waiting:
             try:
                 await self.start_human_visual_evidence_recovery(job_id, entry_id)
-            except ValueError:
+            except Exception:
                 logger.exception("Could not resume human visual evidence recovery for job %s", job_id)
 
     async def start_human_visual_evidence_recovery(self, verification_job_id: int, entry_id: str) -> dict[str, Any]:
@@ -5136,7 +5138,7 @@ class Stage2BWorker:
         config = self._config_getter()
         result_dir = Path(config.processed_dir) / Path(str(job["result_dir"])).name / "verification"
         result_dir.mkdir(parents=True, exist_ok=True)
-        attempt = max(1, int(job.get("attempt_count") or 0) + 1)
+        attempt = max(1, int(job.get("attempt_count") or 0) + (0 if job.get("_preclaimed_processing") else 1))
         path = result_dir / f"stage2b_job_{int(job['id']):06d}_attempt_{attempt:02d}_error.json"
         payload = {
             "schema": "docling-stage2b-verification-error/v1",

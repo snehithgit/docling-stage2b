@@ -676,7 +676,7 @@ def claim_support_audit(answer: str, sources: list[dict[str, Any]]) -> dict[str,
         "unsupported_claim_count": len(unsupported),
         "unsupported_claims": unsupported,
         "claim_support": claims,
-        "grounding_passed": len(unsupported) == 0,
+        "grounding_passed": bool(claims) and len(unsupported) == 0,
     }
 
 
@@ -698,7 +698,7 @@ def citation_audit(answer: str, sources: list[dict[str, Any]]) -> dict[str, Any]
             f"Deterministic claim-to-source grounding rejected {support['unsupported_claim_count']} "
             "technical claim(s). Open the cited source before relying on this answer."
         )
-    grounding_passed = not invalid and (insufficient or bool(support.get("grounding_passed")))
+    grounding_passed = not invalid and (insufficient or (bool(valid) and bool(support.get("grounding_passed"))))
     return {
         "citation_labels": valid,
         "invalid_citation_labels": invalid,

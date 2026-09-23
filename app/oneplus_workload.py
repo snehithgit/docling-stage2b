@@ -408,6 +408,8 @@ class OnePlusWorkloadGovernor:
     async def snapshot(self) -> dict[str, Any]:
         await self._load()
         async with self._lock:
-            self._maybe_idle_reset_locked(time.time())
+            changed = self._maybe_idle_reset_locked(time.time())
             self._sync_public()
+            if changed:
+                await self._persist_locked()
             return dict(self.public_state)

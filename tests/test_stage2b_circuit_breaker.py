@@ -94,6 +94,11 @@ def test_old_connecterror_failures_are_requeued_for_outage_recovery(tmp_path: Pa
         assert recovered["retry_count"] == 0
         assert recovered["run_mode"] == "outage_recovery"
         assert recovered["error_type"] is None
+        # This is a migration, not a restart-time retry-budget bypass.
+        await store.mark_failed(row["id"], "ConnectError", "still offline", "again.json")
+        assert await store.requeue_endpoint_outage_failures() == 0
+        still_failed = (await store.list_book_jobs_raw(7))[0]
+        assert still_failed["status"] == "failed"
 
     asyncio.run(run())
 

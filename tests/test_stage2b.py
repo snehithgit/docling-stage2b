@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import tempfile
@@ -1530,3 +1531,17 @@ class Stage2BClaimCleanupRegressionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(recovered["status"], "failed")
             self.assertEqual(recovered["error_type"], "RuntimeError")
             self.assertIsNone(worker.worker_state["oneplus"]["active_job_id"])
+
+
+def test_mark_processing_is_compare_and_swap(tmp_path):
+    async def run():
+        store = Stage2BStore(str(tmp_path / "jobs.db"))
+        await store.initialize()
+        await store.sync_routes(901, 901, "g", [{"route_id": "T1", "target": "pi5", "code": "TEST", "source": {"type": "text"}}], "book", "book.zip")
+        await store.start_manual_book(901)
+        row = await store.next_runnable("pi5", False)
+        assert await store.mark_processing(row["id"], "manual") is True
+        assert await store.mark_processing(row["id"], "manual") is False
+        saved = (await store.list_book_jobs_raw(901))[0]
+        assert saved["attempt_count"] == 1
+    asyncio.run(run())

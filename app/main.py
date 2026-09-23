@@ -2188,7 +2188,7 @@ def _audit_diagnostic_row(result_dir: Path) -> dict:
 @app.get("/api/errors")
 async def errors() -> dict:
     conversion_jobs = enrich_jobs(await runtime.store.list_jobs(limit=200, failures_only=True))
-    raw_postprocess = await runtime.postprocess_store.list_jobs(limit=500)
+    raw_postprocess = await runtime.postprocess_store.list_jobs(limit=-1)
     postprocess_rows = await asyncio.to_thread(enrich_postprocess_jobs, raw_postprocess)
     current_verification = await runtime.stage2b_store.list_jobs(limit=10000, current_only=True)
     verification_failed = [row for row in current_verification if str(row.get("status") or "") == "failed"]
@@ -2256,8 +2256,18 @@ async def update_settings(update: SettingsUpdate) -> dict:
 async def retry_job(job_id: int) -> dict:
     if not await runtime.store.retry(job_id):
         raise HTTPException(status_code=404, detail="A failed job with this identifier was not found.")
+    row = await runtime.store.get_job(job_id)
+    status = str((row or {}).get("status") or "")
+    authorized_now = False
+    if status == "pending":
+        authorized_now = await runtime.worker.authorize_retry_if_batch_active(job_id)
     runtime.events.notify("job_retried")
-    return {"accepted": True}
+    return {
+        "accepted": True,
+        "status": status,
+        "resumed": status == "processing" or authorized_now or runtime.config.watcher_auto_run,
+        "waiting_for_start": status == "pending" and not authorized_now and not runtime.config.watcher_auto_run,
+    }
 
 
 @app.get("/api/outputs/{filename}")

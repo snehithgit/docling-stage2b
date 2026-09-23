@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import time
 from pathlib import Path
@@ -281,6 +282,8 @@ def build_visual_evidence(
         "model_calls": 0,
         "docling_calls": 0,
         "raw_docling_immutable": True,
+        "ledger_sha256": hashlib.sha256((result_dir / "correction_ledger.json").read_bytes()).hexdigest()
+            if (result_dir / "correction_ledger.json").is_file() else None,
     }
     _atomic_json(result_dir / "visual_evidence_summary.json", summary)
     return summary
@@ -299,10 +302,12 @@ def ensure_visual_evidence_fresh(
     index = result_dir / "visual_evidence_index.jsonl"
     summary_path = result_dir / "visual_evidence_summary.json"
     needs_refresh = not index.is_file() or not summary_path.is_file()
-    if ledger.is_file() and index.is_file():
+    if ledger.is_file() and not needs_refresh:
         try:
-            needs_refresh = needs_refresh or ledger.stat().st_mtime_ns > index.stat().st_mtime_ns
-        except OSError:
+            summary = _read_json(summary_path)
+            current_signature = hashlib.sha256(ledger.read_bytes()).hexdigest()
+            needs_refresh = str(summary.get("ledger_sha256") or "") != current_signature
+        except (OSError, ValueError, TypeError):
             needs_refresh = True
     if needs_refresh:
         return build_visual_evidence(

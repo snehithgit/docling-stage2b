@@ -4,11 +4,14 @@ import json
 import re
 import shutil
 import uuid
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 SCHEMA = "docling-equipment-registry/v1"
+_REGISTRY_LOCK = threading.RLock()
+
 MANUAL_TYPES = (
     "description", "operation", "maintenance", "electrical", "hydraulic",
     "parts", "tools", "service", "installation", "other",
@@ -123,7 +126,7 @@ def resolve_equipment_books(processed_dir: Path, books: list[dict[str, Any]], eq
     return []
 
 
-def upsert_equipment(
+def _upsert_equipment_unlocked(
     processed_dir: Path,
     books: list[dict[str, Any]],
     *,
@@ -219,7 +222,7 @@ def upsert_equipment(
     return new_row
 
 
-def delete_equipment(processed_dir: Path, equipment_id: str) -> bool:
+def _delete_equipment_unlocked(processed_dir: Path, equipment_id: str) -> bool:
     registry = load_registry(processed_dir)
     rows = list(registry.get("equipment") or [])
     target = str(equipment_id or "").strip()
@@ -237,7 +240,7 @@ def delete_equipment(processed_dir: Path, equipment_id: str) -> bool:
     return True
 
 
-def remove_manual_from_equipment(processed_dir: Path, postprocess_job_id: int) -> dict[str, Any]:
+def _remove_manual_from_equipment_unlocked(processed_dir: Path, postprocess_job_id: int) -> dict[str, Any]:
     """Remove one deleted book from equipment scopes and invalidate machine vectors.
 
     A deleted manual must never remain in the machine registry because an old
@@ -297,3 +300,18 @@ def remove_manual_from_equipment(processed_dir: Path, postprocess_job_id: int) -
         "affected_equipment_ids": affected,
         "deleted_empty_equipment": max(0, len(rows) - len(kept_equipment)),
     }
+
+
+def upsert_equipment(processed_dir: Path, books: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
+    with _REGISTRY_LOCK:
+        return _upsert_equipment_unlocked(processed_dir, books, **kwargs)
+
+
+def delete_equipment(processed_dir: Path, equipment_id: str) -> bool:
+    with _REGISTRY_LOCK:
+        return _delete_equipment_unlocked(processed_dir, equipment_id)
+
+
+def remove_manual_from_equipment(processed_dir: Path, postprocess_job_id: int) -> dict[str, Any]:
+    with _REGISTRY_LOCK:
+        return _remove_manual_from_equipment_unlocked(processed_dir, postprocess_job_id)

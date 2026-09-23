@@ -511,6 +511,14 @@ class AppConfig:
             raise ValueError("OnePlus SSH password environment variable name cannot be empty")
         if not self.oneplus_control_script_path.strip():
             raise ValueError("OnePlus control script path cannot be empty")
+        configured_paths = {
+            "input_dir": Path(self.input_dir).expanduser().resolve(),
+            "output_dir": Path(self.output_dir).expanduser().resolve(),
+            "processed_dir": Path(self.processed_dir).expanduser().resolve(),
+            "database_path": Path(self.database_path).expanduser().resolve(),
+        }
+        if len(set(configured_paths.values())) != len(configured_paths):
+            raise ValueError("input_dir, output_dir, processed_dir, and database_path must be distinct paths")
 
     @property
     def primary_format(self) -> str:

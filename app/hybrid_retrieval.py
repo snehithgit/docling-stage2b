@@ -5,6 +5,7 @@ import json
 import math
 import re
 import time
+import threading
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
@@ -15,6 +16,10 @@ import numpy as np
 from .retrieval import _load_index, _snippet, _tokens, diversify_results, extract_cross_references, search_indices
 
 _SCHEMA = "docling-hybrid-embedding-index/v1"
+
+# A rebuild publishes three coupled files. Serialize publication and query-side
+# snapshots so a request can never combine files from different generations.
+_EQUIPMENT_INDEX_SWAP_LOCK = threading.RLock()
 
 _STRUCTURED_IDENTIFIER_RE = re.compile(
     r"\+?[A-Za-z0-9]+(?:[._/:+~\-][A-Za-z0-9]+)+|[A-Za-z]+\d+[A-Za-z0-9]*|\d+[A-Za-z]+[A-Za-z0-9]*",
@@ -728,16 +733,7 @@ def build_equipment_embedding_index(
         raise EmbeddingServiceError("Machine embedding rebuild could not produce a complete vector corpus")
 
     matrix = np.asarray(vectors, dtype="<f4")
-    tmp_vec = vec_path.with_suffix(vec_path.suffix + ".tmp")
-    matrix.tofile(tmp_vec)
-    tmp_vec.replace(vec_path)
     reused_count = len(rows) - embedded_count
-
-    tmp_rows = rows_path.with_suffix(rows_path.suffix + ".tmp")
-    with tmp_rows.open("w", encoding="utf-8") as handle:
-        for row in rows:
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-    tmp_rows.replace(rows_path)
 
     metadata = {
         "schema": _EQUIPMENT_SCHEMA,
@@ -756,11 +752,21 @@ def build_equipment_embedding_index(
         "embedded_vectors": int(embedded_count),
         "elapsed_seconds": round(time.perf_counter() - started, 3),
     }
+    # Prepare the complete generation before taking the publication lock.
+    tmp_vec = vec_path.with_suffix(vec_path.suffix + ".tmp")
+    matrix.tofile(tmp_vec)
+    tmp_rows = rows_path.with_suffix(rows_path.suffix + ".tmp")
+    with tmp_rows.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
     tmp_meta = meta_path.with_suffix(meta_path.suffix + ".tmp")
     tmp_meta.write_text(json.dumps(metadata, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    tmp_meta.replace(meta_path)
-    _load_equipment_vectors_cached.cache_clear()
-    _load_equipment_rows_cached.cache_clear()
+    with _EQUIPMENT_INDEX_SWAP_LOCK:
+        tmp_vec.replace(vec_path)
+        tmp_rows.replace(rows_path)
+        tmp_meta.replace(meta_path)
+        _load_equipment_vectors_cached.cache_clear()
+        _load_equipment_rows_cached.cache_clear()
     return {
         **equipment_hybrid_index_status(
             processed_dir, equipment_id, index_paths,
@@ -832,12 +838,13 @@ def vector_search_equipment(
     meta_path = _equipment_meta_path(processed_dir, equipment_id, model)
     vec_path = _equipment_vectors_path(processed_dir, equipment_id, model)
     rows_path = _equipment_rows_path(processed_dir, equipment_id, model)
-    meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    if int(meta.get("dim") or 0) != q.size:
-        raise HybridIndexNotReady(f"Machine embedding dimension mismatch: index={meta.get('dim')} query={q.size}")
-    vstat = vec_path.stat(); rstat = rows_path.stat()
-    matrix = _load_equipment_vectors_cached(str(vec_path), vstat.st_mtime_ns, vstat.st_size, int(meta["rows"]), int(meta["dim"]))
-    rows = list(_load_equipment_rows_cached(str(rows_path), rstat.st_mtime_ns, rstat.st_size))
+    with _EQUIPMENT_INDEX_SWAP_LOCK:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        if int(meta.get("dim") or 0) != q.size:
+            raise HybridIndexNotReady(f"Machine embedding dimension mismatch: index={meta.get('dim')} query={q.size}")
+        vstat = vec_path.stat(); rstat = rows_path.stat()
+        matrix = _load_equipment_vectors_cached(str(vec_path), vstat.st_mtime_ns, vstat.st_size, int(meta["rows"]), int(meta["dim"])).copy()
+        rows = list(_load_equipment_rows_cached(str(rows_path), rstat.st_mtime_ns, rstat.st_size))
     if len(rows) != int(meta.get("rows") or 0):
         raise HybridIndexNotReady("Machine embedding row mapping changed; rebuild the machine embeddings.")
     scores = matrix @ q

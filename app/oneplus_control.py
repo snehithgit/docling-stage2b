@@ -94,6 +94,10 @@ class OnePlusController:
         }
 
     async def status(self) -> dict[str, Any]:
+        async with self._operation_lock:
+            return await self._status_unlocked()
+
+    async def _status_unlocked(self) -> dict[str, Any]:
         script = self.config.oneplus_control_script_path
         if script == "$HOME/bin/oneplus-llama-control":
             script_expr = '"$HOME/bin/oneplus-llama-control"'
