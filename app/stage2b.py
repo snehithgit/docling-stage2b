@@ -3991,6 +3991,26 @@ class Stage2BWorker:
         except ValueError as exc:
             logger.info("Stage 2C auto-finalize skipped for book %s: %s", postprocess_job_id, exc)
 
+    async def _post_completion_housekeeping(self, job: dict[str, Any], *, is_artifact_sweep: bool) -> None:
+        """Run non-authoritative follow-up work without changing a completed verifier result."""
+        if not is_artifact_sweep:
+            try:
+                released = await self._store.release_ready_artifact_sweeps(int(job["postprocess_job_id"]))
+                if released:
+                    self._events.notify("stage2b_artifact_sweep_released")
+            except Exception:
+                logger.exception(
+                    "Post-completion artifact-sweep release failed for Stage 2B job %s",
+                    job.get("id"),
+                )
+        try:
+            await self._maybe_auto_finalize_book(int(job["postprocess_job_id"]))
+        except Exception:
+            logger.exception(
+                "Post-completion auto-finalize failed for Stage 2B job %s",
+                job.get("id"),
+            )
+
     async def _run_job(
         self,
         target: str,
@@ -4084,11 +4104,10 @@ class Stage2BWorker:
                 logger.exception("Could not remove completed inference checkpoint")
             self.worker_state[target]["last_completed_job_id"] = int(job["id"])
             self._events.notify(f"stage2b_{target}_completed")
-            if not is_artifact_sweep:
-                released = await self._store.release_ready_artifact_sweeps(int(job["postprocess_job_id"]))
-                if released:
-                    self._events.notify("stage2b_artifact_sweep_released")
-            await self._maybe_auto_finalize_book(int(job["postprocess_job_id"]))
+            # The verification result is already durably completed above.
+            # Housekeeping is isolated so its failures cannot fall through to
+            # the verifier error handler and downgrade that result to failed.
+            await self._post_completion_housekeeping(job, is_artifact_sweep=is_artifact_sweep)
         except OnePlusCooldownActive as exc:
             seconds = time.monotonic() - started
             await self._store.mark_deferred(

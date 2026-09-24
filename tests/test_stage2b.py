@@ -1568,3 +1568,47 @@ async def test_shared_artifact_claim_persists_actual_worker(tmp_path):
     books = await store.list_books()
     assert books[0]["pi5_processing"] == 1
     assert books[0]["oneplus_processing"] == 0
+
+class Stage2BPostCompletionHousekeepingRegressionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_housekeeping_failures_are_contained_after_completion(self):
+        from app.stage2b import Stage2BWorker
+
+        class Store:
+            async def release_ready_artifact_sweeps(self, _book_id):
+                raise RuntimeError("injected release failure")
+
+        events = SimpleNamespace(notify=lambda *_args, **_kwargs: None)
+        worker = Stage2BWorker(lambda: SimpleNamespace(), Store(), SimpleNamespace(), events)
+        finalized = []
+
+        async def failing_finalize(book_id):
+            finalized.append(book_id)
+            raise RuntimeError("injected finalize failure")
+
+        worker._maybe_auto_finalize_book = failing_finalize
+        # Neither housekeeping failure may escape to _run_job's generic
+        # exception handler, where an already-completed row would be failed.
+        await worker._post_completion_housekeeping(
+            {"id": 77, "postprocess_job_id": 42}, is_artifact_sweep=False
+        )
+        self.assertEqual(finalized, [42])
+
+    async def test_artifact_job_skips_release_but_contains_finalize_failure(self):
+        from app.stage2b import Stage2BWorker
+
+        class Store:
+            async def release_ready_artifact_sweeps(self, _book_id):
+                raise AssertionError("artifact jobs must not release artifact sweeps")
+
+        worker = Stage2BWorker(
+            lambda: SimpleNamespace(), Store(), SimpleNamespace(),
+            SimpleNamespace(notify=lambda *_args, **_kwargs: None),
+        )
+
+        async def failing_finalize(_book_id):
+            raise RuntimeError("injected finalize failure")
+
+        worker._maybe_auto_finalize_book = failing_finalize
+        await worker._post_completion_housekeeping(
+            {"id": 78, "postprocess_job_id": 43}, is_artifact_sweep=True
+        )
