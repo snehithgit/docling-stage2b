@@ -82,15 +82,24 @@ if ($LASTEXITCODE -ne 0) {
 
 $RemoteHeads = @(& git ls-remote --heads origin "refs/heads/$Branch")
 Assert-LastExitCode "Cannot contact the Gitea repository at $GiteaRepoUrl"
+$NeedsPush = $true
 if ($RemoteHeads.Count -gt 0) {
     & git fetch origin $Branch
     Assert-LastExitCode "Failed to fetch the latest Gitea history"
     & git rebase "origin/$Branch"
     Assert-LastExitCode "Rebase stopped. Resolve the conflicts, run 'git rebase --continue', then run this script again"
+    $LocalHead = (& git rev-parse HEAD).Trim()
+    Assert-LastExitCode "Failed to read the local commit"
+    $RemoteHead = (& git rev-parse "origin/$Branch").Trim()
+    Assert-LastExitCode "Failed to read the Gitea commit"
+    $NeedsPush = $LocalHead -ne $RemoteHead
 }
 
-& git push origin $Branch
-Assert-LastExitCode "Gitea push failed; remote history was left unchanged"
-
-Write-Host "Source synced to Gitea without rewriting history."
-Write-Host "Gitea will mirror this commit to GitHub, which will start GitHub Actions."
+if ($NeedsPush) {
+    & git push origin $Branch
+    Assert-LastExitCode "Gitea push failed; remote history was left unchanged"
+    Write-Host "Source synced to Gitea without rewriting history."
+    Write-Host "Gitea will mirror this commit to GitHub, which will start GitHub Actions."
+} else {
+    Write-Host "Local and Gitea main are already synchronized; no push was needed."
+}

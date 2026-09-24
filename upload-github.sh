@@ -79,13 +79,20 @@ fi
 if ! remote_heads="$(git ls-remote --heads origin "refs/heads/$BRANCH")"; then
   fail "Cannot contact the Gitea repository at $GITEA_REPO_URL"
 fi
+needs_push=1
 if [ -n "$remote_heads" ]; then
   git fetch origin "$BRANCH"
   git rebase "origin/$BRANCH" || fail "Resolve the conflicts, run 'git rebase --continue', then run this script again."
+  if [ "$(git rev-parse HEAD)" = "$(git rev-parse "origin/$BRANCH")" ]; then
+    needs_push=0
+  fi
 fi
 
 # Gitea mirrors this normal push to GitHub, where Actions runs.
-git push origin "$BRANCH"
-
-echo "Source synced to Gitea without rewriting Git history."
-echo "Gitea will mirror this commit to GitHub, which will start GitHub Actions."
+if [ "$needs_push" -eq 1 ]; then
+  git push origin "$BRANCH"
+  echo "Source synced to Gitea without rewriting Git history."
+  echo "Gitea will mirror this commit to GitHub, which will start GitHub Actions."
+else
+  echo "Local and Gitea main are already synchronized; no push was needed."
+fi
