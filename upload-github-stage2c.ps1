@@ -1,5 +1,5 @@
 param(
-    [string]$GiteaRepoUrl = $(if ($env:GITEA_REPO_URL) { $env:GITEA_REPO_URL } else { "http://192.168.68.63:3002/snehithgit/docling-stage2b.git" })
+    [string]$GiteaRepoUrl = $(if ($env:GITEA_REPO_URL) { $env:GITEA_REPO_URL } else { "http://192.168.68.63:3002/snehith/docling-stage2b.git" })
 )
 
 $ErrorActionPreference = "Stop"

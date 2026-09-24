@@ -1,7 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/bash
 set -euo pipefail
 
-GITEA_REPO_URL="${GITEA_REPO_URL:-http://192.168.68.63:3002/snehithgit/docling-stage2b.git}"
+GITEA_REPO_URL="${GITEA_REPO_URL:-http://192.168.68.63:3002/snehith/docling-stage2b.git}"
 GITHUB_REPO_URL="https://github.com/snehithgit/docling-stage2b.git"
 BRANCH="main"
 COMMIT_MESSAGE="Update Marine Pipeline Studio source"
