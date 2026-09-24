@@ -1,7 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/bash
 set -euo pipefail
 
-GITEA_REPO_URL="${GITEA_REPO_URL:-git@192.168.68.63:snehith/docling-stage2b.git}"
+GITEA_REPO_URL="${GITEA_REPO_URL:-ssh://git@192.168.68.63:222/snehith/docling-stage2b.git}"
 GITEA_SSH_KEY="${GITEA_SSH_KEY:-$HOME/.ssh/gitea_mobile}"
 GITHUB_REPO_URL="https://github.com/snehithgit/docling-stage2b.git"
 BRANCH="main"
