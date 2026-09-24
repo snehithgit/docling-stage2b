@@ -1,0 +1,672 @@
+{
+  "schema": "docling-retrieval-real-replay/v1",
+  "baseline_version": "2026.09.14.31",
+  "candidate_version": "2026.09.15.32",
+  "queries": [
+    {
+      "query": "What is 2141 refer to",
+      "before_top1": {
+        "rank": 1,
+        "source_filename": "Instruction Manual.pdf",
+        "page_numbers": [
+          69
+        ],
+        "chunk_id": "CHK-000218",
+        "score": 20.5588,
+        "snippet": "Extra equipment Electrical equipment Introduction The hydrualic circuit diagram shows the following main luffing components: | Variable displacement pump | 2111 | |------------------------------|--------| | Hydraulic motor | 2141 | | Brake | 2211 | The luffing and slewing movements are generally operated by a common control lever, Figure 8."
+      },
+      "after_top1": {
+        "rank": 1,
+        "source_filename": "Instruction Manual.pdf",
+        "page_numbers": [
+          69
+        ],
+        "chunk_id": "CHK-000218",
+        "score": 25.3088,
+        "snippet": "Extra equipment Electrical equipment Introduction The hydrualic circuit diagram shows the following main luffing components: | Variable displacement pump | 2111 | |------------------------------|--------| | Hydraulic motor | 2141 | | Brake | 2211 | The luffing and slewing movements are generally operated by a common control lever, Figure 8."
+      },
+      "after_top5": [
+        {
+          "rank": 1,
+          "source_filename": "Instruction Manual.pdf",
+          "page_numbers": [
+            69
+          ],
+          "chunk_id": "CHK-000218",
+          "score": 25.3088,
+          "snippet": "Extra equipment Electrical equipment Introduction The hydrualic circuit diagram shows the following main luffing components: | Variable displacement pump | 2111 | |------------------------------|--------| | Hydraulic motor | 2141 | | Brake | 2211 | The luffing and slewing movements are generally operated by a common control lever, Figure 8."
+        },
+        {
+          "rank": 2,
+          "source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+          "page_numbers": [
+            66
+          ],
+          "chunk_id": "CHK-000232",
+          "score": 25.0214,
+          "snippet": "Spare parts Electric equipment Introduction Figure 10 shows a luffing winch circuit diagram, with the following main components: | Variable displacement pump | 2111 | |------------------------------|--------| | Hydraulic motor | 2141 | | Brake | 2211 | The luffing and slewing movements are generally operated by a common control lever, Figure 11."
+        },
+        {
+          "rank": 3,
+          "source_filename": "Instruction Manual.pdf",
+          "page_numbers": [
+            478
+          ],
+          "chunk_id": "CHK-001496",
+          "score": 24.3172,
+          "snippet": "Spare Parts Manual How to Order Spare Parts Factors Influencing the Lifetime of Hydraulic HOSES | 2141 | 2141 | Hyc mHreotor | Hyc mHreotor | 188 1221-801 | | | | | /1.6A | | 2211 | 2211 | Brake | Brake | | | Included in winch | Included in winch | Included in winch | /1.6A | | Item: | 1xxx - Hoisting Circuit | 1xxx - Hoisting Circuit | 3xxx - Slewing Circuit | 3xxx - Slewing Circuit | 5xxx - Additional Equipment | 5xxx - Additional Equipment | 5xxx - Additional Equipment | 5xxx - Additional Equipment | 5xxx - Additional Equipment | | 1000005603 Similar…"
+        },
+        {
+          "rank": 4,
+          "source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+          "page_numbers": [
+            369
+          ],
+          "chunk_id": "CHK-001307",
+          "score": 22.1841,
+          "snippet": "…| | | | 2111 | Pump | Pump | 287 9493-801 | A4VG 125 | | 2127 | Avlastningsenhet | Unloading unit | 278 2088-801 | | | 2141 | Hydraulmotor | Hydraulic motor | 178 1934-701 | CA140 | | 2211 | Broms | Brake | 178 2268-722 | MDA 21 | | 2221 | Riktningsventil | Direction valve | 278 2142-801 | Into 278 2101-801 | | 2226 | Riktningsventil | Direction valve | 278 2142-801 | Into 278 2101-801 | | 2241-1 | Back-strypventil | Check-restriction valve | 489 3059-801 | | | 2241-2 | Silbricka | Strainer | 2590 4136-110 | |"
+        },
+        {
+          "rank": 5,
+          "source_filename": "Instruction Manual.pdf",
+          "page_numbers": [
+            477
+          ],
+          "chunk_id": "CHK-001488",
+          "score": 18.0928,
+          "snippet": "…√ A3 M1 1141 X T2 A1 A B⊥ 2249 2664 2661 2226 B 2481 4331 DESCRIPTION 5 5 A2 A M A A1 2241-2 2241-1 92E7 0 Mp 2253 B T2 2141 2211 A T1 2127 W B 10 WM e8 山 M GEAR BOX 4336 4334 WM 6 S Ms 8b 6 6 R1 u 2243 4322-2 4322-1 山 3221 A 8 3251-2 3241-2 3251-1 3241-1 3249 3664 3661 7 SLEWING A T1 A Crane GLB3628-2/28.828gr"
+        }
+      ]
+    },
+    {
+      "query": "Brake release procedure for luffing",
+      "before_top1": {
+        "rank": 1,
+        "source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+        "page_numbers": [
+          66
+        ],
+        "chunk_id": "CHK-000233",
+        "score": 17.875,
+        "snippet": "Spare parts Electric equipment Brake release Moving the control lever from neutral, eg, rearward to raise the jib, causes the valves 2221 and 2226 (2226 slightly delayed in relation to 2221) to shift position and control pressure is admitted to the brake 2211 and to valve 4326 which shifts position from the relief mode. With the control lever in the brake release position, the luffing winch should produce a slow movement of the crane jib."
+      },
+      "after_top1": {
+        "rank": 1,
+        "source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+        "page_numbers": [
+          66
+        ],
+        "chunk_id": "CHK-000233",
+        "score": 30.125,
+        "snippet": "Spare parts Electric equipment Brake release Moving the control lever from neutral, eg, rearward to raise the jib, causes the valves 2221 and 2226 (2226 slightly delayed in relation to 2221) to shift position and control pressure is admitted to the brake 2211 and to valve 4326 which shifts position from the relief mode. With the control lever in the brake release position, the luffing winch should produce a slow movement of the crane jib."
+      },
+      "after_top5": [
+        {
+          "rank": 1,
+          "source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+          "page_numbers": [
+            66
+          ],
+          "chunk_id": "CHK-000233",
+          "score": 30.125,
+          "snippet": "Spare parts Electric equipment Brake release Moving the control lever from neutral, eg, rearward to raise the jib, causes the valves 2221 and 2226 (2226 slightly delayed in relation to 2221) to shift position and control pressure is admitted to the brake 2211 and to valve 4326 which shifts position from the relief mode. With the control lever in the brake release position, the luffing winch should produce a slow movement of the crane jib."
+        },
+        {
+          "rank": 2,
+          "source_filename": "Instruction Manual.pdf",
+          "page_numbers": [
+            69
+          ],
+          "chunk_id": "CHK-000219",
+          "score": 29.1144,
+          "snippet": "Extra equipment Electrical equipment Brake release Moving the control lever from neutral, eg. backwards to raise the jib, causes the valves 2221 and 2226 (2226 slightly delayed in relation to 2221) to shift position and control pressure is admitted to the brake 2211 and to valve 2127 which shifts position from the unloading mode. With the control lever in the brake release position, the luffing winch should produce a slow movement of the crane jib, so called plussing. See instruction \"High pressure pumps\" in section 6.1."
+        },
+        {
+          "rank": 3,
+          "source_filename": "Instruction Manual.pdf",
+          "page_numbers": [
+            248
+          ],
+          "chunk_id": "CHK-000944",
+          "score": 25.1788,
+          "snippet": "Extra equipment Section D 1.9 Brake release/direction valve outputs Each MC card has an output driver for the brake release signal (or direction valve for cranes equipped with cylinder luffing). The system is capable of detecting short-circuited output and then giving an error-message, see sign ERROR MESSAGES. Logo"
+        },
+        {
+          "rank": 4,
+          "source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+          "page_numbers": [
+            211
+          ],
+          "chunk_id": "CHK-000882",
+          "score": 24.9033,
+          "snippet": "Spare parts 1. Description of input and output signals 1.8 Brake release/direction valve outputs Each MPC-card having an output driver for the brake release signal (or direction valve for cr cranes equipped with cylinder luffing). The system is capable of detecting short-circuited output and then giving an error-message, se sign ERROR MESSAGES."
+        },
+        {
+          "rank": 5,
+          "source_filename": "hydraulics-for-mariners_compress.pdf",
+          "page_numbers": [
+            203
+          ],
+          "chunk_id": "CHK-000328",
+          "score": 24.2181,
+          "snippet": "Chapter 6 Pressure Control Valve 6. 3 Pilot-Operated Pressure Relief Valve 6.6 Utilisation of Hydraulic Overcentre / Brake Valves 6.6.5 Dual Counterbalance with Brake Release Port When motion is commanded in either direction, first the pilot pressure must build-up to a level capable to release the brake, then the pilot pressure can open the counterbalance valve and allow the motor to start rotating. The 'pilot pressure' needed to open the counterbalance valve must always be higher than the pressure capable to release the brake and is generally 15 - 20 ba…"
+        }
+      ]
+    },
+    {
+      "query": "How to check plussing pressure",
+      "before_top1": {
+        "rank": 1,
+        "source_filename": "Instruction Manual.pdf",
+        "page_numbers": [
+          481
+        ],
+        "chunk_id": "CHK-001522",
+        "score": 13.8729,
+        "snippet": "Spare Parts Manual How to Order Spare Parts Factors Influencing the Lifetime of Hydraulic HOSES | Low pressure luffing | Low pressure luffing | Low pressure luffing | 2481 | 0.85 MPa | 5.2 | Falling pressure Not to be adjusted | Falling pressure Not to be adjusted | Falling pressure Not to be adjusted | | Pressure relief P-port | Pressure relief P-port | Pressure relief P-port | 3111-2 | 35 MPa | 6.2 | Opening pressure | Opening pressure | Opening pressure | | 2/10044.01 Reference Pressure relief S-port | 2/10044.01 Reference Pressure relief S-port | 2/1…"
+      },
+      "after_top1": {
+        "rank": 1,
+        "source_filename": "Instruction Manual.pdf",
+        "page_numbers": [
+          186
+        ],
+        "chunk_id": "CHK-000728",
+        "score": 24.3079,
+        "snippet": "…- -No load in the hook. - -Park the crane or move the hook block close to the jib top. - -Stop the crane. - -Install a pressure gauge 0-400 bar at connection 5.1 on pump 2111. - -Lock the brake in closed position by closing ball valve 2661, see Fig. 4. - -Start the crane. The oil temperature should be 40°C. - -Operate the directional valve 2221 manually with a small screwdriver or similar during checking and adjustment. See Fig. 4. - -Measure the plussing pressure at connection 5.1 refer to the hydraulic circuit diagram. See Fig. 4. - -If the plussing p…"
+      },
+      "after_top5": [
+        {
+          "rank": 1,
+          "source_filename": "Instruction Manual.pdf",
+          "page_numbers": [
+            186
+          ],
+          "chunk_id": "CHK-000728",
+          "score": 24.3079,
+          "snippet": "…- -No load in the hook. - -Park the crane or move the hook block close to the jib top. - -Stop the crane. - -Install a pressure gauge 0-400 bar at connection 5.1 on pump 2111. - -Lock the brake in closed position by closing ball valve 2661, see Fig. 4. - -Start the crane. The oil temperature should be 40°C. - -Operate the directional valve 2221 manually with a small screwdriver or similar during checking and adjustment. See Fig. 4. - -Measure the plussing pressure at connection 5.1 refer to the hydraulic circuit diagram. See Fig. 4. - -If the plussing p…"
+        },
+        {
+          "rank": 2,
+          "source_filename": "Instruction Manual.pdf",
+          "page_numbers": [
+            184,
+            185
+          ],
+          "chunk_id": "CHK-000726",
+          "score": 23.807,
+          "snippet": "Extra equipment Section D N.B. Hoisting winch - -No load in hook. - -Stop the crane. - -Install a pressure gauge 0-400 bar at connection 3.1 on pump 1111. See Fig. 3. - -Lock the brake in closed position by closing ball valve 1663. - -Start the crane. The oil temperature should be 40°C. - -Operate directional valve 1221 manually with a small screwdriver or similar during checking and adjustment, see Fig. 3. - -Measure the plussing pressure on the pressure gauge at connection 3.1 refer to the hydraulic circuit diagram. - -If the plussing pressure is incor…"
+        },
+        {
+          "rank": 3,
+          "source_filename": "Instruction Manual.pdf",
+          "page_numbers": [
+            481
+          ],
+          "chunk_id": "CHK-001522",
+          "score": 23.2229,
+          "snippet": "Spare Parts Manual How to Order Spare Parts Factors Influencing the Lifetime of Hydraulic HOSES | Low pressure luffing | Low pressure luffing | Low pressure luffing | 2481 | 0.85 MPa | 5.2 | Falling pressure Not to be adjusted | Falling pressure Not to be adjusted | Falling pressure Not to be adjusted | | Pressure relief P-port | Pressure relief P-port | Pressure relief P-port | 3111-2 | 35 MPa | 6.2 | Opening pressure | Opening pressure | Opening pressure | | 2/10044.01 Reference Pressure relief S-port | 2/10044.01 Reference Pressure relief S-port | 2/1…"
+        },
+        {
+          "rank": 4,
+          "source_filename": "Instruction Manual.pdf",
+          "page_numbers": [
+            481
+          ],
+          "chunk_id": "CHK-001521",
+          "score": 21.5846,
+          "snippet": "Spare Parts Manual How to Order Spare Parts Factors Influencing the Lifetime of Hydraulic HOSES | Luffing plussing S-port | Luffing plussing S-port | Luffing plussing S-port | 2111-4 | 10 MPa | 5.1 | +2 / -0 MPa | +2 / -0 MPa | +2 / -0 MPa | | Pressure cut off | Pressure cut off | Pressure cut off | 2111-8a | 30.5 MPa | 5.2 | Start of regulation Not to be adjusted | Start of regulation Not to be adjusted | Start of regulation Not to be adjusted | | Pressure cut off | Pressure cut off | Pressure cut off | 2111-8b | 30.5 MPa | 5.1 | Start of regulation | N…"
+        },
+        {
+          "rank": 5,
+          "source_filename": "Instruction Manual.pdf",
+          "page_numbers": [
+            481
+          ],
+          "chunk_id": "CHK-001518",
+          "score": 21.5237,
+          "snippet": "…e of Hydraulic HOSES | Pre-loading valve | Pre-loading valve | Pre-loading valve | 1111-9 | 0.3 MPa | 3.3/3.4 | Opening pressure | Opening pressure | Opening pressure | | Pressure relief P-port | Pressure relief P-port | Pressure relief P-port | 1112-2 | 15 MPa | 3.2 | Opening pressure | Opening pressure | Opening pressure | | Pressure relief S-port | Pressure relief S-port | Pressure relief S-port | 1112-3 | 42 MPa | 3.1 | Opening pressure | Opening pressure | Opening pressure | | Hoisting plussing S-port | Hoisting plussing S-port | Hoisting plussing S…"
+        }
+      ]
+    },
+    {
+      "query": "How to zero set the anemometer",
+      "before_top1": {
+        "rank": 1,
+        "source_filename": "marine-electrical-maintenance-and-troubleshooting-deck-and-hull-machinery-pdf.pdf",
+        "page_numbers": [
+          284
+        ],
+        "chunk_id": "CHK-001938",
+        "score": 16.0159,
+        "snippet": "Chapter 16 16.5 Fixed Oxygen Analyser 16.5.1 Zero Adjustment 1. Set the knob to 'calibrate'. 2. Introduce zero calibration gas. This is normally Nitrogen. 3. Adjust the flow control valve, if required. 4. Set the '% O 2 ' select switch to 0 1 % range. 5. Adjust the zero knob in order to obtain a zero indication. Note: If the zero-calibration gas is CO2, the zero knob is to be set to obtain an indication of 0.26% O2. This value by CO2 corresponding to an equivalent paramagnetic value of 0% by nitrogen."
+      },
+      "after_top1": {
+        "rank": 1,
+        "source_filename": "Anemometer-Anemoscope.pdf",
+        "page_numbers": [
+          8
+        ],
+        "chunk_id": "CHK-000017",
+        "score": 18.9769,
+        "snippet": "5. Adjustments & Setting after the initial installation 5.1 Zero Setting (Wind direction) Table : The wind direction of the signal generator is set and is produced. If a problem occurs, please set as follows :"
+      },
+      "after_top5": [
+        {
+          "rank": 1,
+          "source_filename": "Anemometer-Anemoscope.pdf",
+          "page_numbers": [
+            8
+          ],
+          "chunk_id": "CHK-000017",
+          "score": 18.9769,
+          "snippet": "5. Adjustments & Setting after the initial installation 5.1 Zero Setting (Wind direction) Table : The wind direction of the signal generator is set and is produced. If a problem occurs, please set as follows :"
+        },
+        {
+          "rank": 2,
+          "source_filename": "Instruction Manual.pdf",
+          "page_numbers": [
+            187,
+            188
+          ],
+          "chunk_id": "CHK-000731",
+          "score": 14.7868,
+          "snippet": "Extra equipment Section D N.B. Zero setting - -If the crane does move, right or left, an adjustment must be made using the set screw for zero setting, see Fig. 6. - -Loosen the locking nut with a hook wrench. - -Operate the directional valve 3221 manually with a small screwdriver or similar during checking and adjustment. See Fig. 7. - -Adjust the zero setting on the slewing pump by turning the set screw. Turn the set screw clockwise or counterclockwise. See *) in note (page 7) and in Fig. 5. - Note! Do not turn the set screw more than ± 1/2 turn. - -Aft…"
+        },
+        {
+          "rank": 3,
+          "source_filename": "marine-electrical-maintenance-and-troubleshooting-deck-and-hull-machinery-pdf.pdf",
+          "page_numbers": [
+            284
+          ],
+          "chunk_id": "CHK-001938",
+          "score": 13.1559,
+          "snippet": "Chapter 16 16.5 Fixed Oxygen Analyser 16.5.1 Zero Adjustment 1. Set the knob to 'calibrate'. 2. Introduce zero calibration gas. This is normally Nitrogen. 3. Adjust the flow control valve, if required. 4. Set the '% O 2 ' select switch to 0 1 % range. 5. Adjust the zero knob in order to obtain a zero indication. Note: If the zero-calibration gas is CO2, the zero knob is to be set to obtain an indication of 0.26% O2. This value by CO2 corresponding to an equivalent paramagnetic value of 0% by nitrogen."
+        },
+        {
+          "rank": 4,
+          "source_filename": "Anemometer-Anemoscope.pdf",
+          "page_numbers": [
+            5
+          ],
+          "chunk_id": "CHK-000010",
+          "score": 11.6945,
+          "snippet": "…f terminals for wiring, please carefully look at the color and name of cable, Refer this manual, the wiring of the True anemometer/ anemoscope uses compression tool and it is must be connected correctly and strongly - 3) The Main unit attaches it to one of the 3 Display units. You can open the Display unit that should remove screw of front Display."
+        },
+        {
+          "rank": 5,
+          "source_filename": "marine-electrical-maintenance-and-troubleshooting-deck-and-hull-machinery-pdf.pdf",
+          "page_numbers": [
+            20
+          ],
+          "chunk_id": "CHK-000084",
+          "score": 10.2863,
+          "snippet": "…ounder | | 8 | Radars | | 9 | Electronic Chart Display & Information System | | 10 | Global Positioning System | | 11 | Anemometer | | 12 | Weather Facsimile | | 13 | Daylight Signalling Light | | 14 | Ship's Security Alert System | | 15 | VHF, NavTex and TV Systems |"
+        }
+      ]
+    },
+    {
+      "query": "What is the joystick neutral voltage",
+      "before_top1": {
+        "rank": 1,
+        "source_filename": "Instruction Manual.pdf",
+        "page_numbers": [
+          88
+        ],
+        "chunk_id": "CHK-000321",
+        "score": 14.499,
+        "snippet": "…ane house who might be caught in the machinery or strangled by the wire ropes. S32 CONTROL LEVER, LUFFING/SLEWING Note! Joystick for luffi ng/slewing motion must be in neutral position when starting the crane. If the joystick has been moved in any direction when pressing the start button the motion is blocked. Move the joystick to neutral position then operation is possible. With the control lever in neutral position the brakes are engaged. Moving the control lever short distance from neutral releases the brake for luffi ng winch or/and slewing machinery…"
+      },
+      "after_top1": {
+        "rank": 1,
+        "source_filename": "Instruction Manual.pdf",
+        "page_numbers": [
+          74
+        ],
+        "chunk_id": "CHK-000241",
+        "score": 29.2765,
+        "snippet": "Extra equipment Electrical equipment Control levers (joysticks) The right control lever controls the hoisting winch. The signals from the control lever are connected to the MC card, \"Ho\" for hoisting winch. The left joystick controls the luffing and slewing movements. Both digital and analouge signals are connected to MC card \"Lu\" for luffing and \"SL\" for slewing. The joystick linear potentiometers are fed with 0V, +6V, and +12V. The output level is approximately +6V with the joystick in neutral. The output signal is controlled by the joystick and is dec…"
+      },
+      "after_top5": [
+        {
+          "rank": 1,
+          "source_filename": "Instruction Manual.pdf",
+          "page_numbers": [
+            74
+          ],
+          "chunk_id": "CHK-000241",
+          "score": 29.2765,
+          "snippet": "Extra equipment Electrical equipment Control levers (joysticks) The right control lever controls the hoisting winch. The signals from the control lever are connected to the MC card, \"Ho\" for hoisting winch. The left joystick controls the luffing and slewing movements. Both digital and analouge signals are connected to MC card \"Lu\" for luffing and \"SL\" for slewing. The joystick linear potentiometers are fed with 0V, +6V, and +12V. The output level is approximately +6V with the joystick in neutral. The output signal is controlled by the joystick and is dec…"
+        },
+        {
+          "rank": 2,
+          "source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+          "page_numbers": [
+            210
+          ],
+          "chunk_id": "CHK-000878",
+          "score": 24.7512,
+          "snippet": "Spare parts 1. Description of input and output signals 1.4 Control lever (joystick) potentiometers, outputs to and inputs from The control levers linear potentiometers are fed with 0V, +6V and +12V from their appropriate MPC-card. The potentiometer output is approx. +6V with the lever in neutral. The output signal is controlled by the lever and is depending on the direction of lever movement. The output signal is increased to approx. +10.5V for max. speed hoisting, luffing in and slewing left respectively. The output signal is decreased to approx. +1,5V…"
+        },
+        {
+          "rank": 3,
+          "source_filename": "Instruction Manual.pdf",
+          "page_numbers": [
+            88
+          ],
+          "chunk_id": "CHK-000321",
+          "score": 21.799,
+          "snippet": "…ane house who might be caught in the machinery or strangled by the wire ropes. S32 CONTROL LEVER, LUFFING/SLEWING Note! Joystick for luffi ng/slewing motion must be in neutral position when starting the crane. If the joystick has been moved in any direction when pressing the start button the motion is blocked. Move the joystick to neutral position then operation is possible. With the control lever in neutral position the brakes are engaged. Moving the control lever short distance from neutral releases the brake for luffi ng winch or/and slewing machinery…"
+        },
+        {
+          "rank": 4,
+          "source_filename": "Instruction Manual.pdf",
+          "page_numbers": [
+            266
+          ],
+          "chunk_id": "CHK-001071",
+          "score": 20.392,
+          "snippet": "Note! | Abbreviations: | VFD = Variable Frequency Drive ALM = Active Line Module | | 11.75 V.  Check connection to joystick  Check switches/cam in joystick  Measure potentiometers in joystick |"
+        },
+        {
+          "rank": 5,
+          "source_filename": "Instruction Manual.pdf",
+          "page_numbers": [
+            87
+          ],
+          "chunk_id": "CHK-000317",
+          "score": 19.4384,
+          "snippet": "…e house who might be caught in the machinery or strangled by the wire ropes. S31 CONTROL LEVER, HOISTING/LOWERING Note! Joystick for hoisting/lowering motion must be in neutral position when starting the crane. If the joystick has been moved in any direction when pressing the start button the motion is blocked. Move the joystick to neutral position then operation is possible. When the control lever is in neutral position the brake is engaged and holds the load. Moving control lever in low speed or high speed position releases the winch brake. Moving cont…"
+        }
+      ]
+    },
+    {
+      "query": "What to do for luffing limit alarm came",
+      "before_top1": {
+        "rank": 1,
+        "source_filename": "Instruction Manual.pdf",
+        "page_numbers": [
+          59
+        ],
+        "chunk_id": "CHK-000180",
+        "score": 13.2327,
+        "snippet": "Extra equipment MACGREGOR 3. Electric Symbols Elektrische Schaltzeichen Limit switches, high hook – luffing winch | Cams | Cam degrees | Speed reduce luffing out Approx. (m) E spr | Max jib stop limit (m) E | Winch angle position degrees | Limit values on winch drum (mm) | Limit values on winch drum (mm)"
+      },
+      "after_top1": {
+        "rank": 1,
+        "source_filename": "marine-electrical-maintenance-and-troubleshooting-deck-and-hull-machinery-pdf.pdf",
+        "page_numbers": [
+          103
+        ],
+        "chunk_id": "CHK-000572",
+        "score": 36.6137,
+        "snippet": "Chapter 5 5.1.8.8 The Luffing Mode is not Working - a) Hydraulic Oil temperature is more than 85 O C - b) Luffing up notch microswitch faulty. - c) Luffing Up-Upper Limit operated. - d) Luffing Down - Lower limit operated - e) Brake is not open. Check brake aux relay."
+      },
+      "after_top5": [
+        {
+          "rank": 1,
+          "source_filename": "marine-electrical-maintenance-and-troubleshooting-deck-and-hull-machinery-pdf.pdf",
+          "page_numbers": [
+            103
+          ],
+          "chunk_id": "CHK-000572",
+          "score": 36.6137,
+          "snippet": "Chapter 5 5.1.8.8 The Luffing Mode is not Working - a) Hydraulic Oil temperature is more than 85 O C - b) Luffing up notch microswitch faulty. - c) Luffing Up-Upper Limit operated. - d) Luffing Down - Lower limit operated - e) Brake is not open. Check brake aux relay."
+        },
+        {
+          "rank": 2,
+          "source_filename": "marine-electrical-maintenance-and-troubleshooting-deck-and-hull-machinery-pdf.pdf",
+          "page_numbers": [
+            128
+          ],
+          "chunk_id": "CHK-000793",
+          "score": 36.3989,
+          "snippet": "Chapter 7 7.1.11 The Luffing Mode is Not Working - a) The hydraulic oil temperature is more than 85 O C. - b) The luffing up notch microswitch is faulty. - c) The luffing up - Upper limit has operated. - d) The luffing down -lower limit has operated. - e) The brake is not open. Check the brake 's auxiliary relay."
+        },
+        {
+          "rank": 3,
+          "source_filename": "Instruction Manual.pdf",
+          "page_numbers": [
+            281
+          ],
+          "chunk_id": "CHK-001155",
+          "score": 35.1428,
+          "snippet": "Extra equipment Section D 7. MFG - MANUFACTURING NUMBER Basic limit switches - luffing winch For setting values see \"Technical Data\", section 2. After the cam settings are done, retighten the lock screws and operate the luffing movements to check all cam settings on the luffing winch. Begin at minimum jib outreach and luff out to maximum jib outreach. Measure of the \"Distance MV\", see Fig. 9. Engineering drawing Fig. 8. Luffing winch limit switches. Icon Icon - = Max. jib outreach. To by-pass this position, correct operation mode has to be selected by he…"
+        },
+        {
+          "rank": 4,
+          "source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+          "page_numbers": [
+            233
+          ],
+          "chunk_id": "CHK-001039",
+          "score": 34.0898,
+          "snippet": "Spare parts 6. Spare parts 6.5 Conductive transit boxes MacGREGOR Limit Switches in Hoisting and Luffing Winch Systems The limit switches of the hoisting and luffing winches are contained in switch boxes in the cranehouse, one box for each winch system. Every switch function is set separately by means of a rotating cam which controls a microswitch. The cams are driven by the winches through gearboxes. The location of the switch boxes is shown in the figure. The limit switch system performs the following functions: 1. Stop function - hook and jib movement…"
+        },
+        {
+          "rank": 5,
+          "source_filename": "Instruction Manual.pdf",
+          "page_numbers": [
+            278
+          ],
+          "chunk_id": "CHK-001149",
+          "score": 32.4876,
+          "snippet": "Extra equipment Section D 7. MFG - MANUFACTURING NUMBER Limit switches The limit switches of the hoisting and luffing winches are contained in limit switch boxes in the cranehouse, one box for each winch system. Every switch function is set separately by means of a rotating cam which controls a microswitch. The cams are driven by the winches through gearboxes. The limit switch system performs the following functions: 1. Stop function - hook and jib movements are halted at chosen safety limits. 2. Speed reduction - the speed of a hook or jib movement is r…"
+        }
+      ]
+    },
+    {
+      "query": "Procedure for oil filter change",
+      "before_top1": {
+        "rank": 1,
+        "source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+        "page_numbers": [
+          99
+        ],
+        "chunk_id": "CHK-000362",
+        "score": 16.63,
+        "snippet": "Spare parts Electric equipment b. Oil level Filter service indicator - -Check filter service indicator - -If necessary change filter cartridges, see instruction \"Filters\", section 5."
+      },
+      "after_top1": {
+        "rank": 1,
+        "source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+        "page_numbers": [
+          117
+        ],
+        "chunk_id": "CHK-000483",
+        "score": 29.8099,
+        "snippet": "Spare parts Hydraulic system Oil filter change Necessary equipment when changing filter cartridges: - 2 new filter cartridges with O-rings. - Spanner. - Bucket. - Put the bucket under the filter unit. Loosen the drain-plug at the bottom of the filter unit using the spanner. (size 9/16\" or 15 mm) - Loosen the filter cap using the spanner. (size 1\" or 26 mm) 3 - Remove the old filter cartridge. Install the new O-ring between the filter cap and the filter head. Install the new filter cartridge. 5 - Remove the drain-plug by hand and let the oil run into the…"
+      },
+      "after_top5": [
+        {
+          "rank": 1,
+          "source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+          "page_numbers": [
+            117
+          ],
+          "chunk_id": "CHK-000483",
+          "score": 29.8099,
+          "snippet": "Spare parts Hydraulic system Oil filter change Necessary equipment when changing filter cartridges: - 2 new filter cartridges with O-rings. - Spanner. - Bucket. - Put the bucket under the filter unit. Loosen the drain-plug at the bottom of the filter unit using the spanner. (size 9/16\" or 15 mm) - Loosen the filter cap using the spanner. (size 1\" or 26 mm) 3 - Remove the old filter cartridge. Install the new O-ring between the filter cap and the filter head. Install the new filter cartridge. 5 - Remove the drain-plug by hand and let the oil run into the…"
+        },
+        {
+          "rank": 2,
+          "source_filename": "Instruction Manual.pdf",
+          "page_numbers": [
+            131,
+            132
+          ],
+          "chunk_id": "CHK-000517",
+          "score": 29.6169,
+          "snippet": "Extra equipment Hydraulic system Oil filter change Necessary equipment when changing filter cartridges: - 2 new filter cartridges with O-rings. - Spanner. - Bucket. - Put the bucket under the filter unit. Loosen the drain-plug at the bottom of the filter unit using the spanner. (size 9/16\" or 15 mm) - Loosen the filter cap using the spanner. (size 1\" or 26 mm) 3 - Remove the old filter cartridge. Install the new O-ring between the filter cap and the filter head. Install the new filter cartridge. - Remove the drain-plug by hand and let the oil run into th…"
+        },
+        {
+          "rank": 3,
+          "source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+          "page_numbers": [
+            35
+          ],
+          "chunk_id": "CHK-000129",
+          "score": 28.8246,
+          "snippet": "2) Quantity of anti-freeze 4.4. Lubrication System 4.4.3. Oil filter cartridge replacement Every time oil exchanges, replace the oil filter cartridge. - Drain engine oil by loosening the drain plug on the filter head. - CAUTION : Don't forget tightening the drain plug after having drained engine oil . - Remove the oil filter by turning it counter-clockwise with a filter wrench. - Wipe, clean the fitting face of the body contacting with the oil filter so that new oil filter cartridge can be seated properly. - Lightly oil the O-ring and turn the oil filter…"
+        },
+        {
+          "rank": 4,
+          "source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+          "page_numbers": [
+            99
+          ],
+          "chunk_id": "CHK-000362",
+          "score": 27.75,
+          "snippet": "Spare parts Electric equipment b. Oil level Filter service indicator - -Check filter service indicator - -If necessary change filter cartridges, see instruction \"Filters\", section 5."
+        },
+        {
+          "rank": 5,
+          "source_filename": "5. AD136TI Operation and maintenance manual.pdf",
+          "page_numbers": [
+            102,
+            103
+          ],
+          "chunk_id": "CHK-000401",
+          "score": 26.6406,
+          "snippet": "3) Wear 6.3. Engine Re-assembly 6.3.28. Oil cooler & oil filter - After assembling the oil cooler onto the oil cooler housing, tighten the mounting bolts of the oil cooler assembly in the cylinder block inserting a new gasket. - Lightly oil the O-ring and turn the oil filter cartridge until its O-ring is contacted against the sealing face of the oil filter head. And then turn the oil filter cartridge 3/4~1 turn more with hands or a filter wrench. Engineering drawing Engineering drawing Engineering drawing - Connect the cooling water pipes to the water pu…"
+        }
+      ]
+    },
+    {
+      "query": "What valve 3221 do",
+      "before_top1": {
+        "rank": 1,
+        "source_filename": "Instruction Manual.pdf",
+        "page_numbers": [
+          70
+        ],
+        "chunk_id": "CHK-000224",
+        "score": 13.0485,
+        "snippet": "Extra equipment Electrical equipment Brake release Moving the control lever, eg. to the left for slewing left (anti-clockwise), will affect valve 3221. The brakes will be released and the unloading valve 3127-1 will be blocked."
+      },
+      "after_top1": {
+        "rank": 1,
+        "source_filename": "Instruction Manual.pdf",
+        "page_numbers": [
+          70
+        ],
+        "chunk_id": "CHK-000224",
+        "score": 31.4485,
+        "snippet": "Extra equipment Electrical equipment Brake release Moving the control lever, eg. to the left for slewing left (anti-clockwise), will affect valve 3221. The brakes will be released and the unloading valve 3127-1 will be blocked."
+      },
+      "after_top5": [
+        {
+          "rank": 1,
+          "source_filename": "Instruction Manual.pdf",
+          "page_numbers": [
+            70
+          ],
+          "chunk_id": "CHK-000224",
+          "score": 31.4485,
+          "snippet": "Extra equipment Electrical equipment Brake release Moving the control lever, eg. to the left for slewing left (anti-clockwise), will affect valve 3221. The brakes will be released and the unloading valve 3127-1 will be blocked."
+        },
+        {
+          "rank": 2,
+          "source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+          "page_numbers": [
+            68
+          ],
+          "chunk_id": "CHK-000239",
+          "score": 31.4485,
+          "snippet": "Spare parts Electric equipment Brake release Moving the control lever, eg, to the left for slewing left (anti-clockwise), will affect valve 3221. The brakes will be released and the unloading valve 3127-1 will be blocked."
+        },
+        {
+          "rank": 3,
+          "source_filename": "Instruction Manual.pdf",
+          "page_numbers": [
+            187
+          ],
+          "chunk_id": "CHK-000730",
+          "score": 27.7668,
+          "snippet": "Extra equipment Section D N.B. Zero setting of slewing pump - -No load in the hook. - -Start the crane. The oil temperature should be 40°C. - -Operate the directional valve 3221 manually with a small screwdriver or similar during checking and adjustment. See Fig. 7. - -Make sure that there is no slewing movement, otherwise the zero setting must be adjusted."
+        },
+        {
+          "rank": 4,
+          "source_filename": "Instruction Manual.pdf",
+          "page_numbers": [
+            187,
+            188
+          ],
+          "chunk_id": "CHK-000731",
+          "score": 23.9663,
+          "snippet": "Extra equipment Section D N.B. Zero setting - -If the crane does move, right or left, an adjustment must be made using the set screw for zero setting, see Fig. 6. - -Loosen the locking nut with a hook wrench. - -Operate the directional valve 3221 manually with a small screwdriver or similar during checking and adjustment. See Fig. 7. - -Adjust the zero setting on the slewing pump by turning the set screw. Turn the set screw clockwise or counterclockwise. See *) in note (page 7) and in Fig. 5. - Note! Do not turn the set screw more than ± 1/2 turn. - -Aft…"
+        },
+        {
+          "rank": 5,
+          "source_filename": "MacGregor_Crane_Instruction_Manual.pdf",
+          "page_numbers": [
+            369
+          ],
+          "chunk_id": "CHK-001309",
+          "score": 23.8022,
+          "snippet": "…| 388 3127-801 | F12-60 | | 3211 | Broms | Brake | | See 288 0867-801 | | 3212 | Broms | Brake | | See 288 0867-801 | | 3221 | Riktningsventil | Direction valve | 287 5950-801 | | | 3241-1 | Back-strypventil | Check-restriction valve | 489 3059-801 | | | 3241-2 | Silbricka | Strainer | 2590 4136-110 | Into 3241-1 | | 3251-1 | Strypbricka | Restriction washer | 487 6213-027 | | | 3251-2 | Silbricka | Strainer | 2590 4136-115 | |"
+        }
+      ]
+    }
+  ],
+  "cross_reference_section_first": [
+    {
+      "title": "High pressure pumps",
+      "section": "6.1",
+      "label": "High pressure pumps · section 6.1"
+    }
+  ],
+  "follow_reference_plussing_after": [
+    {
+      "rank": 1,
+      "source_filename": "Instruction Manual.pdf",
+      "page_numbers": [
+        186
+      ],
+      "chunk_id": "CHK-000728",
+      "score": 30.4482,
+      "snippet": "…- -No load in the hook. - -Park the crane or move the hook block close to the jib top. - -Stop the crane. - -Install a pressure gauge 0-400 bar at connection 5.1 on pump 2111. - -Lock the brake in closed position by closing ball valve 2661, see Fig. 4. - -Start the crane. The oil temperature should be 40°C. - -Operate the directional valve 2221 manually with a small screwdriver or similar during checking and adjustment. See Fig. 4. - -Measure the plussing pressure at connection 5.1 refer to the hydraulic circuit diagram. See Fig. 4. - -If the plussing p…"
+    },
+    {
+      "rank": 2,
+      "source_filename": "Instruction Manual.pdf",
+      "page_numbers": [
+        184,
+        185
+      ],
+      "chunk_id": "CHK-000726",
+      "score": 29.8605,
+      "snippet": "Extra equipment Section D N.B. Hoisting winch - -No load in hook. - -Stop the crane. - -Install a pressure gauge 0-400 bar at connection 3.1 on pump 1111. See Fig. 3. - -Lock the brake in closed position by closing ball valve 1663. - -Start the crane. The oil temperature should be 40°C. - -Operate directional valve 1221 manually with a small screwdriver or similar during checking and adjustment, see Fig. 3. - -Measure the plussing pressure on the pressure gauge at connection 3.1 refer to the hydraulic circuit diagram. - -If the plussing pressure is incor…"
+    },
+    {
+      "rank": 3,
+      "source_filename": "Instruction Manual.pdf",
+      "page_numbers": [
+        481
+      ],
+      "chunk_id": "CHK-001517",
+      "score": 18.5927,
+      "snippet": "Spare Parts Manual How to Order Spare Parts Factors Influencing the Lifetime of Hydraulic HOSES | Pressure relief P-port | Pressure relief P-port | Pressure relief P-port | 1111-2 | 15 MPa | 3.2 | Opening pressure | Opening pressure | Opening pressure | | Pressure relief S-port | Pressure relief S-port | Pressure relief S-port | 1111-3 | 42 MPa | 3.1 | Opening pressure | Opening pressure | Opening pressure | | Hoisting plussing S-port | Hoisting plussing S-port | Hoisting plussing S-port | 1111-4 | 10 MPa | 3.1 | +2 / -0 MPa | +2 / -0 MPa | +2 / -0 MPa |…"
+    },
+    {
+      "rank": 4,
+      "source_filename": "Instruction Manual.pdf",
+      "page_numbers": [
+        481
+      ],
+      "chunk_id": "CHK-001518",
+      "score": 18.5927,
+      "snippet": "…e of Hydraulic HOSES | Pre-loading valve | Pre-loading valve | Pre-loading valve | 1111-9 | 0.3 MPa | 3.3/3.4 | Opening pressure | Opening pressure | Opening pressure | | Pressure relief P-port | Pressure relief P-port | Pressure relief P-port | 1112-2 | 15 MPa | 3.2 | Opening pressure | Opening pressure | Opening pressure | | Pressure relief S-port | Pressure relief S-port | Pressure relief S-port | 1112-3 | 42 MPa | 3.1 | Opening pressure | Opening pressure | Opening pressure | | Hoisting plussing S-port | Hoisting plussing S-port | Hoisting plussing S…"
+    },
+    {
+      "rank": 5,
+      "source_filename": "Instruction Manual.pdf",
+      "page_numbers": [
+        481
+      ],
+      "chunk_id": "CHK-001521",
+      "score": 18.5927,
+      "snippet": "Spare Parts Manual How to Order Spare Parts Factors Influencing the Lifetime of Hydraulic HOSES | Luffing plussing S-port | Luffing plussing S-port | Luffing plussing S-port | 2111-4 | 10 MPa | 5.1 | +2 / -0 MPa | +2 / -0 MPa | +2 / -0 MPa | | Pressure cut off | Pressure cut off | Pressure cut off | 2111-8a | 30.5 MPa | 5.2 | Start of regulation Not to be adjusted | Start of regulation Not to be adjusted | Start of regulation Not to be adjusted | | Pressure cut off | Pressure cut off | Pressure cut off | 2111-8b | 30.5 MPa | 5.1 | Start of regulation | N…"
+    }
+  ]
+}

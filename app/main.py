@@ -147,7 +147,11 @@ def _authoritative_visual_entry(
             source_index = int(exact.get("source_index"))
         except (TypeError, ValueError):
             source_index = None
-    candidates = entries
+    # Without a resolvable physical picture identity, never search the whole
+    # book: that could borrow a human decision from an unrelated image.
+    if source_index is None:
+        return exact
+    candidates = []
     if source_index is not None:
         candidates = []
         for item in entries:
@@ -2709,27 +2713,32 @@ async def delete_conversion_queue_item(job_id: int, request: DeleteBookRequest) 
     """
     if not request.confirm:
         raise HTTPException(status_code=422, detail="Explicit delete confirmation is required.")
-    job = await runtime.store.get_job(job_id)
+    try:
+        job = await runtime.store.reserve_terminal_deletion(job_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if job is None:
         raise HTTPException(status_code=404, detail="Queue item not found.")
-    if str(job.get("status") or "") not in {"failed", "completed"}:
-        raise HTTPException(status_code=409, detail="Only failed or completed queue items can be removed. Wait for active conversion work to finish first.")
+    original_status = str(job.get("status") or "failed")
 
     try:
         quarantine = await asyncio.to_thread(quarantine_conversion_job, runtime.config, job)
     except OSError as exc:
+        await runtime.store.cancel_terminal_deletion(job_id, original_status)
         raise HTTPException(status_code=500, detail=f"Could not quarantine the queue item files: {exc}") from exc
 
     try:
         deleted = await runtime.store.delete_terminal_job(job_id)
     except RuntimeError as exc:
         rollback_errors = await asyncio.to_thread(restore_quarantined_artifacts, quarantine)
+        await runtime.store.cancel_terminal_deletion(job_id, original_status)
         detail = str(exc)
         if rollback_errors:
             detail += " File rollback also reported: " + "; ".join(rollback_errors)
         raise HTTPException(status_code=409, detail=detail) from exc
     except Exception as exc:
         rollback_errors = await asyncio.to_thread(restore_quarantined_artifacts, quarantine)
+        await runtime.store.cancel_terminal_deletion(job_id, original_status)
         detail = f"Queue deletion failed: {exc}"
         if rollback_errors:
             detail += " File rollback also reported: " + "; ".join(rollback_errors)

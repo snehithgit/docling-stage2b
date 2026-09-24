@@ -3266,7 +3266,8 @@ class Stage2BWorker:
         # Normalize human-reviewed entries from older builds before deciding
         # which Stage 2C routes are already complete. This never changes the
         # human text/decision; it only removes stale automatic live reasons.
-        await asyncio.to_thread(normalize_human_verified_ledger, result_dir)
+        async with self._stage2c_ledger_lock:
+            await asyncio.to_thread(normalize_human_verified_ledger, result_dir)
         ledger_path = result_dir / "correction_ledger.json"
         try:
             ledger = json.loads(ledger_path.read_text(encoding="utf-8")) if ledger_path.is_file() else {}
@@ -3481,9 +3482,10 @@ class Stage2BWorker:
         normal_indices = {int(value) for value in (plan.get("normal_picture_indices") or [])}
         suppressed_routes = await self._store.suppress_overlapping_artifact_sweeps(int(job["id"]), normal_indices)
         if suppressed_routes:
-            await asyncio.to_thread(
-                supersede_vision_entries_for_routes, result_dir, set(suppressed_routes)
-            )
+            async with self._stage2c_ledger_lock:
+                await asyncio.to_thread(
+                    supersede_vision_entries_for_routes, result_dir, set(suppressed_routes)
+                )
         created = await self._store.create_artifact_sweep_jobs(
             int(job["id"]),
             int(job.get("conversion_job_id") or 0),
@@ -3915,6 +3917,16 @@ class Stage2BWorker:
         delay = int(config.stage2b_retry_delay_seconds * (2 ** min(attempt - 1, 5)))
         return min(delay, int(config.stage2b_retry_max_delay_seconds))
 
+    async def _failure_artifact_or_none(self, job, exc, seconds, status, retry_after):
+        """Best-effort diagnostics: persistence failure must not strand DB state as processing."""
+        try:
+            return await asyncio.to_thread(
+                self._write_failure_artifact, job, exc, seconds, status, retry_after
+            )
+        except Exception:
+            logger.exception("Could not write Stage 2B failure artifact for job %s", job.get("id"))
+            return None
+
     async def _retry_or_fail(
         self,
         target: str,
@@ -3927,8 +3939,8 @@ class Stage2BWorker:
         retries_used = int(job.get("retry_count") or 0)
         max_retries = int(config.stage2b_max_retries)
         if retries_used >= max_retries:
-            artifact = await asyncio.to_thread(
-                self._write_failure_artifact, job, exc, seconds, "failed_retry_limit", None
+            artifact = await self._failure_artifact_or_none(
+                job, exc, seconds, "failed_retry_limit", None
             )
             message = f"{exc} (retry limit exhausted: {max_retries} retries)"
             await self._store.mark_failed(
@@ -3946,8 +3958,8 @@ class Stage2BWorker:
             return
 
         delay = self._retry_delay(job)
-        artifact = await asyncio.to_thread(
-            self._write_failure_artifact, job, exc, seconds, "pending_retry", delay
+        artifact = await self._failure_artifact_or_none(
+            job, exc, seconds, "pending_retry", delay
         )
         await self._store.mark_retryable(
             int(job["id"]), type(exc).__name__, str(exc), delay, artifact
@@ -3991,6 +4003,7 @@ class Stage2BWorker:
         is_artifact_sweep = self._is_artifact_sweep_job(job)
         run_mode = run_mode_override or ("auto" if self._auto_run(target) else "manual")
         started = time.monotonic()
+        claimed_here = bool(preclaimed)
         # IMPORTANT: a preclaimed artifact row is already status='processing'.
         # Keep *all* setup after that claim inside this protected region so an
         # exception cannot escape to _device_loop and orphan the row forever.
@@ -4002,7 +4015,9 @@ class Stage2BWorker:
             if not preclaimed:
                 claimed = await self._store.mark_processing(int(job["id"]), run_mode)
                 if not claimed:
-                    raise RuntimeError(f"Stage 2B job {job['id']} was no longer pending when claimed")
+                    logger.info("Stage 2B job %s lost claim race; leaving owner state untouched", job.get("id"))
+                    return
+                claimed_here = True
             job["run_mode"] = run_mode
             job["_active_stage"] = "starting"
             self.worker_state[target]["active_job_id"] = int(job["id"])
@@ -4116,8 +4131,8 @@ class Stage2BWorker:
                     self._cooldown_artifact_worker(target)
                 await self._retry_or_fail(target, job, exc, seconds)
             else:
-                artifact = await asyncio.to_thread(
-                    self._write_failure_artifact, job, exc, seconds, "failed", None
+                artifact = await self._failure_artifact_or_none(
+                    job, exc, seconds, "failed", None
                 )
                 await self._store.mark_failed(
                     int(job["id"]), type(exc).__name__, str(exc), artifact
@@ -4161,8 +4176,15 @@ class Stage2BWorker:
                 await self._retry_or_fail(target, job, exc, seconds)
         except Exception as exc:
             seconds = time.monotonic() - started
-            artifact = await asyncio.to_thread(
-                self._write_failure_artifact, job, exc, seconds, "failed", None
+            if not claimed_here:
+                logger.exception("Stage 2B setup failed before job %s was claimed; leaving it pending", job.get("id"))
+                self._notify_event(
+                    f"stage2b_{target}_setup_failed",
+                    **(await self._notification_job_context(job, error=exc)),
+                )
+                return
+            artifact = await self._failure_artifact_or_none(
+                job, exc, seconds, "failed", None
             )
             await self._store.mark_failed(
                 int(job["id"]), type(exc).__name__, str(exc), artifact

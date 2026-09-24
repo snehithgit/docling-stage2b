@@ -140,8 +140,9 @@ function applyFilters(resetPage=true) {
     if (book && job.book !== book) return false;
     if (verdict === "HUMAN_REVIEW" && !needsHumanReview(job)) return false;
     if (verdict === "HUMAN_REVIEWED" && !(job.downstream?.current_authoritative && job.downstream?.human_visual_decision)) return false;
+    if (verdict === "EVIDENCE_RECOVERY" && !job.downstream?.human_evidence_recovery_required) return false;
     if (verdict === "FAILED" && job.status !== "failed") return false;
-    if (verdict && !["FAILED", "HUMAN_REVIEW", "HUMAN_REVIEWED"].includes(verdict) && (job.classification?.verdict || job.verdict) !== verdict) return false;
+    if (verdict && !["FAILED", "HUMAN_REVIEW", "HUMAN_REVIEWED", "EVIDENCE_RECOVERY"].includes(verdict) && (job.classification?.verdict || job.verdict) !== verdict) return false;
     if (query) {
       const blob = [job.book, job.route_id, job.code, job.reason, job.source?.page, job.classification?.diagram_category, job.classification?.summary, ...(job.classification?.visible_text || []), ...(job.classification?.visible_objects || [])].join(" ").toLowerCase();
       if (!blob.includes(query)) return false;

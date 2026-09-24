@@ -1,0 +1,979 @@
+{
+  "schema": "docling-equipment-scoped-lexical-baseline/v1",
+  "note": "Each benchmark query searched only the expected source manual; this is a per-book proxy baseline before real multi-manual equipment groups are configured.",
+  "overall": {
+    "top1": 70.7,
+    "top3": 87.2,
+    "top5": 91.7,
+    "top10": 94.7,
+    "mrr": 0.7998,
+    "n": 133
+  },
+  "by_manual": {
+    "Anemometer-Anemoscope.pdf": {
+      "top1": 76.9,
+      "top3": 100.0,
+      "top5": 100.0,
+      "top10": 100.0,
+      "mrr": 0.8718,
+      "n": 13
+    },
+    "MacGregor_Crane_Instruction_Manual.pdf": {
+      "top1": 77.8,
+      "top3": 86.1,
+      "top5": 88.9,
+      "top10": 97.2,
+      "mrr": 0.8346,
+      "n": 36
+    },
+    "Instruction Manual.pdf": {
+      "top1": 62.0,
+      "top3": 84.0,
+      "top5": 92.0,
+      "top10": 94.0,
+      "mrr": 0.7501,
+      "n": 50
+    },
+    "5. AD136TI Operation and maintenance manual.pdf": {
+      "top1": 73.5,
+      "top3": 88.2,
+      "top5": 91.2,
+      "top10": 91.2,
+      "mrr": 0.8086,
+      "n": 34
+    }
+  },
+  "details": [
+    {
+      "id": "RB-67c2969b",
+      "source": "Anemometer-Anemoscope.pdf",
+      "category": "troubleshooting",
+      "rank": 1,
+      "top": "CHK-000020"
+    },
+    {
+      "id": "RB-07c5a645",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "procedure",
+      "rank": 2,
+      "top": "CHK-000703"
+    },
+    {
+      "id": "RB-02db10cb",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-000315"
+    },
+    {
+      "id": "RB-ae676354",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "cross_reference",
+      "rank": 1,
+      "top": "CHK-000631"
+    },
+    {
+      "id": "RB-afe61148",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "procedure",
+      "rank": 8,
+      "top": "CHK-000637"
+    },
+    {
+      "id": "RB-b76a7608",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "troubleshooting",
+      "rank": 9,
+      "top": "CHK-000867"
+    },
+    {
+      "id": "RB-edd07637",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "cross_reference",
+      "rank": 1,
+      "top": "CHK-001060"
+    },
+    {
+      "id": "RB-dcb1b85f",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-001336"
+    },
+    {
+      "id": "RB-558f5177",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-001402"
+    },
+    {
+      "id": "RB-c8778d72",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "technical_value",
+      "rank": 9,
+      "top": "CHK-001203"
+    },
+    {
+      "id": "RB-237d9ea2",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-001610"
+    },
+    {
+      "id": "RB-e2011e02",
+      "source": "Instruction Manual.pdf",
+      "category": "procedure",
+      "rank": 2,
+      "top": "CHK-000269"
+    },
+    {
+      "id": "RB-edb71f78",
+      "source": "Instruction Manual.pdf",
+      "category": "definition",
+      "rank": 2,
+      "top": "CHK-000254"
+    },
+    {
+      "id": "RB-e1905620",
+      "source": "Instruction Manual.pdf",
+      "category": "definition",
+      "rank": 1,
+      "top": "CHK-000425"
+    },
+    {
+      "id": "RB-d1e2a1e5",
+      "source": "Instruction Manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-000427"
+    },
+    {
+      "id": "RB-88ec638d",
+      "source": "Instruction Manual.pdf",
+      "category": "cross_reference",
+      "rank": 4,
+      "top": "CHK-000819"
+    },
+    {
+      "id": "RB-fd4e6444",
+      "source": "Instruction Manual.pdf",
+      "category": "cross_reference",
+      "rank": 1,
+      "top": "CHK-000726"
+    },
+    {
+      "id": "RB-91b916bb",
+      "source": "Instruction Manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-000863"
+    },
+    {
+      "id": "RB-3cf63708",
+      "source": "Instruction Manual.pdf",
+      "category": "technical_value",
+      "rank": null,
+      "top": "CHK-000943"
+    },
+    {
+      "id": "RB-438dfe9d",
+      "source": "Instruction Manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-000985"
+    },
+    {
+      "id": "RB-7fe1f356",
+      "source": "Instruction Manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-001165"
+    },
+    {
+      "id": "RB-974eb203",
+      "source": "Instruction Manual.pdf",
+      "category": "definition",
+      "rank": 1,
+      "top": "CHK-001196"
+    },
+    {
+      "id": "RB-c449d5f9",
+      "source": "Instruction Manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-001502"
+    },
+    {
+      "id": "RB-7873a705",
+      "source": "Instruction Manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-001798"
+    },
+    {
+      "id": "RB-52317329",
+      "source": "Instruction Manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-001844"
+    },
+    {
+      "id": "RB-9a2f1661",
+      "source": "Instruction Manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-001899"
+    },
+    {
+      "id": "RB-0149e3a0",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "troubleshooting",
+      "rank": 1,
+      "top": "CHK-000076"
+    },
+    {
+      "id": "RB-7b912a19",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-000103"
+    },
+    {
+      "id": "RB-81d3856e",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-000238"
+    },
+    {
+      "id": "RB-2696bc7b",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-000289"
+    },
+    {
+      "id": "RB-3622c809",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "technical_value",
+      "rank": null,
+      "top": "CHK-000384"
+    },
+    {
+      "id": "RB-c4908e42",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "procedure",
+      "rank": 2,
+      "top": "CHK-000264"
+    },
+    {
+      "id": "RB-6bffc200",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-000518"
+    },
+    {
+      "id": "RB-a05ceb24",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "cross_reference",
+      "rank": 1,
+      "top": "CHK-000576"
+    },
+    {
+      "id": "RB-58eef2b4",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-000610"
+    },
+    {
+      "id": "RB-6bb1e752",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-000672"
+    },
+    {
+      "id": "RB-183ff34b",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-000233"
+    },
+    {
+      "id": "RB-5846415d",
+      "source": "Instruction Manual.pdf",
+      "category": "cross_reference",
+      "rank": 5,
+      "top": "CHK-000728"
+    },
+    {
+      "id": "RB-0a3a5120",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "technical_value",
+      "rank": 3,
+      "top": "CHK-000743"
+    },
+    {
+      "id": "RB-79e0336d",
+      "source": "Anemometer-Anemoscope.pdf",
+      "category": "troubleshooting",
+      "rank": 1,
+      "top": "CHK-000021"
+    },
+    {
+      "id": "RB-9b205b9a",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "troubleshooting",
+      "rank": 1,
+      "top": "CHK-000583"
+    },
+    {
+      "id": "RB-fbfd3d95",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "technical_value",
+      "rank": 4,
+      "top": "CHK-000103"
+    },
+    {
+      "id": "RB-78323d63",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-000522"
+    },
+    {
+      "id": "RB-474c3308",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "technical_value",
+      "rank": null,
+      "top": "CHK-000143"
+    },
+    {
+      "id": "RB-9c3484c0",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-000334"
+    },
+    {
+      "id": "RB-1e188ba6",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-000389"
+    },
+    {
+      "id": "RB-a2a9f639",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-000742"
+    },
+    {
+      "id": "RB-7da235e2",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-000705"
+    },
+    {
+      "id": "RB-95a6d000",
+      "source": "Instruction Manual.pdf",
+      "category": "cross_reference",
+      "rank": 1,
+      "top": "CHK-000393"
+    },
+    {
+      "id": "RB-98199b3c",
+      "source": "Instruction Manual.pdf",
+      "category": "troubleshooting",
+      "rank": 1,
+      "top": "CHK-001091"
+    },
+    {
+      "id": "RB-918c11d8",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "confusion",
+      "rank": 1,
+      "top": "CHK-000233"
+    },
+    {
+      "id": "RB-6c6b9502",
+      "source": "Instruction Manual.pdf",
+      "category": "confusion",
+      "rank": 2,
+      "top": "CHK-001190"
+    },
+    {
+      "id": "RB-980df51e",
+      "source": "Anemometer-Anemoscope.pdf",
+      "category": "confusion",
+      "rank": 1,
+      "top": "CHK-000020"
+    },
+    {
+      "id": "RB-ab2d14d7",
+      "source": "Anemometer-Anemoscope.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-000003"
+    },
+    {
+      "id": "RB-0d12f002",
+      "source": "Anemometer-Anemoscope.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-000004"
+    },
+    {
+      "id": "RB-28c87219",
+      "source": "Anemometer-Anemoscope.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-000007"
+    },
+    {
+      "id": "RB-1f1bcfa5",
+      "source": "Anemometer-Anemoscope.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-000008"
+    },
+    {
+      "id": "RB-9b678a13",
+      "source": "Anemometer-Anemoscope.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-000009"
+    },
+    {
+      "id": "RB-1759c221",
+      "source": "Anemometer-Anemoscope.pdf",
+      "category": "procedure",
+      "rank": 2,
+      "top": "CHK-000019"
+    },
+    {
+      "id": "RB-05363430",
+      "source": "Anemometer-Anemoscope.pdf",
+      "category": "definition",
+      "rank": 2,
+      "top": "CHK-000010"
+    },
+    {
+      "id": "RB-c48ab2ac",
+      "source": "Anemometer-Anemoscope.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-000018"
+    },
+    {
+      "id": "RB-925cfdce",
+      "source": "Anemometer-Anemoscope.pdf",
+      "category": "troubleshooting",
+      "rank": 3,
+      "top": "CHK-000010"
+    },
+    {
+      "id": "RB-8160264c",
+      "source": "Anemometer-Anemoscope.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-000030"
+    },
+    {
+      "id": "RB-9e739899",
+      "source": "Instruction Manual.pdf",
+      "category": "troubleshooting",
+      "rank": 1,
+      "top": "CHK-000072"
+    },
+    {
+      "id": "RB-edade6aa",
+      "source": "Instruction Manual.pdf",
+      "category": "procedure",
+      "rank": 2,
+      "top": "CHK-000546"
+    },
+    {
+      "id": "RB-92cdd677",
+      "source": "Instruction Manual.pdf",
+      "category": "troubleshooting",
+      "rank": 1,
+      "top": "CHK-000217"
+    },
+    {
+      "id": "RB-ed6c88ea",
+      "source": "Instruction Manual.pdf",
+      "category": "troubleshooting",
+      "rank": 1,
+      "top": "CHK-000259"
+    },
+    {
+      "id": "RB-3b4e0e1a",
+      "source": "Instruction Manual.pdf",
+      "category": "cross_reference",
+      "rank": 6,
+      "top": "CHK-000708"
+    },
+    {
+      "id": "RB-e60d27af",
+      "source": "Instruction Manual.pdf",
+      "category": "troubleshooting",
+      "rank": 2,
+      "top": "CHK-000277"
+    },
+    {
+      "id": "RB-32e72003",
+      "source": "Instruction Manual.pdf",
+      "category": "cross_reference",
+      "rank": 1,
+      "top": "CHK-000410"
+    },
+    {
+      "id": "RB-614a3bf6",
+      "source": "Instruction Manual.pdf",
+      "category": "procedure",
+      "rank": 2,
+      "top": "CHK-000924"
+    },
+    {
+      "id": "RB-16dcb68c",
+      "source": "Instruction Manual.pdf",
+      "category": "procedure",
+      "rank": 2,
+      "top": "CHK-000530"
+    },
+    {
+      "id": "RB-21ea395c",
+      "source": "Instruction Manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-000533"
+    },
+    {
+      "id": "RB-e065f229",
+      "source": "Instruction Manual.pdf",
+      "category": "procedure",
+      "rank": 2,
+      "top": "CHK-000542"
+    },
+    {
+      "id": "RB-c8ae8db6",
+      "source": "Instruction Manual.pdf",
+      "category": "troubleshooting",
+      "rank": 4,
+      "top": "CHK-000870"
+    },
+    {
+      "id": "RB-a30f96e6",
+      "source": "Instruction Manual.pdf",
+      "category": "procedure",
+      "rank": 19,
+      "top": "CHK-000440"
+    },
+    {
+      "id": "RB-610c7444",
+      "source": "Instruction Manual.pdf",
+      "category": "troubleshooting",
+      "rank": 1,
+      "top": "CHK-000708"
+    },
+    {
+      "id": "RB-01123f8d",
+      "source": "Instruction Manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-000728"
+    },
+    {
+      "id": "RB-fb6e631c",
+      "source": "Instruction Manual.pdf",
+      "category": "procedure",
+      "rank": 3,
+      "top": "CHK-000741"
+    },
+    {
+      "id": "RB-f556090f",
+      "source": "Instruction Manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-000827"
+    },
+    {
+      "id": "RB-46a299df",
+      "source": "Instruction Manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-000877"
+    },
+    {
+      "id": "RB-e96d6d0a",
+      "source": "Instruction Manual.pdf",
+      "category": "technical_value",
+      "rank": 4,
+      "top": "CHK-000951"
+    },
+    {
+      "id": "RB-148ac348",
+      "source": "Instruction Manual.pdf",
+      "category": "troubleshooting",
+      "rank": 1,
+      "top": "CHK-001090"
+    },
+    {
+      "id": "RB-a7b8d851",
+      "source": "Instruction Manual.pdf",
+      "category": "troubleshooting",
+      "rank": 1,
+      "top": "CHK-001145"
+    },
+    {
+      "id": "RB-8c867174",
+      "source": "Instruction Manual.pdf",
+      "category": "cross_reference",
+      "rank": null,
+      "top": "CHK-001190"
+    },
+    {
+      "id": "RB-9009a3be",
+      "source": "Instruction Manual.pdf",
+      "category": "definition",
+      "rank": 2,
+      "top": "CHK-001185"
+    },
+    {
+      "id": "RB-94db25e7",
+      "source": "Instruction Manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-001209"
+    },
+    {
+      "id": "RB-e9363ea6",
+      "source": "Instruction Manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-001211"
+    },
+    {
+      "id": "RB-3ac5e97a",
+      "source": "Instruction Manual.pdf",
+      "category": "troubleshooting",
+      "rank": 2,
+      "top": "CHK-000259"
+    },
+    {
+      "id": "RB-90ef4619",
+      "source": "Instruction Manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-001362"
+    },
+    {
+      "id": "RB-cbd62d88",
+      "source": "Instruction Manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-001384"
+    },
+    {
+      "id": "RB-89f19b2a",
+      "source": "Instruction Manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-001519"
+    },
+    {
+      "id": "RB-42d5e432",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "troubleshooting",
+      "rank": 2,
+      "top": "CHK-000260"
+    },
+    {
+      "id": "RB-35823480",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "troubleshooting",
+      "rank": 1,
+      "top": "CHK-000076"
+    },
+    {
+      "id": "RB-b0400d39",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-000190"
+    },
+    {
+      "id": "RB-f1292061",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-000192"
+    },
+    {
+      "id": "RB-9cff048c",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "troubleshooting",
+      "rank": 1,
+      "top": "CHK-000229"
+    },
+    {
+      "id": "RB-77c75266",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "definition",
+      "rank": 1,
+      "top": "CHK-000260"
+    },
+    {
+      "id": "RB-16520ecc",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "troubleshooting",
+      "rank": 1,
+      "top": "CHK-000284"
+    },
+    {
+      "id": "RB-60b5585b",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "troubleshooting",
+      "rank": null,
+      "top": "CHK-000709"
+    },
+    {
+      "id": "RB-dffd35f1",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-000352"
+    },
+    {
+      "id": "RB-8dc41e1b",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "procedure",
+      "rank": 2,
+      "top": "CHK-000362"
+    },
+    {
+      "id": "RB-f8c0799a",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-000483"
+    },
+    {
+      "id": "RB-ee485c48",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-000497"
+    },
+    {
+      "id": "RB-e25be4a1",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "cross_reference",
+      "rank": 1,
+      "top": "CHK-000593"
+    },
+    {
+      "id": "RB-61856cc7",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "technical_value",
+      "rank": 5,
+      "top": "CHK-000144"
+    },
+    {
+      "id": "RB-7f3fe259",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-000710"
+    },
+    {
+      "id": "RB-0501f29d",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-000716"
+    },
+    {
+      "id": "RB-54a4b3a9",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-000745"
+    },
+    {
+      "id": "RB-90c9467e",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-000753"
+    },
+    {
+      "id": "RB-b84cb627",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "troubleshooting",
+      "rank": 1,
+      "top": "CHK-000865"
+    },
+    {
+      "id": "RB-5c9c593d",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-001337"
+    },
+    {
+      "id": "RB-33617f2b",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "procedure",
+      "rank": 3,
+      "top": "CHK-000065"
+    },
+    {
+      "id": "RB-54d01341",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "technical_value",
+      "rank": 13,
+      "top": "CHK-000112"
+    },
+    {
+      "id": "RB-583ac3c0",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-000119"
+    },
+    {
+      "id": "RB-504c8169",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-000221"
+    },
+    {
+      "id": "RB-22fb16ac",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "troubleshooting",
+      "rank": 1,
+      "top": "CHK-000240"
+    },
+    {
+      "id": "RB-69535ffe",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "definition",
+      "rank": 2,
+      "top": "CHK-000077"
+    },
+    {
+      "id": "RB-580b2879",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-000272"
+    },
+    {
+      "id": "RB-8e6813c8",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-000370"
+    },
+    {
+      "id": "RB-746d37af",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-000393"
+    },
+    {
+      "id": "RB-21606190",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-000420"
+    },
+    {
+      "id": "RB-3c652f15",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "technical_value",
+      "rank": 2,
+      "top": "CHK-000423"
+    },
+    {
+      "id": "RB-f218a8cb",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "definition",
+      "rank": 1,
+      "top": "CHK-000559"
+    },
+    {
+      "id": "RB-cb727414",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-000561"
+    },
+    {
+      "id": "RB-637edfe9",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "procedure",
+      "rank": 1,
+      "top": "CHK-000606"
+    },
+    {
+      "id": "RB-544f6b18",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-000673"
+    },
+    {
+      "id": "RB-ccb591f9",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-000678"
+    },
+    {
+      "id": "RB-459b3217",
+      "source": "5. AD136TI Operation and maintenance manual.pdf",
+      "category": "technical_value",
+      "rank": 1,
+      "top": "CHK-000784"
+    },
+    {
+      "id": "RB-f1e12dfa",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "confusion",
+      "rank": 1,
+      "top": "CHK-000229"
+    },
+    {
+      "id": "RB-ee25b554",
+      "source": "Instruction Manual.pdf",
+      "category": "confusion",
+      "rank": 1,
+      "top": "CHK-000242"
+    },
+    {
+      "id": "RB-9e4d3792",
+      "source": "MacGregor_Crane_Instruction_Manual.pdf",
+      "category": "confusion",
+      "rank": 1,
+      "top": "CHK-000710"
+    },
+    {
+      "id": "RB-b7b9bbf0",
+      "source": "Instruction Manual.pdf",
+      "category": "confusion",
+      "rank": 1,
+      "top": "CHK-001261"
+    }
+  ]
+}

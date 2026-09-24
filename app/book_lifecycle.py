@@ -93,7 +93,11 @@ def quarantine_book_artifacts(config: Any, book: dict[str, Any]) -> dict[str, An
         "note": "Book removed from the active pipeline. Files were quarantined, not destroyed.",
     }
     manifest_path = _unique_target(manifest_dir, f"{prefix}__deletion.json")
-    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    try:
+        manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    except OSError:
+        restore_quarantined_artifacts({"moves": moves, "manifest": ""})
+        raise
     return {"moves": moves, "manifest": str(manifest_path)}
 
 
@@ -161,6 +165,9 @@ def restore_quarantined_artifacts(quarantine: dict[str, Any]) -> list[str]:
             continue
         try:
             destination.parent.mkdir(parents=True, exist_ok=True)
+            if destination.exists():
+                errors.append(f"{source} -> {destination}: destination already exists; rollback refused")
+                continue
             shutil.move(str(source), str(destination))
         except OSError as exc:
             errors.append(f"{source} -> {destination}: {exc}")

@@ -874,12 +874,12 @@ class Stage2BStore:
                           -- may be stored under either historical worker target.
                           SUM(CASE WHEN target='pi5' AND status='pending' THEN 1 ELSE 0 END) AS pi5_pending,
                           SUM(CASE WHEN status='processing' AND (CASE WHEN code='FULL_TECHNICAL_VISUAL' THEN COALESCE(claimed_by,target) ELSE target END)='pi5' THEN 1 ELSE 0 END) AS pi5_processing,
-                          SUM(CASE WHEN target='pi5' AND status='completed' THEN 1 ELSE 0 END) AS pi5_completed,
-                          SUM(CASE WHEN target='pi5' AND status='failed' THEN 1 ELSE 0 END) AS pi5_failed,
+                          SUM(CASE WHEN status='completed' AND (CASE WHEN code='FULL_TECHNICAL_VISUAL' THEN COALESCE(claimed_by,target) ELSE target END)='pi5' THEN 1 ELSE 0 END) AS pi5_completed,
+                          SUM(CASE WHEN status='failed' AND (CASE WHEN code='FULL_TECHNICAL_VISUAL' THEN COALESCE(claimed_by,target) ELSE target END)='pi5' THEN 1 ELSE 0 END) AS pi5_failed,
                           SUM(CASE WHEN target='oneplus' AND status='pending' THEN 1 ELSE 0 END) AS oneplus_pending,
                           SUM(CASE WHEN status='processing' AND (CASE WHEN code='FULL_TECHNICAL_VISUAL' THEN COALESCE(claimed_by,target) ELSE target END)='oneplus' THEN 1 ELSE 0 END) AS oneplus_processing,
-                          SUM(CASE WHEN target='oneplus' AND status='completed' THEN 1 ELSE 0 END) AS oneplus_completed,
-                          SUM(CASE WHEN target='oneplus' AND status='failed' THEN 1 ELSE 0 END) AS oneplus_failed,
+                          SUM(CASE WHEN status='completed' AND (CASE WHEN code='FULL_TECHNICAL_VISUAL' THEN COALESCE(claimed_by,target) ELSE target END)='oneplus' THEN 1 ELSE 0 END) AS oneplus_completed,
+                          SUM(CASE WHEN status='failed' AND (CASE WHEN code='FULL_TECHNICAL_VISUAL' THEN COALESCE(claimed_by,target) ELSE target END)='oneplus' THEN 1 ELSE 0 END) AS oneplus_failed,
 
                           -- User-facing logical work types. Keep these independent from the worker
                           -- lane because artifact work stealing means the stored target is not the

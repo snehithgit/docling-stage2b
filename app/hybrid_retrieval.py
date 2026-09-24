@@ -5,7 +5,7 @@ import json
 import math
 import re
 import time
-import threading
+import uuid
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
@@ -13,13 +13,14 @@ from typing import Any, Iterable
 import httpx
 import numpy as np
 
+from .equipment_index_lock import EQUIPMENT_INDEX_SWAP_LOCK
 from .retrieval import _load_index, _snippet, _tokens, diversify_results, extract_cross_references, search_indices
 
 _SCHEMA = "docling-hybrid-embedding-index/v1"
 
 # A rebuild publishes three coupled files. Serialize publication and query-side
 # snapshots so a request can never combine files from different generations.
-_EQUIPMENT_INDEX_SWAP_LOCK = threading.RLock()
+_EQUIPMENT_INDEX_SWAP_LOCK = EQUIPMENT_INDEX_SWAP_LOCK
 
 _STRUCTURED_IDENTIFIER_RE = re.compile(
     r"\+?[A-Za-z0-9]+(?:[._/:+~\-][A-Za-z0-9]+)+|[A-Za-z]+\d+[A-Za-z0-9]*|\d+[A-Za-z]+[A-Za-z0-9]*",
@@ -753,13 +754,14 @@ def build_equipment_embedding_index(
         "elapsed_seconds": round(time.perf_counter() - started, 3),
     }
     # Prepare the complete generation before taking the publication lock.
-    tmp_vec = vec_path.with_suffix(vec_path.suffix + ".tmp")
+    generation_token = uuid.uuid4().hex
+    tmp_vec = vec_path.with_suffix(vec_path.suffix + f".{generation_token}.tmp")
     matrix.tofile(tmp_vec)
-    tmp_rows = rows_path.with_suffix(rows_path.suffix + ".tmp")
+    tmp_rows = rows_path.with_suffix(rows_path.suffix + f".{generation_token}.tmp")
     with tmp_rows.open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-    tmp_meta = meta_path.with_suffix(meta_path.suffix + ".tmp")
+    tmp_meta = meta_path.with_suffix(meta_path.suffix + f".{generation_token}.tmp")
     tmp_meta.write_text(json.dumps(metadata, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     with _EQUIPMENT_INDEX_SWAP_LOCK:
         tmp_vec.replace(vec_path)

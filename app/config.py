@@ -417,8 +417,8 @@ class AppConfig:
             raise ValueError("Stage 2B polling interval must be at least one second")
         if self.stage2b_request_timeout_seconds < 30:
             raise ValueError("Stage 2B request timeout must be at least 30 seconds")
-        if self.stage2b_pi5_job_timeout_seconds < self.stage2b_request_timeout_seconds:
-            raise ValueError("Pi5 job timeout must be >= Stage 2B request timeout")
+        if self.stage2b_pi5_job_timeout_seconds < self.stage2b_request_timeout_seconds + 30:
+            raise ValueError("Pi5 job timeout must be at least 30 seconds greater than the Stage 2B request timeout")
         if self.stage2b_oneplus_first_token_timeout_seconds < 30:
             raise ValueError("OnePlus first-token timeout must be at least 30 seconds")
         if self.stage2b_oneplus_stream_idle_timeout_seconds < 30:

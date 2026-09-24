@@ -2541,9 +2541,9 @@ class PostprocessWorker:
         config = self._config_getter()
         output_path = Path(config.output_dir) / job["output_filename"]
         started = time.monotonic()
-        await self._store.mark_processing(job["id"])
-        self._events.notify("postprocess_started")
         try:
+            await self._store.mark_processing(job["id"])
+            self._events.notify("postprocess_started")
             if not output_path.is_file():
                 raise FileNotFoundError(f"Converted ZIP not found: {output_path}")
             output_sha = await asyncio.to_thread(sha256_file, output_path)

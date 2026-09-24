@@ -8,6 +8,8 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
+COPY tools/stamp_ui_version.py ./tools/stamp_ui_version.py
+RUN python ./tools/stamp_ui_version.py
 COPY mobile ./mobile
 RUN chmod 755 /app/mobile/oneplus-llama-control
 COPY config.example.yaml ./config.example.yaml

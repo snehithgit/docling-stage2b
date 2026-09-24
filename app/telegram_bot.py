@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 from datetime import datetime
 from typing import Awaitable, Callable, Any
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 def _utf16_len(value: str) -> int:
@@ -264,8 +267,8 @@ class TelegramBotService:
                     if reply_markup and index == len(chunks) - 1:
                         payload["reply_markup"] = reply_markup
                     last = await self._api("sendMessage", payload)
-                except (httpx.HTTPError, ValueError):
-                    pass
+                except (httpx.HTTPError, ValueError) as exc:
+                    logger.warning("Telegram sendMessage failed for chat %s: %s", target, exc)
         return last
 
     async def send_photo(self, image: bytes, mime_type: str, caption: str, chat_id: int, *, reply_markup: dict | None = None) -> dict:
@@ -292,7 +295,8 @@ class TelegramBotService:
                     payload["entities"] = extra_entities
                 await self._api("sendMessage", payload)
             return result
-        except (httpx.HTTPError, ValueError):
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("Telegram sendPhoto failed for chat %s; falling back to text: %s", chat_id, exc)
             return await self.send(caption, chat_id, reply_markup=reply_markup)
 
     @staticmethod

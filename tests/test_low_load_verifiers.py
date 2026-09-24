@@ -8,7 +8,7 @@ import pytest
 from app.config import AppConfig
 from app.stage2b import Stage2BWorker, _text_segments, _inspect_pi5_bounded, _merge_vision
 from app.verifier_checkpoint import CheckpointVerifier
-from app.verifier_clients import GroqVisionVerifier, OpenAICompatibleVerifier
+from app.verifier_clients import GroqStructuredVerifier, GroqVisionVerifier, OpenAICompatibleVerifier
 
 
 @pytest.mark.asyncio
@@ -313,3 +313,40 @@ async def test_local_verifier_http_client_is_context_managed_per_call(monkeypatc
     verifier = OpenAICompatibleVerifier("http://pi5.test:8080")
     await verifier.chat_text("system", "user")
     assert state == {"entered": 1, "exited": 1}
+
+
+@pytest.mark.asyncio
+async def test_groq_structured_text_constructs_http_client(monkeypatch):
+    captured = {}
+    class Response:
+        status_code = 200; headers = {}; content = b"yes"; is_success = True
+        def json(self): return {"choices":[{"message":{"content":"{\"ok\":true}"}}], "usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}}
+        def raise_for_status(self): return None
+    class Client:
+        def __init__(self, *args, **kwargs): captured["constructed"] = True
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): return None
+        async def post(self, url, json=None): captured["url"] = url; return Response()
+    monkeypatch.setattr("app.verifier_clients.httpx.AsyncClient", Client)
+    verifier = GroqStructuredVerifier("https://api.groq.test/openai/v1", "secret", "model")
+    body = await verifier.chat_text("system", "user")
+    assert captured["constructed"] is True
+    assert captured["url"].endswith("/chat/completions")
+    assert body["choices"][0]["message"]["content"] == '{"ok":true}'
+
+@pytest.mark.asyncio
+async def test_groq_structured_text_releases_reservation_on_client_failure(monkeypatch):
+    class Client:
+        def __init__(self, *args, **kwargs): pass
+        async def __aenter__(self): raise RuntimeError("client enter failed")
+        async def __aexit__(self, *args): return None
+    class Guard:
+        def __init__(self): self.released = []
+        async def reserve_request(self, tokens): return {"reservation_id":"r1"}
+        async def release_reservation(self, rid): self.released.append(rid)
+    guard = Guard()
+    monkeypatch.setattr("app.verifier_clients.httpx.AsyncClient", Client)
+    verifier = GroqStructuredVerifier("https://api.groq.test/openai/v1", "secret", "model", quota_guard=guard)
+    with pytest.raises(RuntimeError, match="client enter failed"):
+        await verifier.chat_text("system", "user")
+    assert guard.released == ["r1"]

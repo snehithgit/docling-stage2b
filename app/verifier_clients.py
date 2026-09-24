@@ -60,7 +60,7 @@ class GroqStructuredVerifier:
     async def _reserved_client(self, reservation_id: str | None):
         """Cover client enter and the HTTP call with reservation cleanup."""
         try:
-            async with self._reserved_client(reservation_id) as client:
+            async with httpx.AsyncClient(timeout=self.timeout, headers=self._headers()) as client:
                 yield client
         except BaseException:
             if self.quota_guard is not None and hasattr(self.quota_guard, "release_reservation"):
@@ -80,13 +80,7 @@ class GroqStructuredVerifier:
                     await self.quota_guard.before_request(0)
             async with self._reserved_client(reservation_id) as client:
                 started = time.monotonic()
-                try:
-                    response = await client.get(f"{self.base_url}/models/{self.default_model}")
-                except BaseException:
-                    if self.quota_guard is not None:
-                        if hasattr(self.quota_guard, "release_reservation"):
-                            await self.quota_guard.release_reservation(reservation_id)
-                    raise
+                response = await client.get(f"{self.base_url}/models/{self.default_model}")
                 if self.quota_guard is not None:
                     await self.quota_guard.record_response(
                         response, model=self.default_model, usage_tokens=0, call_kind="health",
@@ -151,13 +145,7 @@ class GroqStructuredVerifier:
                 await self.quota_guard.before_request(estimated_tokens)
         async with self._reserved_client(reservation_id) as client:
             started = time.monotonic()
-            try:
-                response = await client.post(f"{self.base_url}/chat/completions", json=payload)
-            except BaseException:
-                if self.quota_guard is not None:
-                    if hasattr(self.quota_guard, "release_reservation"):
-                            await self.quota_guard.release_reservation(reservation_id)
-                raise
+            response = await client.post(f"{self.base_url}/chat/completions", json=payload)
             latency = time.monotonic() - started
             body: dict[str, Any] = {}
             if response.content:
@@ -331,13 +319,7 @@ class GroqVisionVerifier:
                 await self.quota_guard.before_request(estimated_tokens)
         async with self._reserved_client(reservation_id) as client:
             started = time.monotonic()
-            try:
-                response = await client.post(f"{self.base_url}/chat/completions", json=payload)
-            except BaseException:
-                if self.quota_guard is not None:
-                    if hasattr(self.quota_guard, "release_reservation"):
-                            await self.quota_guard.release_reservation(reservation_id)
-                raise
+            response = await client.post(f"{self.base_url}/chat/completions", json=payload)
             latency = time.monotonic() - started
             body: dict[str, Any] = {}
             if response.content:

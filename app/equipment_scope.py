@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .equipment_index_lock import EQUIPMENT_INDEX_SWAP_LOCK
+
 SCHEMA = "docling-equipment-registry/v1"
 _REGISTRY_LOCK = threading.RLock()
 
@@ -235,8 +237,9 @@ def _delete_equipment_unlocked(processed_dir: Path, equipment_id: str) -> bool:
     # that can never be selected again. Remove it immediately instead of
     # requiring the stale-file maintenance action later.
     index_dir = Path(processed_dir) / "equipment_embedding_index" / target
-    if index_dir.is_dir():
-        shutil.rmtree(index_dir)
+    with EQUIPMENT_INDEX_SWAP_LOCK:
+        if index_dir.is_dir():
+            shutil.rmtree(index_dir)
     return True
 
 
@@ -290,10 +293,11 @@ def _remove_manual_from_equipment_unlocked(processed_dir: Path, postprocess_job_
 
     if removed:
         save_registry(processed_dir, {"equipment": kept_equipment})
-        for equipment_id in affected:
-            index_dir = Path(processed_dir) / "equipment_embedding_index" / equipment_id
-            if index_dir.is_dir():
-                shutil.rmtree(index_dir)
+        with EQUIPMENT_INDEX_SWAP_LOCK:
+            for equipment_id in affected:
+                index_dir = Path(processed_dir) / "equipment_embedding_index" / equipment_id
+                if index_dir.is_dir():
+                    shutil.rmtree(index_dir)
 
     return {
         "removed_assignments": removed,

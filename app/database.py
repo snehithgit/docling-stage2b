@@ -315,6 +315,38 @@ class JobStore:
             row = connection.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
             return dict(row) if row else None
 
+    async def reserve_terminal_deletion(self, job_id: int) -> dict[str, Any] | None:
+        return await self._run(self._reserve_terminal_deletion_sync, job_id)
+
+    def _reserve_terminal_deletion_sync(self, job_id: int) -> dict[str, Any] | None:
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            if row is None:
+                return None
+            if str(row["status"] or "") not in {"failed", "completed"}:
+                raise RuntimeError("Only failed or completed queue items can be removed. Wait for active conversion work to finish first.")
+            try:
+                managed = connection.execute(
+                    "SELECT id FROM postprocess_jobs WHERE conversion_job_id = ? LIMIT 1", (job_id,)
+                ).fetchone()
+            except sqlite3.OperationalError:
+                managed = None
+            if managed is not None:
+                raise RuntimeError("This conversion already belongs to a managed book. Delete the book through the book lifecycle instead.")
+            original = dict(row)
+            cursor = connection.execute(
+                "UPDATE jobs SET status='deleting' WHERE id=? AND status IN ('failed','completed')", (job_id,)
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("Queue item changed state before deletion could be reserved.")
+            return original
+
+    async def cancel_terminal_deletion(self, job_id: int, original_status: str) -> None:
+        await self._run(self._execute_sync,
+            "UPDATE jobs SET status=? WHERE id=? AND status='deleting'",
+            (original_status, job_id))
+
     async def delete_terminal_job(self, job_id: int) -> dict[str, Any] | None:
         """Delete a queue-only failed/completed conversion atomically.
 
@@ -331,7 +363,7 @@ class JobStore:
             if row is None:
                 return None
             status = str(row["status"] or "")
-            if status not in {"failed", "completed"}:
+            if status not in {"failed", "completed", "deleting"}:
                 raise RuntimeError("Only failed or completed queue items can be removed. Wait for active conversion work to finish first.")
             try:
                 managed = connection.execute(
