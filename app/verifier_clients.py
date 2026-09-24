@@ -5,6 +5,7 @@ import base64
 import inspect
 import json
 import time
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -55,6 +56,17 @@ class GroqStructuredVerifier:
             raise ValueError("Groq API key is not configured")
         return {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
 
+    @asynccontextmanager
+    async def _reserved_client(self, reservation_id: str | None):
+        """Cover client enter and the HTTP call with reservation cleanup."""
+        try:
+            async with self._reserved_client(reservation_id) as client:
+                yield client
+        except BaseException:
+            if self.quota_guard is not None and hasattr(self.quota_guard, "release_reservation"):
+                await self.quota_guard.release_reservation(reservation_id)
+            raise
+
     async def health(self) -> EndpointHealth:
         if not self.api_key:
             return EndpointHealth(False, model=self.default_model, detail="GROQ_API_KEY not configured")
@@ -66,7 +78,7 @@ class GroqStructuredVerifier:
                     reservation_id = reservation.get("reservation_id")
                 else:
                     await self.quota_guard.before_request(0)
-            async with httpx.AsyncClient(timeout=self.timeout, headers=self._headers()) as client:
+            async with self._reserved_client(reservation_id) as client:
                 started = time.monotonic()
                 try:
                     response = await client.get(f"{self.base_url}/models/{self.default_model}")
@@ -137,7 +149,7 @@ class GroqStructuredVerifier:
                 reservation_id = reservation.get("reservation_id")
             else:
                 await self.quota_guard.before_request(estimated_tokens)
-        async with httpx.AsyncClient(timeout=self.timeout, headers=self._headers()) as client:
+        async with self._reserved_client(reservation_id) as client:
             started = time.monotonic()
             try:
                 response = await client.post(f"{self.base_url}/chat/completions", json=payload)
@@ -243,6 +255,16 @@ class GroqVisionVerifier:
             raise ValueError("Groq API key is not configured")
         return {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
 
+    @asynccontextmanager
+    async def _reserved_client(self, reservation_id: str | None):
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout, headers=self._headers()) as client:
+                yield client
+        except BaseException:
+            if self.quota_guard is not None and hasattr(self.quota_guard, "release_reservation"):
+                await self.quota_guard.release_reservation(reservation_id)
+            raise
+
     async def health(self) -> EndpointHealth:
         if not self.api_key:
             return EndpointHealth(False, model=self.default_model, detail="GROQ_API_KEY not configured")
@@ -307,7 +329,7 @@ class GroqVisionVerifier:
                 reservation_id = reservation.get("reservation_id")
             else:
                 await self.quota_guard.before_request(estimated_tokens)
-        async with httpx.AsyncClient(timeout=self.timeout, headers=self._headers()) as client:
+        async with self._reserved_client(reservation_id) as client:
             started = time.monotonic()
             try:
                 response = await client.post(f"{self.base_url}/chat/completions", json=payload)

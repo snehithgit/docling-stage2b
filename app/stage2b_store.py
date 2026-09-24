@@ -90,6 +90,7 @@ class Stage2BStore:
                     artifact_path TEXT,
                     error_type TEXT,
                     error_message TEXT,
+                    claimed_by TEXT,
                     is_current INTEGER NOT NULL DEFAULT 1,
                     UNIQUE(postprocess_job_id, generation, route_id, target)
                 )"""
@@ -102,6 +103,8 @@ class Stage2BStore:
                 conn.execute("ALTER TABLE verification_jobs ADD COLUMN next_attempt_at TEXT")
             if "priority_score" not in columns:
                 conn.execute("ALTER TABLE verification_jobs ADD COLUMN priority_score INTEGER NOT NULL DEFAULT 0")
+            if "claimed_by" not in columns:
+                conn.execute("ALTER TABLE verification_jobs ADD COLUMN claimed_by TEXT")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_verification_runnable ON verification_jobs(target, is_current, status, authorized, next_attempt_at)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_verification_postprocess ON verification_jobs(postprocess_job_id, is_current)")
             conn.execute("""CREATE TABLE IF NOT EXISTS stage2b_migrations (
@@ -462,9 +465,9 @@ class Stage2BStore:
                 """UPDATE verification_jobs
                    SET status='processing', started_at=?, completed_at=NULL,
                        attempt_count=attempt_count+1, run_mode='artifact_shared',
-                       next_attempt_at=NULL, error_type=NULL, error_message=NULL
+                       next_attempt_at=NULL, error_type=NULL, error_message=NULL, claimed_by=?
                    WHERE id=? AND is_current=1 AND status='pending' AND authorized=1""",
-                (now, job_id),
+                (now, worker, job_id),
             )
             if not cursor.rowcount:
                 return None
@@ -472,6 +475,7 @@ class Stage2BStore:
             claimed["status"] = "processing"
             claimed["run_mode"] = "artifact_shared"
             claimed["attempt_count"] = int(claimed.get("attempt_count") or 0) + 1
+            claimed["claimed_by"] = worker
             claimed["_artifact_worker"] = worker
             claimed["_preclaimed_processing"] = True
             return claimed
@@ -869,11 +873,11 @@ class Stage2BStore:
                           -- FULL_TECHNICAL_VISUAL is a shared artifact pool even though older rows
                           -- may be stored under either historical worker target.
                           SUM(CASE WHEN target='pi5' AND status='pending' THEN 1 ELSE 0 END) AS pi5_pending,
-                          SUM(CASE WHEN target='pi5' AND status='processing' THEN 1 ELSE 0 END) AS pi5_processing,
+                          SUM(CASE WHEN status='processing' AND (CASE WHEN code='FULL_TECHNICAL_VISUAL' THEN COALESCE(claimed_by,target) ELSE target END)='pi5' THEN 1 ELSE 0 END) AS pi5_processing,
                           SUM(CASE WHEN target='pi5' AND status='completed' THEN 1 ELSE 0 END) AS pi5_completed,
                           SUM(CASE WHEN target='pi5' AND status='failed' THEN 1 ELSE 0 END) AS pi5_failed,
                           SUM(CASE WHEN target='oneplus' AND status='pending' THEN 1 ELSE 0 END) AS oneplus_pending,
-                          SUM(CASE WHEN target='oneplus' AND status='processing' THEN 1 ELSE 0 END) AS oneplus_processing,
+                          SUM(CASE WHEN status='processing' AND (CASE WHEN code='FULL_TECHNICAL_VISUAL' THEN COALESCE(claimed_by,target) ELSE target END)='oneplus' THEN 1 ELSE 0 END) AS oneplus_processing,
                           SUM(CASE WHEN target='oneplus' AND status='completed' THEN 1 ELSE 0 END) AS oneplus_completed,
                           SUM(CASE WHEN target='oneplus' AND status='failed' THEN 1 ELSE 0 END) AS oneplus_failed,
 

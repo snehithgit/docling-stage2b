@@ -31,8 +31,9 @@ class EventBroker:
             if not listener.full():
                 listener.put_nowait(payload)
 
-    async def stream(self) -> AsyncIterator[str]:
-        queue: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
+    async def stream(self, maxsize: int = 1) -> AsyncIterator[str]:
+        """Stream events. Dashboard callers use coalescing size=1; alert transports may request a deeper queue."""
+        queue: asyncio.Queue[str] = asyncio.Queue(maxsize=max(0, int(maxsize)))
         self._listeners.add(queue)
         try:
             yield "event: connected\ndata: {}\n\n"

@@ -1545,3 +1545,26 @@ def test_mark_processing_is_compare_and_swap(tmp_path):
         saved = (await store.list_book_jobs_raw(901))[0]
         assert saved["attempt_count"] == 1
     asyncio.run(run())
+
+import pytest
+@pytest.mark.asyncio
+async def test_shared_artifact_claim_persists_actual_worker(tmp_path):
+    from app.stage2b_store import Stage2BStore
+    store = Stage2BStore(str(tmp_path / "jobs.db"))
+    await store.initialize()
+    # Seed directly because this test targets claim ownership, not route preparation.
+    def seed():
+        with store._connection() as conn:
+            now = __import__('datetime').datetime.now(__import__('datetime').UTC).isoformat()
+            conn.execute("""INSERT INTO verification_jobs
+                (postprocess_job_id,conversion_job_id,route_id,route_key,generation,target,code,priority,source_json,result_dir,output_filename,status,authorized,created_at)
+                VALUES (1,1,'AV1','g:oneplus:AV1','g','oneplus','FULL_TECHNICAL_VISUAL','low','{}','book','book.zip','pending',1,?)""", (now,))
+    await store._run(seed)
+    job = await store.claim_next_artifact("pi5")
+    assert job is not None
+    assert job["claimed_by"] == "pi5"
+    rows = await store.list_book_jobs_raw(1)
+    assert rows[0]["claimed_by"] == "pi5"
+    books = await store.list_books()
+    assert books[0]["pi5_processing"] == 1
+    assert books[0]["oneplus_processing"] == 0

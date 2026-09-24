@@ -743,7 +743,7 @@ class Runtime:
             lambda: self.config, self.postprocess_store, self.client, self.events, self.stage2b_store
         )
         self.telegram_bot = TelegramBotService(
-            lambda: self.config, self.telegram_command, self.events.stream, self.telegram_audit
+            lambda: self.config, self.telegram_command, lambda: self.events.stream(maxsize=0), self.telegram_audit
         )
         self.pipeline_sequence_task: asyncio.Task | None = None
         self.pipeline_sequence_state: dict = {
@@ -1744,7 +1744,16 @@ class Runtime:
                 elif pending:
                     rank, state, icon = 2, "Verifying", "🔵"
                 else:
-                    rank, state, icon = 3, "Complete", "🟢"
+                    result_dir = Path(self.config.processed_dir) / Path(str(post_job.get("result_dir") or book.get("result_dir") or "")).name
+                    verification_rows = await self.stage2b_store.list_book_jobs_raw(jid) if jid else []
+                    s2c = stage2c_freshness(result_dir, verification_rows, rule_version=STAGE2C_RULE_VERSION, artifact_sweep_required=bool(getattr(self.config, "stage2b_artifact_sweep_required_for_finalize", True)))
+                    s3 = stage3_freshness(result_dir, s2c, stage3_rule_version=STAGE3_RULE_VERSION, retrieval_rule_version=RETRIEVAL_RULE_VERSION)
+                    if not s2c.get("ready"):
+                        rank, state, icon = 2, "Stage 2C stale", "🟡"
+                    elif not s3.get("ready"):
+                        rank, state, icon = 2, "Stage 3 stale", "🟡"
+                    else:
+                        rank, state, icon = 3, "Complete", "🟢"
                 entries.append({"rank": rank, "name": name, "jid": jid, "audit": audit, "unresolved": unresolved, "recovery": recovery, "post_job": post_job, "state": state, "icon": icon, "book": book})
             entries.sort(key=lambda item: (item["rank"], str(item["name"]).casefold()))
             per_page = 8
