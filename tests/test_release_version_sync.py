@@ -18,6 +18,8 @@ def test_nav_ui_version_matches_backend_version():
 def test_all_static_asset_cache_keys_match_backend_version():
     mismatches = []
     for path in STATIC.glob("*.html"):
+        if path.name.startswith(".~backup_"):
+            continue
         text = path.read_text(encoding="utf-8")
         for value in re.findall(r'/assets/[^"\'?#]+\?v=([^"\']+)', text):
             if value != APP_VERSION:

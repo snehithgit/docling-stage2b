@@ -204,6 +204,8 @@ def test_frontend_assets_and_badge_match_release_version():
     from app.version import APP_VERSION
     import re
     for page in STATIC.glob("*.html"):
+        if page.name.startswith(".~backup_"):
+            continue
         assets = re.findall(r'(?:src|href)="(/assets/[^"]+)"', page.read_text(encoding="utf-8"))
         assert assets
         assert all(asset.endswith("?v=" + APP_VERSION) for asset in assets)
