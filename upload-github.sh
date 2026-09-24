@@ -1,7 +1,8 @@
 #!/data/data/com.termux/files/usr/bin/bash
 set -euo pipefail
 
-REPO="snehithgit/docling-stage2b"
+GITEA_REPO_URL="${GITEA_REPO_URL:-http://192.168.68.63:3002/snehithgit/docling-stage2b.git}"
+GITHUB_REPO_URL="https://github.com/snehithgit/docling-stage2b.git"
 BRANCH="main"
 COMMIT_MESSAGE="Update Marine Pipeline Studio source"
 
@@ -10,8 +11,6 @@ fail() { echo "ERROR: $*" >&2; exit 1; }
 [ -f Dockerfile ] && [ -d app ] || fail "Run this script from the project root."
 [ -f .gitignore ] || fail ".gitignore is missing; refusing to publish."
 command -v git >/dev/null 2>&1 || fail "git is not installed."
-command -v gh >/dev/null 2>&1 || fail "GitHub CLI is not installed."
-gh auth status >/dev/null 2>&1 || fail "GitHub CLI is not authenticated. Run: gh auth login"
 
 PROJECT_DIR="$(pwd -P)"
 git config --global --add safe.directory "$PROJECT_DIR" 2>/dev/null || true
@@ -24,28 +23,25 @@ new_repo=0
 if [ ! -d .git ]; then
   new_repo=1
   git init
-  git remote add origin "https://github.com/${REPO}.git"
-  # If the remote already has history, attach this working tree to that history
-  # without overwriting local files. This avoids force-push/history destruction.
-  if git fetch origin "$BRANCH" >/dev/null 2>&1; then
-    git update-ref "refs/heads/$BRANCH" FETCH_HEAD
-    git symbolic-ref HEAD "refs/heads/$BRANCH"
-    git reset --mixed "refs/heads/$BRANCH" >/dev/null
-  else
-    git branch -M "$BRANCH"
-  fi
+  git branch -M "$BRANCH"
 else
   current_branch="$(git branch --show-current)"
   [ "$current_branch" = "$BRANCH" ] || fail "Current branch is '$current_branch'. Checkout '$BRANCH' before publishing."
-  if git remote get-url origin >/dev/null 2>&1; then
-    git remote set-url origin "https://github.com/${REPO}.git"
-  else
-    git remote add origin "https://github.com/${REPO}.git"
-  fi
 fi
 
-git config user.name "$(gh api user --jq .login)"
-git config user.email "$(gh api user --jq '.id')+$(gh api user --jq .login)@users.noreply.github.com"
+if git remote get-url origin >/dev/null 2>&1; then
+  git remote set-url origin "$GITEA_REPO_URL"
+else
+  git remote add origin "$GITEA_REPO_URL"
+fi
+if git remote get-url github >/dev/null 2>&1; then
+  git remote set-url github "$GITHUB_REPO_URL"
+else
+  git remote add github "$GITHUB_REPO_URL"
+fi
+
+[ -n "$(git config user.name || true)" ] || git config user.name "snehithgit"
+[ -n "$(git config user.email || true)" ] || git config user.email "64060670+snehithgit@users.noreply.github.com"
 
 git add -A
 
@@ -66,14 +62,22 @@ fi
 echo "Files/changes to publish:"
 git status --short
 if git diff --cached --quiet; then
-  echo "No source changes to publish."
-  exit 0
+  echo "No new local source changes to commit."
+else
+  git commit -m "$COMMIT_MESSAGE"
 fi
 
-git commit -m "$COMMIT_MESSAGE"
-# Normal push only. If GitHub is ahead, stop and let the user reconcile history.
+# Incorporate changes pushed from the other device before publishing.
+if ! remote_heads="$(git ls-remote --heads origin "refs/heads/$BRANCH")"; then
+  fail "Cannot contact the Gitea repository at $GITEA_REPO_URL"
+fi
+if [ -n "$remote_heads" ]; then
+  git fetch origin "$BRANCH"
+  git rebase "origin/$BRANCH" || fail "Resolve the conflicts, run 'git rebase --continue', then run this script again."
+fi
+
+# Gitea mirrors this normal push to GitHub, where Actions runs.
 git push origin "$BRANCH"
 
-echo "Source uploaded without rewriting Git history."
-sleep 3
-gh run list --repo "$REPO" --workflow docker-publish.yml --limit 3 || true
+echo "Source synced to Gitea without rewriting Git history."
+echo "Gitea will mirror this commit to GitHub, which will start GitHub Actions."
