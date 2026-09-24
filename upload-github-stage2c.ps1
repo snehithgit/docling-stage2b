@@ -52,6 +52,24 @@ Assert-LastExitCode "Failed to configure the Git author name"
 & git config user.email "64060670+snehithgit@users.noreply.github.com"
 Assert-LastExitCode "Failed to configure the Git author email"
 
+$PreSyncRemoteHeads = @(& git ls-remote --heads origin "refs/heads/$Branch")
+Assert-LastExitCode "Cannot contact the Gitea repository at $GiteaRepoUrl"
+if ($PreSyncRemoteHeads.Count -gt 0) {
+    & git fetch origin $Branch
+    Assert-LastExitCode "Failed to fetch the latest Gitea history before committing"
+    $PreSyncDirty = @(& git status --porcelain).Count -gt 0
+    if ($PreSyncDirty) {
+        & git stash push --include-untracked -m "automatic pre-publish sync"
+        Assert-LastExitCode "Failed to preserve local changes before synchronizing"
+    }
+    & git rebase "origin/$Branch"
+    Assert-LastExitCode "Could not update to the latest Gitea base before committing"
+    if ($PreSyncDirty) {
+        & git stash pop --index
+        Assert-LastExitCode "Latest Gitea changes overlap local edits. Resolve the conflicts before publishing; the automatic stash was preserved"
+    }
+}
+
 & git add -A
 Assert-LastExitCode "git add failed"
 

@@ -51,6 +51,25 @@ fi
 [ -n "$(git config user.name || true)" ] || git config user.name "snehithgit"
 [ -n "$(git config user.email || true)" ] || git config user.email "64060670+snehithgit@users.noreply.github.com"
 
+# Sync before committing. Preserve any current edits, update to the latest
+# Gitea base, then restore the edits so the new commit is not based on stale
+# laptop/mobile history.
+if ! pre_sync_heads="$(git ls-remote --heads origin "refs/heads/$BRANCH")"; then
+  fail "Cannot contact the Gitea repository at $GITEA_REPO_URL"
+fi
+if [ -n "$pre_sync_heads" ]; then
+  git fetch origin "$BRANCH"
+  pre_sync_stashed=0
+  if [ -n "$(git status --porcelain)" ]; then
+    git stash push --include-untracked -m "automatic pre-publish sync" >/dev/null
+    pre_sync_stashed=1
+  fi
+  git rebase "origin/$BRANCH" || fail "Could not update to the latest Gitea base before committing."
+  if [ "$pre_sync_stashed" -eq 1 ]; then
+    git stash pop --index || fail "Latest Gitea changes overlap local edits. Resolve the conflicts before publishing; the automatic stash was preserved."
+  fi
+fi
+
 git add -A
 
 # Defense in depth: .gitignore is the primary protection, but refuse a publish
