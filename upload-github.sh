@@ -1,7 +1,8 @@
 #!/data/data/com.termux/files/usr/bin/bash
 set -euo pipefail
 
-GITEA_REPO_URL="${GITEA_REPO_URL:-http://192.168.68.63:3002/snehith/docling-stage2b.git}"
+GITEA_REPO_URL="${GITEA_REPO_URL:-git@192.168.68.63:snehith/docling-stage2b.git}"
+GITEA_SSH_KEY="${GITEA_SSH_KEY:-$HOME/.ssh/gitea_mobile}"
 GITHUB_REPO_URL="https://github.com/snehithgit/docling-stage2b.git"
 BRANCH="main"
 COMMIT_MESSAGE="Update Marine Pipeline Studio source"
@@ -11,6 +12,13 @@ fail() { echo "ERROR: $*" >&2; exit 1; }
 [ -f Dockerfile ] && [ -d app ] || fail "Run this script from the project root."
 [ -f .gitignore ] || fail ".gitignore is missing; refusing to publish."
 command -v git >/dev/null 2>&1 || fail "git is not installed."
+
+case "$GITEA_REPO_URL" in
+  git@*|ssh://*)
+    [ -f "$GITEA_SSH_KEY" ] || fail "Gitea SSH private key not found: $GITEA_SSH_KEY"
+    export GIT_SSH_COMMAND="ssh -i $GITEA_SSH_KEY -o IdentitiesOnly=yes"
+    ;;
+esac
 
 PROJECT_DIR="$(pwd -P)"
 git config --global --add safe.directory "$PROJECT_DIR" 2>/dev/null || true
