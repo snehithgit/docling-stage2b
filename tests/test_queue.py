@@ -9,13 +9,13 @@ from pathlib import Path
 
 from app.config import AppConfig
 from app.database import JobStore
-from app.docling_client import DoclingApiError, ResultPayload
+from app.docling_client import DoclingApiError, DoclingTransientSubmitError, ResultPayload
 from app.events import EventBroker
 from app.worker import ConversionWorker
 
 
 class FakeDoclingClient:
-    def __init__(self, failures=None, transient_poll_errors=0):
+    def __init__(self, failures=None, transient_poll_errors=0, transient_submit_errors=0):
         self.submitted = []
         self.submitted_formats = []
         self.failures = failures or set()
@@ -23,9 +23,15 @@ class FakeDoclingClient:
         # (e.g. a slow-server read timeout) before it starts returning a
         # real status, simulating Docling being too busy to answer.
         self.transient_poll_errors = transient_poll_errors
+        self.transient_submit_errors = transient_submit_errors
         self.poll_calls = 0
+        self.submit_calls = 0
 
     async def submit(self, file_path, to_formats=None):
+        self.submit_calls += 1
+        if self.transient_submit_errors:
+            self.transient_submit_errors -= 1
+            raise DoclingTransientSubmitError("connect refused")
         self.submitted.append(file_path.name)
         self.submitted_formats.append(list(to_formats or []))
         return f"task-{file_path.stem}"
@@ -110,6 +116,27 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         await worker._process_one()
         failures = await self.store.list_jobs(failures_only=True)
         self.assertIn("Unreadable source", failures[0]["error_message"])
+
+    async def test_retries_unambiguous_connect_failure_during_submit(self):
+        source = self.input_dir / "restart.pdf"
+        source.write_bytes(b"restart")
+        client = FakeDoclingClient(transient_submit_errors=2)
+        worker = ConversionWorker(lambda: self.config, self.store, client, EventBroker())
+        await self._discover_as_stable(worker)
+        await worker._process_one()
+        self.assertEqual((await self.store.counts())["completed"], 1)
+        self.assertEqual(client.submit_calls, 3)
+        self.assertEqual(client.submitted, ["restart.pdf"])
+
+    async def test_submit_connect_failure_stops_after_retry_budget(self):
+        source = self.input_dir / "offline.pdf"
+        source.write_bytes(b"offline")
+        client = FakeDoclingClient(transient_submit_errors=10)
+        worker = ConversionWorker(lambda: self.config, self.store, client, EventBroker())
+        await self._discover_as_stable(worker)
+        await worker._process_one()
+        self.assertEqual((await self.store.counts())["failed"], 1)
+        self.assertEqual(client.submit_calls, self.config.poll_max_consecutive_errors)
 
     async def test_survives_transient_poll_errors_without_failing_the_job(self):
         # Regression test: a slow Docling server (busy converting) can make

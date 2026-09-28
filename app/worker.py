@@ -12,7 +12,7 @@ from typing import Any
 
 from .config import AppConfig
 from .database import JobStore
-from .docling_client import DoclingApiError, DoclingClient, ResultPayload
+from .docling_client import DoclingApiError, DoclingTransientSubmitError, DoclingClient, ResultPayload
 from .events import EventBroker
 
 
@@ -435,11 +435,25 @@ class ConversionWorker:
                 task_id = str(job["docling_task_id"])
                 self._events.notify("processing_resumed")
             else:
-                await self._store.mark_processing(job["id"])
+                claimed = await self._store.mark_processing(job["id"])
+                if not claimed:
+                    return True
                 self._events.notify("processing_started")
-                task_id = await self._client.submit(
-                    file_path, to_formats=self._job_formats(job, config)
-                )
+                submit_attempt = 0
+                while True:
+                    try:
+                        task_id = await self._client.submit(
+                            file_path, to_formats=self._job_formats(job, config)
+                        )
+                        break
+                    except DoclingTransientSubmitError:
+                        submit_attempt += 1
+                        if submit_attempt >= config.poll_max_consecutive_errors:
+                            raise
+                        self._events.notify("processing_submit_retry")
+                        await self._sleep(
+                            min(config.docling_poll_interval_seconds * submit_attempt, 30)
+                        )
                 await self._store.set_task_id(job["id"], task_id)
 
             consecutive_poll_errors = 0

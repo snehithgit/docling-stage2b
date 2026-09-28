@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Structural review · Docling Auto-Convert</title>
+<link rel="stylesheet" href="/assets/styles.css?v=2026.09.28.40.11W" />
+<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.28.40.11W" />
+<style>
+.structural-source-card h2,.structural-evidence-card h2{margin-bottom:8px}.structural-source-state{color:var(--muted);font-size:12px}.structural-code-note{margin:0;color:var(--muted);font-size:12px;line-height:1.55}.structural-item-title{margin:0 0 4px;font-size:16px}.structural-item-meta{margin:0;color:var(--muted);font-size:11px}.structural-review-progress{font-weight:800}.structural-no-page{display:grid;place-items:center;min-height:240px;padding:28px;text-align:center;color:var(--muted)}.structural-no-page strong{display:block;color:var(--ink);margin-bottom:6px}.structural-summary-banner{padding:12px 14px;border-radius:10px;background:#fff7df;color:#71520f;margin-bottom:16px}.structural-summary-banner strong{display:block;margin-bottom:3px}.structural-detail-heading{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.structural-detail-heading span{flex:0 0 auto}.structural-review-grid{margin-top:16px}
+</style>
+</head>
+<body class="ui29">
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<div class="app-shell review-workspace-shell">
+<main class="main-content review-workspace-main" id="main-content">
+<a class="back-link" id="back-link" href="/">← Book workflow</a>
+<header class="book-workflow-header">
+  <div>
+    <p class="eyebrow">Structural review</p>
+    <h1 id="title">Review structural finding</h1>
+    <p class="subtle" id="subtitle">Loading diagnostic evidence…</p>
+  </div>
+  <span class="workflow-tag" id="status-tag">Loading</span>
+</header>
+<div id="feedback" class="status-message page-feedback" hidden role="status" aria-live="polite"></div>
+<div class="structural-summary-banner"><strong>Evidence-first review.</strong> This screen never rewrites raw Docling. Review every persisted diagnostic item. If the finding is real and the current structure is unsafe for downstream use, leave it unresolved instead of approving it merely to unblock Stage 3.</div>
+<div class="review-workspace-grid structural-review-grid">
+  <section class="review-workspace-card structural-source-card">
+    <div class="structural-detail-heading"><div><h2 id="source-title">Source evidence</h2><p class="structural-source-state" id="source-state">Loading…</p></div><span class="workflow-tag" id="item-status">Pending</span></div>
+    <div class="review-source-frame" id="source-frame">
+      <img id="source-image" alt="Original PDF page with structural evidence highlighted" hidden />
+      <div class="structural-no-page" id="no-page" hidden><div><strong>No source page is attached to this diagnostic item.</strong><span>Review the persisted structural evidence on the right. This is expected for graph-level and archive-level findings.</span></div></div>
+    </div>
+    <div class="review-nav">
+      <button class="secondary-button" id="prev" type="button">Previous item</button>
+      <span class="subtle" id="counter"></span>
+      <button class="secondary-button" id="next" type="button">Next item</button>
+    </div>
+  </section>
+  <section class="review-workspace-card structural-evidence-card">
+    <h2>Diagnostic evidence</h2>
+    <p class="structural-code-note" id="route-note"></p>
+    <div class="review-evidence-list" id="evidence-summary"></div>
+    <h3>Persisted item</h3>
+    <pre class="review-evidence-json" id="evidence-json"></pre>
+    <div id="review-state" class="review-inline-state"></div>
+    <div class="review-decision-actions"><button class="primary-button" id="mark-reviewed" type="button" disabled>Mark this evidence reviewed</button></div>
+    <div class="review-decision-panel">
+      <p class="structural-review-progress" id="review-progress">0 / 0 evidence items reviewed</p>
+      <div class="review-note-field"><label for="note"><strong>Reviewer note</strong></label><textarea id="note" maxlength="1000" placeholder="Optional: why the current structure is safe to use, or why the detector is a false positive"></textarea></div>
+      <div class="review-decision-actions">
+        <button class="primary-button" id="accept" type="button" disabled>Accept reviewed structure</button>
+        <button class="secondary-button" id="dismiss" type="button" disabled>Dismiss as false positive</button>
+        <a class="secondary-button" id="leave" href="/">Leave unresolved</a>
+      </div>
+    </div>
+  </section>
+</div>
+</main>
+</div>
+<script src="/assets/structural-review.js?v=2026.09.28.40.11W"></script>
+</body>
+</html>

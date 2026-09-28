@@ -3,9 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
+import threading
 import time
 import unicodedata
+import uuid
 from collections import Counter
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -28,6 +31,11 @@ TECHNICAL_IMAGE_CATEGORIES = TECHNICAL_DIAGRAM_CATEGORIES | {
 }
 DECORATIVE_IMAGE_CATEGORIES = {"decorative_photo", "logo", "signature_or_stamp", "cover_art"}
 ALL_DIAGRAM_CATEGORIES = TECHNICAL_IMAGE_CATEGORIES | DECORATIVE_IMAGE_CATEGORIES | {"unknown"}
+
+# Sync callers (Stage 2A, Stage 2C helpers) may rebuild overlays outside the
+# async Stage 2B ledger lock. Unique temp files prevent clobbering, while the
+# swap lock makes publication atomic inside this process.
+_CHUNK_OVERLAY_SWAP_LOCK = threading.RLock()
 STAGE2C_RULE_VERSION = "stage2c-source-fidelity-v8"
 
 # Pattern classes, not book/manufacturer-specific values.
@@ -1299,9 +1307,17 @@ def rebuild_chunk_overlays(result_dir: Path, entries: list[dict[str, Any]]) -> N
                 "provenance": "selected_vision_processor_generated_enrichment",
             })
     path = result_dir / "chunk_overlays.jsonl"
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text("".join(json.dumps(item, ensure_ascii=False) + "\n" for item in overlays), encoding="utf-8")
-    tmp.replace(path)
+    token = uuid.uuid4().hex
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{token}.tmp")
+    try:
+        tmp.write_text("".join(json.dumps(item, ensure_ascii=False) + "\n" for item in overlays), encoding="utf-8")
+        with _CHUNK_OVERLAY_SWAP_LOCK:
+            os.replace(tmp, path)
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 AUDIT_GATE_FILE = "verifier_audit_gate.json"
 

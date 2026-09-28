@@ -3,6 +3,7 @@ let artifactJobs = [];
 let filteredArtifacts = [];
 let artifactPage = 1;
 const requestedBookJob = new URLSearchParams(location.search).get("job");
+let decisionInFlight = false;
 
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
@@ -54,6 +55,16 @@ function humanDecisionLabel(value) {
   return ({technical:"Technical", decorative:"Decorative", useful:"Useful", not_useful:"Not useful"})[String(value || "").toLowerCase()] || String(value || "").replaceAll("_", " ");
 }
 
+function doclingReviewUrl(job) {
+  const params = new URLSearchParams({
+    job: String(job.postprocess_job_id),
+    page: String(job.page || 1),
+    ref: `#/pictures/${job.picture_index}`,
+    return: location.pathname + location.search,
+  });
+  return `/docling-review?${params}`;
+}
+
 function renderArtifact(job) {
   const state = artifactState(job);
   const verification = job.verification || {};
@@ -74,6 +85,7 @@ function renderArtifact(job) {
         <img class="artifact-thumb" loading="lazy" src="${esc(job.image_url)}" alt="Artifact ${esc(job.picture_index)} from ${esc(job.book)}" />
         <div class="artifact-thumb-actions">
           ${job.page_url ? `<a class="mini-action" href="${esc(job.page_url)}" target="_blank" rel="noopener">Open source page</a>` : ""}
+          ${job.page ? `<a class="mini-action primary-mini" href="${esc(doclingReviewUrl(job))}">Open Docling PDF bbox</a>` : ""}
           ${verification.job_id ? `<a class="mini-action" href="/vision-audit?job=${encodeURIComponent(verification.job_id)}">Verifier audit</a>` : ""}
         </div>
       </div>
@@ -203,9 +215,10 @@ async function queueAction(url, buttonId, label) {
       const armedTotal = Number(armed.total || 0);
       const prepared = data.prepared || {};
       const skipped = Number(prepared.skipped_normal_picture_routes || 0);
+      const unclassified = Number(prepared.unclassified_picture_count || 0);
       const workers = data.artifact_workers || {};
       const active = [workers.pi5?.paused ? null : "Pi5", workers.oneplus?.paused ? null : "OnePlus"].filter(Boolean);
-      feedback(`Prepared/backfilled ${Number(prepared.eligible_sweep_jobs || 0).toLocaleString()} sweep job(s); skipped ${skipped.toLocaleString()} picture(s) already covered by normal Vision routes; armed ${armedTotal.toLocaleString()}, released ${released.toLocaleString()} now. Remaining armed jobs will release automatically after Text + Vision complete. ${active.length ? `${active.join(" + ")} will share released work while idle.` : "Both artifact workers are paused."}`, "completed");
+      feedback(`Prepared/backfilled ${Number(prepared.eligible_sweep_jobs || 0).toLocaleString()} sweep job(s); skipped ${skipped.toLocaleString()} picture(s) already covered by normal Vision routes${unclassified ? `; ${unclassified.toLocaleString()} picture(s) have no classification metadata and were not silently counted as swept` : ""}; armed ${armedTotal.toLocaleString()}, released ${released.toLocaleString()} now. Remaining armed jobs will release automatically after Text + Vision complete. ${active.length ? `${active.join(" + ")} will share released work while idle.` : "Both artifact workers are paused."}`, "completed");
     }
     await loadAudit();
   } catch (error) {
@@ -239,8 +252,12 @@ async function loadAudit() {
 
 document.addEventListener("click", async event => {
   const button = event.target.closest(".artifact-decision");
-  if (!button) return;
-  button.disabled = true;
+  if (!button || decisionInFlight) return;
+  decisionInFlight = true;
+  const decisionButtons = [...document.querySelectorAll(".artifact-decision")];
+  decisionButtons.forEach(node => { node.disabled = true; });
+  if ($("aa-prev")) $("aa-prev").disabled = true;
+  if ($("aa-next")) $("aa-next").disabled = true;
   feedback(`Saving human decision: ${button.dataset.decision}…`);
   try {
     const response = await fetch(`/api/postprocess/jobs/${encodeURIComponent(button.dataset.job)}/vision-audit/${encodeURIComponent(button.dataset.entry)}/decision`, {
@@ -249,16 +266,15 @@ document.addEventListener("click", async event => {
       body:JSON.stringify({decision:button.dataset.decision}),
     });
     if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
-    const humanQueue = $("aa-decision").value === "human_review";
-    const previousPosition = artifactPage;
     await loadAudit();
-    if (!humanQueue && filteredArtifacts.length > previousPosition) artifactPage = previousPosition + 1;
     renderPage();
     feedback("Human artifact decision saved. The next matching item is ready.", "completed");
     window.scrollTo({top:0, behavior:"smooth"});
   } catch (error) {
     feedback(`Could not save decision: ${error.message}`, "warning");
-    button.disabled = false;
+  } finally {
+    decisionInFlight = false;
+    renderPage();
   }
 });
 
@@ -269,8 +285,8 @@ $("aa-status").addEventListener("change", () => applyFilters());
 $("aa-technical-only").addEventListener("change", () => applyFilters());
 $("aa-search").addEventListener("input", () => applyFilters());
 $("aa-clear").addEventListener("click", () => { history.replaceState({}, "", "/artifact-audit"); location.reload(); });
-$("aa-prev").addEventListener("click", () => { artifactPage -= 1; renderPage(); window.scrollTo({top: 0, behavior: "smooth"}); });
-$("aa-next").addEventListener("click", () => { artifactPage += 1; renderPage(); window.scrollTo({top: 0, behavior: "smooth"}); });
+$("aa-prev").addEventListener("click", () => { if (decisionInFlight) return; artifactPage -= 1; renderPage(); window.scrollTo({top: 0, behavior: "smooth"}); });
+$("aa-next").addEventListener("click", () => { if (decisionInFlight) return; artifactPage += 1; renderPage(); window.scrollTo({top: 0, behavior: "smooth"}); });
 $("aa-start").addEventListener("click", () => {
   if (window.confirm("Queue verification for all currently eligible technical artifacts?\n\nThis can add a large amount of Pi5/OnePlus work. Existing completed results are not discarded.")) {
     queueAction("/api/stage2b/artifact-audit/start-all", "aa-start", "Starting…");
@@ -283,7 +299,7 @@ $("aa-retry").addEventListener("click", () => {
 });
 document.addEventListener("keydown", event => {
   const editing = ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName);
-  if (editing) return;
+  if (editing || decisionInFlight) return;
   if ((event.altKey && event.key === "ArrowLeft") || event.key === "[") { event.preventDefault(); if (artifactPage > 1) { artifactPage -= 1; renderPage(); } }
   if ((event.altKey && event.key === "ArrowRight") || event.key === "]") { event.preventDefault(); const pages = Math.max(1, Math.ceil(filteredArtifacts.length / PAGE_SIZE)); if (artifactPage < pages) { artifactPage += 1; renderPage(); } }
 });

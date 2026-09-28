@@ -802,6 +802,9 @@ class Stage2BMigrationTests(unittest.IsolatedAsyncioTestCase):
             conn.close()
             self.assertIn("retry_count", cols)
             self.assertIn("next_attempt_at", cols)
+            self.assertIn("stage2c_entry_state", cols)
+            self.assertIn("stage2c_entry_id", cols)
+            self.assertIn("stage2c_entry_error", cols)
 
 class Stage2BRouteSyncCacheTests(unittest.IsolatedAsyncioTestCase):
     async def test_unchanged_route_files_do_not_resync_database(self):
@@ -1113,6 +1116,110 @@ class Stage2CBackfillTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(saved_entry["status"], "pending")
             self.assertIsNone(saved_entry["proposed_text"])
             self.assertEqual((result_dir / "chunk_overlays.jsonl").read_text(encoding="utf-8"), "")
+
+class Stage2CReviewPublicationRegressionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_completed_text_result_can_repair_missing_review_entry_without_model_call(self):
+        from app.stage2b import Stage2BWorker
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            processed = root / "processed"
+            result_dir = processed / "book__job1"
+            result_dir.mkdir(parents=True)
+            store = Stage2BStore(str(root / "jobs.db"))
+            await store.initialize()
+            await store.sync_routes(1, 1, "g1", [route("R1", "pi5", page=72, index=5378)], "book__job1", "book.zip")
+            await store.start_manual_book(1)
+            job = await store.next_runnable("pi5", False)
+            self.assertIsNotNone(job)
+            await store.mark_processing(job["id"], "manual")
+            request = {
+                "page": 72,
+                "source_type": "text",
+                "text_index": 5378,
+                "suspect_text": "Condenser cooling water oullet (23){50A]JIS SK Flange",
+            }
+            result = {
+                "parsed": {"verdict": "UNCERTAIN", "confidence": 0.0},
+                "correction": {
+                    "attempted": True,
+                    "status": "pending",
+                    "reason": "SOURCE_IMAGE_UNREADABLE_KEEP_ORIGINAL",
+                    "proposed_text": None,
+                },
+                "source_reconstruction": {"status": "unreadable", "usable": False},
+            }
+            await store.mark_completed(
+                job["id"], 15.8, "model", "http://pi5", "UNCERTAIN",
+                request, result, "verification/stage2b_job.json",
+            )
+
+            class FakePostprocessStore:
+                async def get_job(self, postprocess_job_id):
+                    return {"id": 1, "status": "completed", "result_dir": "book__job1"}
+
+            cfg = SimpleNamespace(
+                stage2c_enabled=True,
+                stage2c_vision_enrichment_enabled=True,
+                processed_dir=str(processed),
+            )
+            worker = Stage2BWorker(
+                lambda: cfg, store, FakePostprocessStore(),
+                SimpleNamespace(notify=lambda *_args, **_kwargs: None),
+            )
+            self.assertFalse((result_dir / "correction_ledger.json").exists())
+            outcome = await worker.ensure_stage2c_entry(job["id"])
+            self.assertEqual(outcome["state"], "ready")
+            self.assertEqual(outcome["entry_id"], "g1:text:R1")
+            self.assertEqual(outcome["entry"]["original_text"], request["suspect_text"])
+
+            ledger = json.loads((result_dir / "correction_ledger.json").read_text(encoding="utf-8"))
+            entry = next(item for item in ledger["entries"] if item["entry_id"] == "g1:text:R1")
+            self.assertEqual(entry["status"], "pending")
+            self.assertEqual(entry["original_text"], request["suspect_text"])
+            saved = await store.get_job(job["id"])
+            self.assertEqual(saved["status"], "completed")
+            self.assertEqual(saved["stage2c_entry_state"], "ready")
+            self.assertEqual(saved["stage2c_entry_id"], "g1:text:R1")
+            self.assertIsNone(saved["stage2c_entry_error"])
+
+    async def test_publication_error_is_persisted_separately_from_verifier_completion(self):
+        from app.stage2b import Stage2BWorker
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            processed = root / "processed"
+            (processed / "book__job1").mkdir(parents=True)
+            store = Stage2BStore(str(root / "jobs.db"))
+            await store.initialize()
+            await store.sync_routes(1, 1, "g1", [route("R1", "pi5", page=72, index=5378)], "book__job1", "book.zip")
+            await store.start_manual_book(1)
+            job = await store.next_runnable("pi5", False)
+            await store.mark_processing(job["id"], "manual")
+            request = {"suspect_text": "oullet", "page": 72}
+            result = {"parsed": {"verdict": "UNCERTAIN"}, "correction": {"attempted": True, "status": "pending"}}
+            await store.mark_completed(job["id"], 1.0, "model", "http://pi5", "UNCERTAIN", request, result, "")
+
+            class FakePostprocessStore:
+                async def get_job(self, postprocess_job_id):
+                    return {"id": 1, "status": "completed", "result_dir": "book__job1"}
+
+            cfg = SimpleNamespace(stage2c_enabled=True, stage2c_vision_enrichment_enabled=True, processed_dir=str(processed))
+            worker = Stage2BWorker(lambda: cfg, store, FakePostprocessStore(), SimpleNamespace(notify=lambda *_args, **_kwargs: None))
+
+            async def fail_record(*_args, **_kwargs):
+                raise OSError("injected ledger write failure")
+
+            worker._record_stage2c_entry = fail_record
+            saved_job = await store.get_job(job["id"])
+            with self.assertRaisesRegex(OSError, "injected ledger write failure"):
+                await worker._publish_stage2c_entry("pi5", saved_job, request, result, "UNCERTAIN", "model")
+            saved = await store.get_job(job["id"])
+            self.assertEqual(saved["status"], "completed")
+            self.assertEqual(saved["stage2c_entry_state"], "error")
+            self.assertEqual(saved["stage2c_entry_id"], "g1:text:R1")
+            self.assertIn("injected ledger write failure", saved["stage2c_entry_error"])
+
 
 class Stage2BCloudQuotaPauseTests(unittest.IsolatedAsyncioTestCase):
     async def test_cloud_quota_pause_returns_job_to_pending_without_retry_penalty(self):

@@ -7,6 +7,7 @@ let currentEntry = null;
 let reviewQueue = [];
 let reviewIndex = -1;
 let filtersLoaded = false;
+let saveInFlight = false;
 
 if (job) {
   $("back-workflow").href = `/book?job=${encodeURIComponent(job)}`;
@@ -129,6 +130,8 @@ function friendlyReason(value) {
   const raw = String(value || "");
   const known = {
     SOURCE_IMAGE_UNREADABLE_KEEP_ORIGINAL: "Source image could not be read safely",
+    VERIFIER_TRANSCRIPTION_TRUNCATED_KEEP_ORIGINAL: "Verifier reply was cut off (token limit / repetition) before finishing",
+    VERIFIER_TRANSCRIPTION_TRUNCATED: "Verifier reply was cut off (token limit / repetition) before finishing",
     CRITICAL_SOURCE_TOKEN_NOT_PRESERVED_KEEP_ORIGINAL: "Important technical value was not preserved",
     TROUBLESHOOTING_ACTION_DROPPED_KEEP_ORIGINAL: "A troubleshooting action was dropped",
     TABLE_CELL_CONTEXT_CONTAMINATION_KEEP_ORIGINAL: "Table-cell correction included neighboring context",
@@ -174,6 +177,58 @@ function renderContextRows(containerId, rows, emptyText) {
     block.append(meta, text);
     container.appendChild(block);
   }
+}
+
+function setReviewUnavailable(text) {
+  currentEntry = null;
+  $("original").value = "";
+  $("correction").value = "";
+  $("correction").disabled = true;
+  $("save").disabled = true;
+  $("reject").disabled = true;
+  $("reset").disabled = true;
+  $("use-pi5-suggestion").disabled = true;
+  $("edit-heading").textContent = "Review record unavailable";
+  $("edit-status").textContent = "Not ready";
+  $("edit-note").textContent = "The verifier result is preserved. Editing is disabled until its review record is available.";
+  renderContextRows("docling-above", [], "Raw Docling text above is unavailable until the review record is published.");
+  renderContextRows("docling-below", [], "Raw Docling text below is unavailable until the review record is published.");
+  $("target-source-meta").textContent = "Review publication incomplete";
+  $("open-docling-bbox").hidden = true;
+  renderDiff();
+  message(text || "Review record is not available yet.", "error");
+}
+
+function setDoclingReviewLink(data = null) {
+  const link = $("open-docling-bbox");
+  if (!link || !job) return;
+  const sourceType = String(data?.source_type || currentEntry?.source_type || "text");
+  const targetPage = data?.page ?? currentEntry?.page ?? page;
+  let ref = "";
+  if (sourceType === "table_cell") {
+    const tableIndex = data?.table_index ?? currentEntry?.table_index;
+    if (tableIndex !== null && tableIndex !== undefined && tableIndex !== "") ref = `#/tables/${tableIndex}`;
+  } else {
+    const sourceIndex = data?.source_index ?? currentEntry?.source_index;
+    if (sourceIndex !== null && sourceIndex !== undefined && sourceIndex !== "") ref = `#/texts/${sourceIndex}`;
+  }
+  if (!targetPage) { link.hidden = true; return; }
+  const params = new URLSearchParams({job:String(job), page:String(targetPage), return:location.pathname + location.search});
+  if (ref) params.set("ref", ref);
+  link.href = `/docling-review?${params}`;
+  link.hidden = false;
+}
+
+async function repairMissingEntry() {
+  if (!job || !entryId) return null;
+  const response = await fetch(`/api/postprocess/jobs/${job}/corrections/${encodeURIComponent(entryId)}/repair`, {
+    method: "POST",
+    cache: "no-store",
+  });
+  let data = {};
+  try { data = await response.json(); } catch (_) { data = {}; }
+  if (!response.ok) throw new Error(data.detail || "Review record could not be prepared yet.");
+  return data.entry || null;
 }
 
 function renderAppliedState(entry, rawTarget) {
@@ -235,6 +290,7 @@ async function loadDoclingContext() {
   if (data.target_matches_ledger === false) targetBits.push("ledger/source mismatch detected");
   $("target-source-meta").textContent = targetBits.join(" · ");
   if (data.page) $("page-label").textContent = `Page ${data.page}`;
+  setDoclingReviewLink(data);
   renderDiff();
 }
 
@@ -247,8 +303,8 @@ function updateQueueControls() {
     return;
   }
   progress.textContent = `${reviewIndex + 1} of ${reviewQueue.length}`;
-  $("queue-prev").disabled = reviewIndex <= 0;
-  $("queue-next").disabled = reviewIndex >= reviewQueue.length - 1;
+  $("queue-prev").disabled = saveInFlight || reviewIndex <= 0;
+  $("queue-next").disabled = saveInFlight || reviewIndex >= reviewQueue.length - 1;
 }
 
 function queueFilterParams() {
@@ -278,6 +334,7 @@ function reviewUrl(entry) {
 }
 
 function navigateQueue(delta) {
+  if (saveInFlight) return false;
   const next = reviewQueue[reviewIndex + delta];
   if (!next) return false;
   location.href = reviewUrl(next);
@@ -295,7 +352,7 @@ function fillReviewFilters(data) {
   const currentBook = bookSelect.value || q.get("filter_book") || "";
   const currentReason = reasonSelect.value || q.get("filter_reason") || "";
   bookSelect.innerHTML = `<option value="">All books</option>${(facets.books || []).map(item => `<option value="${String(item.postprocess_job_id)}">${String(item.book || `Book ${item.postprocess_job_id}`).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}</option>`).join("")}`;
-  reasonSelect.innerHTML = `<option value="">All reasons</option>${(facets.reasons || []).map(item => `<option value="${String(item).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}">${friendlyReason(item)}</option>`).join("")}`;
+  reasonSelect.innerHTML = `<option value="">All reasons</option>${(facets.reasons || []).map(item => `<option value="${String(item).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}">${String(friendlyReason(item)).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}</option>`).join("")}`;
   if ([...bookSelect.options].some(o => o.value === currentBook)) bookSelect.value = currentBook;
   if ([...reasonSelect.options].some(o => o.value === currentReason)) reasonSelect.value = currentReason;
   const type = q.get("filter_type") || "";
@@ -328,22 +385,43 @@ async function load() {
       message("No text-review items match the current filters.", "success");
       return;
     }
-    const response = await fetch(`/api/postprocess/jobs/${job}/artifact/correction_ledger.json`);
-    if (!response.ok) throw new Error("Correction ledger is not available yet.");
-    const ledger = await response.json();
-    const entry = (ledger.entries || []).find((item) => String(item.entry_id) === String(entryId));
-    if (!entry) throw new Error("Correction entry not found.");
+
+    let entry = null;
+    const response = await fetch(`/api/postprocess/jobs/${job}/artifact/correction_ledger.json`, {cache:"no-store"});
+    if (response.ok) {
+      const ledger = await response.json();
+      entry = (ledger.entries || []).find((item) => String(item.entry_id) === String(entryId)) || null;
+    }
+    if (!entry) {
+      message("Preparing the review record from the completed verifier result…");
+      entry = await repairMissingEntry();
+      if (entry) await loadQueue();
+    }
+    if (!entry) throw new Error("Review record is not available yet.");
 
     currentEntry = entry;
+    $("correction").disabled = false;
+    $("save").disabled = false;
+    $("reject").disabled = false;
+    $("reset").disabled = false;
     $("page-image").src = `/api/postprocess/jobs/${job}/source-page/${page}`;
+    setDoclingReviewLink();
     updateMeta(entry);
     await loadDoclingContext();
   } catch (error) {
+    if (!currentEntry) {
+      setReviewUnavailable(error.message || "Review record is not available yet.");
+      return;
+    }
     // Fall back to the ledger's immutable original text if the converted ZIP
     // has been moved, while clearly telling the user that neighbor context is
     // unavailable. Never substitute Pi5 context here.
-    const original = String(currentEntry?.original_text || "");
+    const original = String(currentEntry.original_text || "");
     $("original").value = original;
+    $("correction").disabled = false;
+    $("save").disabled = false;
+    $("reject").disabled = false;
+    $("reset").disabled = false;
     renderAppliedState(currentEntry, original);
     renderPi5Suggestion(currentEntry, original);
     renderContextRows("docling-above", [], "Raw Docling text above is unavailable.");
@@ -363,10 +441,13 @@ async function save(action) {
   }
 
   const text = action === "reject" ? original : corrected;
+  if (saveInFlight) return;
   const saveLabel = $("save").textContent;
   const rejectLabel = $("reject").textContent;
+  saveInFlight = true;
   $("save").disabled = true;
   $("reject").disabled = true;
+  updateQueueControls();
   $(action === "apply" ? "save" : "reject").textContent = "Saving…";
   try {
     const response = await fetch(`/api/postprocess/jobs/${job}/corrections/${encodeURIComponent(entryId)}`, {
@@ -403,8 +484,10 @@ async function save(action) {
   } catch (error) {
     message(error.message || "Could not save.", "error");
   } finally {
+    saveInFlight = false;
     $("save").disabled = false;
     $("reject").disabled = false;
+    updateQueueControls();
     $("save").textContent = saveLabel;
     $("reject").textContent = rejectLabel;
   }
@@ -425,8 +508,12 @@ $("queue-prev").addEventListener("click", () => navigateQueue(-1));
 $("queue-next").addEventListener("click", () => navigateQueue(1));
 document.addEventListener("keydown", event => {
   const editing = ["TEXTAREA", "INPUT", "SELECT"].includes(document.activeElement?.tagName);
-  if (event.altKey && event.key === "ArrowLeft") { event.preventDefault(); navigateQueue(-1); return; }
-  if (event.altKey && event.key === "ArrowRight") { event.preventDefault(); navigateQueue(1); return; }
+  if (saveInFlight) {
+    if ((event.altKey && ["ArrowLeft","ArrowRight"].includes(event.key)) || (!editing && ["[","]"].includes(event.key))) event.preventDefault();
+    return;
+  }
+  if (!editing && event.altKey && event.key === "ArrowLeft") { event.preventDefault(); navigateQueue(-1); return; }
+  if (!editing && event.altKey && event.key === "ArrowRight") { event.preventDefault(); navigateQueue(1); return; }
   if (event.ctrlKey && event.key === "Enter") {
     event.preventDefault();
     if (event.shiftKey) save("reject"); else save("apply");

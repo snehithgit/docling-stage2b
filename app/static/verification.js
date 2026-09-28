@@ -75,6 +75,27 @@ async function changeProvider(kind, select) {
 }
 window.changeProvider = changeProvider;
 
+async function setInterlockMode(mode, button) {
+  const labels = {start:"Starting…", stop:"Stopping…", auto:"Enabling Auto…"};
+  const original = button?.textContent || mode;
+  if (button) { button.disabled = true; button.textContent = labels[mode] || "Working…"; }
+  try {
+    const data = await api(`/api/stage2b/interlock/${mode}`, {method:"POST"});
+    if (mode === "stop") {
+      const active = Object.keys(data.active_jobs_finishing || {}).length;
+      feedback(`Text · Vision · Artifact dispatch stopped.${active ? " Current request(s) will finish safely." : ""}`, "success");
+    } else if (mode === "auto") {
+      feedback(`Auto interlock enabled. Text/Vision keep priority; Artifact work will use Pi5/OnePlus whenever they become idle.`, "success");
+    } else {
+      const normal = Number(data.text_authorized || 0) + Number(data.vision_authorized || 0);
+      feedback(`Interlock started · ${normal} normal route(s) authorized · ${Number(data.artifact_released || 0)} artifact route(s) ready.`, "success");
+    }
+    await load();
+  } catch (error) { feedback(error.message); }
+  finally { if (button) { button.disabled = false; button.textContent = original; } }
+}
+window.setInterlockMode = setInterlockMode;
+
 async function toggleAutoAll(button) {
   const enabled = button.getAttribute("aria-checked") !== "true";
   button.disabled = true;
@@ -196,16 +217,28 @@ function renderModes(status) {
   const note = document.getElementById("verifier-status-note");
   if (note) note.textContent = `Text: ${textName}${status?.text_provider?.primary_model ? ` · ${status.text_provider.primary_model}` : ""} | Vision: ${visionName}${status?.vision_provider?.primary_model ? ` · ${status.vision_provider.primary_model}` : ""} · explicit selection, no automatic provider fallback`;
   const quota = quotaFromStatus(status);
+  const interlockMode = String(status?.interlock?.mode || "mixed");
+  const interlockBadge = document.getElementById("interlock-mode");
+  if (interlockBadge) {
+    const labels = {auto:"Auto", started:"Started", stopped:"Stopped", mixed:"Mixed / legacy"};
+    interlockBadge.textContent = labels[interlockMode] || interlockMode;
+    interlockBadge.className = `mode-badge ${interlockMode === "auto" ? "auto" : interlockMode === "started" ? "running" : "paused"}`;
+  }
+  for (const id of ["interlock-start", "interlock-stop", "interlock-auto"]) {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle("is-active", id === `interlock-${interlockMode === "started" ? "start" : interlockMode}`);
+  }
   for (const target of ["pi5", "oneplus"]) {
-    const counts = status.counts?.[target] || {};
+    const counts = (target === "pi5" ? status.workloads?.text : status.workloads?.vision) || status.counts?.[target] || {};
     const auto = status.modes?.[target]?.auto_run === true;
     const paused = status.modes?.[target]?.paused === true;
     const active = Number(counts.processing || 0) > 0;
     const selectedCloud = target === "pi5" ? status?.text_provider?.mode === "cloud" : status?.vision_provider?.mode === "cloud";
     const quotaPaused = selectedCloud && quota?.paused === true;
     const mode = document.getElementById(`${target}-mode`);
-    mode.textContent = quotaPaused ? "Quota paused" : paused ? "Stopped" : auto ? "Auto Run" : active ? "Running" : "Manual";
-    mode.className = `mode-badge ${quotaPaused || paused ? "paused" : auto ? "auto" : active ? "running" : "paused"}`;
+    const sharedLabel = interlockMode === "auto" ? "Auto" : interlockMode === "started" ? (active ? "Running" : "Started") : interlockMode === "stopped" ? "Stopped" : (paused ? "Stopped" : auto ? "Auto" : "Mixed");
+    mode.textContent = quotaPaused ? "Quota paused" : sharedLabel;
+    mode.className = `mode-badge ${quotaPaused || interlockMode === "stopped" ? "paused" : interlockMode === "auto" ? "auto" : interlockMode === "started" ? "running" : "paused"}`;
     document.getElementById(`${target}-done`).textContent = Number(counts.completed || 0);
     document.getElementById(`${target}-failed`).textContent = Number(counts.failed || 0);
     setSwitch(document.getElementById(`${target}-auto`), auto);
@@ -235,10 +268,24 @@ function renderModes(status) {
       } else stage.textContent = `Active job #${worker.active_job_id} · ${worker.active_stage || "processing"}`;
     }
   }
-  const piAuto = status.modes?.pi5?.auto_run === true, oneAuto = status.modes?.oneplus?.auto_run === true;
-  const all = piAuto && oneAuto; const master = document.getElementById("auto-all"); setSwitch(master, all);
-  const masterSmall = master?.querySelector("small"); if (masterSmall && !all && (piAuto || oneAuto)) masterSmall.textContent = "Mixed";
-  const failedTotal = Number(status.counts?.pi5?.failed || 0) + Number(status.counts?.oneplus?.failed || 0);
+  const artifact = status.workloads?.artifact || {};
+  const artifactDone = document.getElementById("artifact-done"); if (artifactDone) artifactDone.textContent = Number(artifact.completed || 0);
+  const artifactPending = document.getElementById("artifact-pending"); if (artifactPending) artifactPending.textContent = Number(artifact.pending || 0);
+  const artifactFailed = document.getElementById("artifact-failed"); if (artifactFailed) artifactFailed.textContent = Number(artifact.failed || 0);
+  const reservations = status?.interlock?.provider_reservations || {};
+  const artifactProviders = Object.entries(reservations).filter(([, owner]) => String(owner).includes(":artifact")).map(([provider]) => verifierProviderName(provider));
+  const artifactMode = document.getElementById("artifact-mode");
+  if (artifactMode) {
+    const processing = Number(artifact.processing || 0);
+    artifactMode.textContent = interlockMode === "stopped" ? "Stopped" : processing ? "Running" : interlockMode === "auto" ? "Auto idle-pool" : "Ready";
+    artifactMode.className = `mode-badge ${interlockMode === "stopped" ? "paused" : processing ? "running" : interlockMode === "auto" ? "auto" : "paused"}`;
+  }
+  const artifactStage = document.getElementById("artifact-stage");
+  if (artifactStage) {
+    const waiting = Number(artifact.waiting_dependency || 0), ready = Number(artifact.ready || 0);
+    artifactStage.textContent = artifactProviders.length ? `Running on ${artifactProviders.join(" + ")}` : interlockMode === "stopped" ? "Stopped — pending work preserved" : ready ? `${ready} ready · waiting for an idle local device` : waiting ? `${waiting} waiting for normal Text/Vision routes` : "No eligible artifact work";
+  }
+  const failedTotal = Number(status.workloads?.text?.failed || 0) + Number(status.workloads?.vision?.failed || 0);
   const failedStrip = document.getElementById("retry-failed-strip");
   const failedCount = document.getElementById("retry-failed-count");
   const retryAll = document.getElementById("retry-all-failed");
@@ -342,8 +389,17 @@ function renderResults(target, data) {
       const crossLabel = isPicture
         ? (target === "pi5" ? `Text consistency → ${visionVerifierName()}` : textConsistencyLabel)
         : `Re-read target → ${visionVerifierName()}`;
-      const reviewLink = !isPicture && target === "pi5" && ["LIKELY_CORRUPT","UNCERTAIN"].includes(job.verdict) && source.page
-        ? `<a class="mini-action quiet-action" href="/review?job=${job.postprocess_job_id}&entry=${encodeURIComponent(`${job.generation}:text:${job.route_id}`)}&page=${encodeURIComponent(source.page)}">Manual override</a>` : "";
+      const reviewCandidate = !isPicture && target === "pi5" && ["LIKELY_CORRUPT","UNCERTAIN"].includes(job.verdict) && source.page;
+      const reviewEntryId = job.review_entry_id || `${job.generation}:text:${job.route_id}`;
+      const reviewHref = `/review?job=${job.postprocess_job_id}&entry=${encodeURIComponent(reviewEntryId)}&page=${encodeURIComponent(source.page ?? "")}`;
+      let reviewLink = "";
+      if (reviewCandidate && job.review_entry_ready) {
+        reviewLink = `<a class="mini-action quiet-action" href="${reviewHref}">Manual override</a>`;
+      } else if (reviewCandidate && job.review_entry_state === "publishing") {
+        reviewLink = `<span class="mini-action quiet-action" aria-disabled="true">Preparing review…</span>`;
+      } else if (reviewCandidate) {
+        reviewLink = `<a class="mini-action quiet-action" href="${reviewHref}">Repair / review</a>`;
+      }
       const auditLink = isPicture
         ? `<a class="mini-action" href="/vision-audit?job=${encodeURIComponent(job.id)}">Audit</a>`
         : `<a class="mini-action" href="/text-audit?job=${encodeURIComponent(job.id)}">Audit</a>`;

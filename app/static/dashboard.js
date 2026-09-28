@@ -1,5 +1,6 @@
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
+const busyActions = new Set();
 const formatLabels = {
   md: "Markdown",
   json: "JSON",
@@ -55,18 +56,25 @@ function formatPills(formats) {
 }
 
 async function rerunStage2(id, button) {
+  const busyKey = `stage2:${id}`;
+  if (busyActions.has(busyKey)) return;
   if (!window.confirm("Re-run Stage 2A analysis?\n\nThis creates a new analysis generation and may require downstream verification, finalization, chunks and embeddings to rebuild. Historical runs and human decisions are preserved.")) return;
+  busyActions.add(busyKey);
   if (button) { button.disabled = true; button.textContent = "Queuing…"; }
-  const response = await fetch(`/api/postprocess/jobs/${id}/rerun`, { method: "POST" });
-  let data = {};
-  try { data = await response.json(); } catch (_) {}
-  if (!response.ok) {
-    if (button) { button.disabled = false; button.textContent = "Rerun"; }
-    showDashboardFeedback(data.detail || "Quality analysis rerun could not be queued.");
-    return;
+  let response;
+  try {
+    response = await fetch(`/api/postprocess/jobs/${id}/rerun`, { method: "POST" });
+    let data = {};
+    try { data = await response.json(); } catch (_) {}
+    if (!response.ok) throw new Error(data.detail || "Quality analysis rerun could not be queued.");
+    showDashboardFeedback("Quality analysis rerun queued.", "success");
+    await refresh();
+  } catch (error) {
+    showDashboardFeedback(error.message, "error");
+  } finally {
+    busyActions.delete(busyKey);
+    if (button?.isConnected) { button.disabled = false; button.textContent = "Rerun"; }
   }
-  showDashboardFeedback("Quality analysis rerun queued.", "success");
-  await refresh();
 }
 window.rerunStage2 = rerunStage2;
 
@@ -75,11 +83,14 @@ async function deleteQueueItem(button) {
   const stage2Id = Number(button.dataset.deleteBook || 0);
   const name = button.dataset.deleteName || "this document";
   const managed = stage2Id > 0;
+  const busyKey = managed ? `book-delete:${stage2Id}` : `conversion-delete:${conversionId}`;
+  if (busyActions.has(busyKey)) return;
   const message = managed
     ? `Delete "${name}" from the active pipeline?\n\nThis clears its conversion and downstream book state. Existing source/output/processed files are moved to _deleted_books quarantine folders, not permanently destroyed.`
     : `Remove "${name}" from the conversion queue/history?\n\nUse this for stale failures such as FileMissing after a manual rename. If the old source/output file still exists, it is moved to _deleted_books; already-missing files do not block cleanup.`;
   if (!window.confirm(message)) return;
   const original = button.textContent;
+  busyActions.add(busyKey);
   button.disabled = true;
   button.textContent = "Deleting…";
   try {
@@ -96,8 +107,9 @@ async function deleteQueueItem(button) {
     await refresh();
   } catch (error) {
     showDashboardFeedback(error.message, "error");
-    button.disabled = false;
-    button.textContent = original;
+  } finally {
+    busyActions.delete(busyKey);
+    if (button.isConnected) { button.disabled = false; button.textContent = original; }
   }
 }
 
@@ -113,7 +125,7 @@ function resultActions(job) {
     if (job.stage2_status === "completed") {
       parts.push(`<a class="mini-action" href="/api/postprocess/jobs/${job.stage2_job_id}/artifact/summary.json" target="_blank">Quality</a>`);
       parts.push(`<a class="mini-action" href="/api/postprocess/jobs/${job.stage2_job_id}/artifact/routes.json" target="_blank">Routing</a>`);
-      parts.push(`<button class="mini-action" onclick="rerunStage2(${job.stage2_job_id}, this)">Rerun</button>`);
+      parts.push(`<button class="mini-action" data-stage2-rerun="${job.stage2_job_id}" ${busyActions.has(`stage2:${job.stage2_job_id}`) ? "disabled" : ""} onclick="rerunStage2(${job.stage2_job_id}, this)">Rerun</button>`);
     } else {
       parts.push(`<span class="quality-muted">Quality analysis ${escapeHtml(job.stage2_status || "queued")}</span>`);
     }
@@ -121,7 +133,8 @@ function resultActions(job) {
   const terminal = ["failed", "completed"].includes(String(job.status || ""));
   const downstreamActive = job.stage2_job_id && ["pending", "processing"].includes(String(job.stage2_status || ""));
   if (terminal && !downstreamActive) {
-    parts.push(`<button class="mini-action danger-action queue-delete" type="button" data-delete-conversion="${Number(job.id || 0)}" data-delete-book="${Number(job.stage2_job_id || 0)}" data-delete-name="${escapeHtml(job.filename || "Document")}" title="Remove this document from the active queue/history">🗑 Delete</button>`);
+    const deleteBusyKey = job.stage2_job_id ? `book-delete:${Number(job.stage2_job_id)}` : `conversion-delete:${Number(job.id || 0)}`;
+    parts.push(`<button class="mini-action danger-action queue-delete" type="button" ${busyActions.has(deleteBusyKey) ? "disabled" : ""} data-delete-conversion="${Number(job.id || 0)}" data-delete-book="${Number(job.stage2_job_id || 0)}" data-delete-name="${escapeHtml(job.filename || "Document")}" title="Remove this document from the active queue/history">🗑 Delete</button>`);
   }
   return parts.length ? `<div class="document-actions align-actions-right">${parts.join("")}</div>` : "—";
 }

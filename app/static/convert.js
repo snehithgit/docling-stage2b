@@ -172,7 +172,7 @@ async function pollTask(taskId) {
       setProcessing(false);
       return;
     }
-    const position = data.task_position ? ` · Queue position ${data.task_position}` : "";
+    const position = data.task_position ? ` · Queue position ${escapeHtml(String(data.task_position))}` : "";
     setStatus(`Processing your document(s), please wait…${position}`);
     pollTimer = setTimeout(() => pollTask(taskId), 1500);
   } catch (error) {

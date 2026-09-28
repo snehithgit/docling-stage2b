@@ -246,3 +246,44 @@
 .vision-audit-human-state > strong { margin:0; }
 .vision-audit-human-state > span { color:var(--muted); font-size:.84rem; }
 .extracted-detail { margin-top:12px; }
+
+/* 40.11T standalone structural-review workspaces.
+   These pages intentionally omit the global sidebar, so they must not inherit
+   the two-column app shell or the workflow step-card grid. */
+.ui29 .app-shell.review-workspace-shell { display:block; grid-template-columns:minmax(0,1fr); }
+.ui29 .review-workspace-main { max-width:1600px; }
+.review-workspace-grid { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(360px,.75fr); gap:18px; align-items:start; }
+.review-workspace-card { min-width:0; padding:20px; border:1px solid var(--line); border-radius:16px; background:var(--surface); box-shadow:var(--shadow-small); }
+.review-workspace-card > :last-child { margin-bottom:0; }
+.review-source-frame { display:grid; place-items:center; min-height:320px; max-height:76vh; overflow:auto; padding:12px; border:1px solid var(--line); border-radius:12px; background:#f1f2f6; }
+.review-source-frame img { display:block; max-width:100%; width:auto; height:auto; max-height:72vh; object-fit:contain; border:1px solid #d8dbe5; border-radius:8px; background:#fff; }
+.review-evidence-json { max-height:360px; overflow:auto; margin:12px 0 0; padding:12px; border:1px solid var(--line); border-radius:10px; background:#fafbfc; font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
+.review-evidence-list { display:grid; gap:8px; margin:12px 0; }
+.review-evidence-row { display:grid; grid-template-columns:minmax(120px,.45fr) minmax(0,1fr); gap:10px; padding:9px 10px; border:1px solid var(--line); border-radius:9px; background:#fafbfc; }
+.review-evidence-row span { color:var(--muted); font-size:11px; }
+.review-evidence-row strong { min-width:0; overflow-wrap:anywhere; font-size:12px; }
+.review-nav { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:12px; }
+.review-decision-panel { margin-top:16px; padding-top:16px; border-top:1px solid var(--line); }
+.review-decision-actions { display:flex; gap:9px; flex-wrap:wrap; margin-top:12px; }
+.review-inline-state { margin-top:12px; padding:9px 11px; border-radius:9px; background:var(--green-soft); color:#28684c; font-size:12px; }
+.review-inline-warning { margin-top:12px; padding:10px 12px; border-radius:9px; background:var(--amber-soft); color:#76520d; font-size:12px; }
+.review-note-field { display:grid; gap:6px; margin-top:12px; }
+.review-note-field textarea { width:100%; min-height:82px; resize:vertical; }
+@media(max-width:980px){ .review-workspace-grid { grid-template-columns:1fr; } .review-source-frame { max-height:none; } .review-source-frame img { max-height:72vh; } }
+@media(max-width:620px){ .review-workspace-card { padding:15px; } .review-evidence-row { grid-template-columns:1fr; gap:3px; } .review-decision-actions > * { width:100%; text-align:center; justify-content:center; } }
+.stage-actions-inline{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+/* 40.11W — shared Text / Vision / Artifact scheduler interlock */
+.verification-interlock-controls {
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:8px;
+  flex-wrap:wrap;
+}
+.verification-interlock-controls .mode-badge { margin-left:4px; }
+.verification-interlock-controls button.is-active { box-shadow:0 0 0 2px rgba(15,23,42,.12) inset; }
+.interlock-card-note { margin:12px 0 0; color:var(--muted); font-size:.82rem; line-height:1.45; }
+.artifact-worker-card .verification-big-stats { grid-template-columns:repeat(3,minmax(0,1fr)); }
+@media(min-width:980px){ .verification-device-grid.always-visible-devices { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+@media(max-width:760px){ .verification-interlock-controls { justify-content:flex-start; } }

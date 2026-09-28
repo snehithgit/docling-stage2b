@@ -1,5 +1,6 @@
 (() => {
   const $ = id => document.getElementById(id);
+  const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   let mode = 'file';
   let pickedFile = null;
   let busy = false;
@@ -58,7 +59,7 @@
     const result = $('add-book-result');
     result.hidden = false;
     const state = data.auto_run ? 'Conversion will start automatically.' : 'The book is queued. Start the conversion batch when you are ready.';
-    result.innerHTML = `<div><strong>${data.duplicate ? 'Book already present' : 'Book added to pipeline'}</strong><p>${String(data.filename || '')}</p><p class="subtle">${state}</p></div><div class="add-book-result-actions"><a class="primary-button" href="/queue">Open conversion queue</a><a class="secondary-button" href="/">Back to books</a></div>`;
+    result.innerHTML = `<div><strong>${data.duplicate ? 'Book already present' : 'Book added to pipeline'}</strong><p>${esc(data.filename || '')}</p><p class="subtle">${state}</p></div><div class="add-book-result-actions"><a class="primary-button" href="/queue">Open conversion queue</a><a class="secondary-button" href="/">Back to books</a></div>`;
   }
   async function addBook() {
     if (busy) return;

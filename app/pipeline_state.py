@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -79,6 +80,12 @@ def stage2c_output_signature(result_dir: Path) -> str:
         result_dir / "stage2c_backfill.json",
         result_dir / "correction_ledger.json",
         result_dir / "chunk_overlays.jsonl",
+        # Human table-structure overlays are authoritative Stage-3 input. Any
+        # saved/changed repair must make canonical chunks stale.
+        result_dir / "table_structure_repairs.json",
+        # Human Docling page/bbox repairs are direct Stage-3 input. Saving or
+        # deactivating one must invalidate existing chunks without forcing 2A/2B.
+        result_dir / "docling_page_repairs.json",
     ]
     return _sha256_parts(
         [f"{path.name}:{file_signature(path)}".encode("utf-8") for path in paths]
@@ -165,16 +172,208 @@ def repair_identity_metadata(result_dir: Path, expected_job_id: int | None = Non
     final = identity_metadata_status(result_dir, expected_job_id)
     return {**final, "repaired": repaired, "repairable": True}
 
+
+def stage2a_human_review_summary(result_dir: Path) -> dict[str, Any]:
+    """Summarize durable Stage-2A structural human-review routes."""
+    payload = load_json(Path(result_dir) / "routes.json")
+    routes = [
+        dict(route) for route in (payload.get("routes") or [])
+        if isinstance(route, dict) and str(route.get("target") or "") == "human"
+    ]
+    pending = [route for route in routes if str(route.get("status") or "pending") == "pending"]
+    resolved = [route for route in routes if str(route.get("status") or "") in {"resolved", "accepted", "dismissed"}]
+    return {
+        "total": len(routes),
+        "pending": len(pending),
+        "resolved": len(resolved),
+        "blocking_review_required": len(pending),
+        "pending_routes": pending,
+        "routes": routes,
+    }
+
+
+def stage2a_structural_review_context(result_dir: Path, route_id: str) -> dict[str, Any]:
+    """Return one structural route with its persisted diagnostic evidence.
+
+    Older 40.11R ``routes.json`` files intentionally grouped diagnostics and
+    retained only a count.  ``diagnostics.json`` is therefore the compatibility
+    source of truth for review evidence.  Newer routes may also carry page hints,
+    but human review never depends on regenerating Stage 2A solely to populate
+    the UI.
+    """
+    result_dir = Path(result_dir)
+    summary = stage2a_human_review_summary(result_dir)
+    route = next(
+        (item for item in summary.get("routes", []) if str(item.get("route_id") or "") == str(route_id)),
+        None,
+    )
+    if route is None:
+        raise KeyError(route_id)
+
+    code = str(route.get("code") or "")
+    diagnostics = load_json(result_dir / "diagnostics.json")
+    signal = next(
+        (item for item in (diagnostics.get("signals") or [])
+         if isinstance(item, dict) and str(item.get("code") or "") == code),
+        {},
+    )
+    items = [dict(item) for item in (signal.get("items") or signal.get("samples") or []) if isinstance(item, dict)]
+    pages: list[int] = []
+    for item in items:
+        try:
+            page = int(item.get("page"))
+        except (TypeError, ValueError):
+            continue
+        if page > 0 and page not in pages:
+            pages.append(page)
+    pages.sort()
+    evidence_items = []
+    for idx, item in enumerate(items, start=1):
+        page = None
+        try:
+            value = int(item.get("page"))
+            page = value if value > 0 else None
+        except (TypeError, ValueError):
+            page = None
+        evidence_items.append({
+            "evidence_id": f"E{idx:04d}",
+            "page": page,
+            "data": item,
+        })
+    return {
+        "route": route,
+        "code": code,
+        "signal": signal,
+        "items": items,
+        "evidence_items": evidence_items,
+        "required_evidence_ids": [item["evidence_id"] for item in evidence_items],
+        "required_pages": pages,
+    }
+
+
+def set_stage2a_human_review_decision(
+    result_dir: Path,
+    route_id: str,
+    *,
+    decision: str,
+    note: str | None = None,
+    reviewed_pages: list[int] | None = None,
+    reviewed_items: list[str] | None = None,
+) -> dict[str, Any]:
+    """Resolve one Stage-2A structural human-review route atomically.
+
+    Structural review is intentionally separate from the Stage-2C text/visual
+    correction ledger.  The decision is stored on the route itself so Stage 3
+    can enforce the route's advertised ``review_before_chunking`` contract.
+    """
+    normalized = str(decision or "").strip().lower()
+    if normalized not in {"accepted", "dismissed"}:
+        raise ValueError("decision must be 'accepted' or 'dismissed'")
+    path = Path(result_dir) / "routes.json"
+    payload = load_json(path)
+    routes = payload.get("routes") or []
+    found: dict[str, Any] | None = None
+    for route in routes:
+        if not isinstance(route, dict):
+            continue
+        if str(route.get("route_id") or "") != str(route_id):
+            continue
+        if str(route.get("target") or "") != "human":
+            raise ValueError("route is not a Stage-2A human-review route")
+        normalized_page_set: set[int] = set()
+        for value in reviewed_pages or []:
+            try:
+                page = int(value)
+            except (TypeError, ValueError):
+                continue
+            if page > 0:
+                normalized_page_set.add(page)
+        normalized_pages = sorted(normalized_page_set)
+        normalized_item_ids = sorted({
+            str(value).strip() for value in (reviewed_items or []) if str(value).strip()
+        })
+        code = str(route.get("code") or "")
+        if code == "READING_ORDER_ANOMALY":
+            context = stage2a_structural_review_context(result_dir, route_id)
+            required_pages = list(context.get("required_pages") or [])
+            if not required_pages:
+                raise ValueError("Reading-order review evidence is unavailable; keep the route unresolved until its Stage 2A diagnostics can be inspected.")
+            missing = [page for page in required_pages if page not in normalized_pages]
+            if missing:
+                raise ValueError("Review every flagged reading-order page before resolving this route. Missing page(s): " + ", ".join(str(page) for page in missing))
+            route["human_reviewed_pages"] = normalized_pages
+        elif code == "TABLE_ROW_COLLAPSE":
+            # A saved repair is accepted through the dedicated table-repair path.
+            # False-positive dismissal must still come from that page after the
+            # immutable source page was explicitly checked.
+            if normalized == "dismissed" and "table-source" not in normalized_item_ids:
+                raise ValueError("Review the collapsed table against the original source page before dismissing it as a false positive.")
+            if normalized_item_ids:
+                route["human_reviewed_evidence_ids"] = normalized_item_ids
+        else:
+            context = stage2a_structural_review_context(result_dir, route_id)
+            required_ids = list(context.get("required_evidence_ids") or [])
+            if not required_ids:
+                raise ValueError("Structural-review evidence is unavailable; keep the route unresolved until its Stage 2A diagnostics can be inspected.")
+            missing = [item_id for item_id in required_ids if item_id not in normalized_item_ids]
+            if missing:
+                raise ValueError("Review every structural evidence item before resolving this route. Missing item(s): " + ", ".join(missing))
+            route["human_reviewed_evidence_ids"] = normalized_item_ids
+        route["status"] = normalized
+        route["human_decision"] = normalized
+        route["human_decision_note"] = str(note or "").strip() or None
+        route["human_decided_at_epoch"] = time.time()
+        found = dict(route)
+        break
+    if found is None:
+        raise KeyError(route_id)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(path)
+    return found
+
+
 def stage2c_freshness(result_dir: Path, verification_rows: list[dict[str, Any]], *, rule_version: str | None = None, artifact_sweep_required: bool = True) -> dict[str, Any]:
     result_dir = Path(result_dir)
     state = load_json(result_dir / "stage2c_backfill.json")
     signature_rows = verification_rows_for_stage2c(verification_rows, artifact_sweep_required=artifact_sweep_required)
     current_verification = verification_signature(signature_rows)
+    ledger = load_json(result_dir / "correction_ledger.json")
+    ledger_entry_ids = {
+        str(entry.get("entry_id") or "")
+        for entry in (ledger.get("entries") or [])
+        if isinstance(entry, dict) and entry.get("entry_id")
+    }
+    publication_blockers: list[dict[str, Any]] = []
+    for row in signature_rows:
+        if str(row.get("status") or "") != "completed":
+            continue
+        explicit_state = str(row.get("stage2c_entry_state") or "")
+        if explicit_state in {"publishing", "error"}:
+            publication_blockers.append(row)
+            continue
+        # Backward-compatible safety for rows completed by 40.11P or older:
+        # those rows have no publication state column populated. A completed
+        # uncertain/corrupt text-verifier result still requires its deterministic
+        # ledger entry before Stage 3 may regard Stage 2C as current.
+        if str(row.get("target") or "") != "pi5":
+            continue
+        if str(row.get("verdict") or "").upper() not in {"LIKELY_CORRUPT", "UNCERTAIN"}:
+            continue
+        try:
+            source = json.loads(row.get("source_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            source = {}
+        if str(source.get("type") or "") == "picture":
+            continue
+        expected_entry_id = f"{str(row.get('generation') or '')}:text:{str(row.get('route_id') or '')}"
+        if expected_entry_id not in ledger_entry_ids:
+            publication_blockers.append(row)
     ready_status = str(state.get("status") or "") == "completed"
     signature_match = bool(state.get("verification_signature")) and str(state.get("verification_signature")) == current_verification
     rule_match = (not rule_version) or str(state.get("rule_version") or "") == str(rule_version)
     outputs = (result_dir / "correction_ledger.json").is_file() and (result_dir / "chunk_overlays.jsonl").is_file()
-    ready = bool(ready_status and signature_match and rule_match and outputs)
+    ready = bool(ready_status and signature_match and rule_match and outputs and not publication_blockers)
     reason = None
     if not state:
         reason = "stage2c_not_built"
@@ -186,6 +385,8 @@ def stage2c_freshness(result_dir: Path, verification_rows: list[dict[str, Any]],
         reason = "stage2c_rule_version_stale"
     elif not outputs:
         reason = "stage2c_outputs_missing"
+    elif publication_blockers:
+        reason = "stage2c_publication_incomplete"
     return {
         "ready": ready,
         "reason": reason,
@@ -193,6 +394,8 @@ def stage2c_freshness(result_dir: Path, verification_rows: list[dict[str, Any]],
         "verification_signature": current_verification,
         "signature_route_count": len(signature_rows),
         "artifact_sweep_required": bool(artifact_sweep_required),
+        "publication_blocker_count": len(publication_blockers),
+        "publication_blocker_job_ids": [int(row.get("id") or 0) for row in publication_blockers],
         "recorded_verification_signature": state.get("verification_signature"),
         "rule_version": rule_version,
         "recorded_rule_version": state.get("rule_version"),

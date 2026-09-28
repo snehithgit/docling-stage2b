@@ -8,6 +8,7 @@ from app.config import AppConfig
 from app.events import EventBroker
 from app.pipeline_state import stage2c_freshness, stage2c_output_signature, stage3_freshness, verification_signature
 from app.stage2b import Stage2BWorker
+from app.stage2c import STAGE2C_RULE_VERSION
 from app.stage3 import Stage3ChunkBuilder
 
 
@@ -34,6 +35,7 @@ def _write_current_stage2c(result_dir: Path, rows):
     (result_dir / "chunk_overlays.jsonl").write_text("", encoding="utf-8")
     (result_dir / "stage2c_backfill.json").write_text(json.dumps({
         "status": "completed",
+        "rule_version": STAGE2C_RULE_VERSION,
         "verification_signature": verification_signature(rows),
     }), encoding="utf-8")
 
@@ -201,3 +203,188 @@ def test_stage3_rule_version_change_marks_canonical_chunks_stale(tmp_path: Path)
     assert state["ready"] is False
     assert state["canonical_ready"] is False
     assert state["reason"] == "stage3_rule_version_stale"
+
+
+def test_stage2a_human_review_summary_and_decision_are_durable(tmp_path: Path):
+    from app.pipeline_state import stage2a_human_review_summary, set_stage2a_human_review_decision
+    (tmp_path / "routes.json").write_text(json.dumps({"routes": [
+        {"route_id":"R00001","target":"human","code":"DOCLING_GEOMETRY_ANOMALY","status":"pending","source":{"type":"diagnostic_group","count":2}},
+        {"route_id":"R00002","target":"pi5","code":"TEXT_REVIEW","status":"pending","source":{"type":"text","index":1}},
+    ]}), encoding="utf-8")
+    (tmp_path / "diagnostics.json").write_text(json.dumps({"signals": [{
+        "code": "DOCLING_GEOMETRY_ANOMALY", "classification": "HUMAN_REVIEW", "count": 2,
+        "items": [
+            {"page": 2, "source_type": "text", "text_index": 4, "problem": "degenerate_bbox"},
+            {"page": 5, "source_type": "text", "text_index": 9, "problem": "bbox_outside_page"},
+        ],
+    }]}), encoding="utf-8")
+    before = stage2a_human_review_summary(tmp_path)
+    assert before["blocking_review_required"] == 1
+    with pytest.raises(ValueError, match="Review every structural evidence item"):
+        set_stage2a_human_review_decision(tmp_path, "R00001", decision="accepted", reviewed_items=["E0001"])
+    decided = set_stage2a_human_review_decision(
+        tmp_path, "R00001", decision="accepted", note="checked source layout",
+        reviewed_items=["E0002", "E0001"],
+    )
+    assert decided["status"] == "accepted"
+    assert decided["human_reviewed_evidence_ids"] == ["E0001", "E0002"]
+    after = stage2a_human_review_summary(tmp_path)
+    assert after["blocking_review_required"] == 0
+    persisted = json.loads((tmp_path / "routes.json").read_text(encoding="utf-8"))
+    row = next(r for r in persisted["routes"] if r["route_id"] == "R00001")
+    assert row["human_decision"] == "accepted"
+    assert row["human_decision_note"] == "checked source layout"
+
+
+@pytest.mark.asyncio
+async def test_stage3_rejects_pending_stage2a_structural_human_review(tmp_path: Path):
+    processed = tmp_path / "processed"; output = tmp_path / "output"
+    result_dir = processed / "book"; result_dir.mkdir(parents=True); output.mkdir()
+    rows = [_verification_row()]
+    _write_current_stage2c(result_dir, rows)
+    (result_dir / "routes.json").write_text(json.dumps({"routes": [{
+        "route_id":"R00002","target":"human","code":"DOCLING_GEOMETRY_ANOMALY","status":"pending",
+        "source":{"type":"diagnostic_group","count":2},
+    }]}), encoding="utf-8")
+
+    class PostprocessStore:
+        async def get_job(self, job_id):
+            return {"id":1,"status":"completed","result_dir":"book","output_filename":"book.zip"}
+    class VerificationStore:
+        async def list_book_jobs_raw(self, job_id): return rows
+    class Docling: pass
+
+    cfg = AppConfig(output_dir=str(output), processed_dir=str(processed), database_path=str(tmp_path / "jobs.db"))
+    builder = Stage3ChunkBuilder(lambda: cfg, PostprocessStore(), Docling(), EventBroker(), VerificationStore())
+    with pytest.raises(ValueError, match="structural human review"):
+        await builder.start(1)
+
+
+def test_stage2c_publication_error_blocks_current_state_even_with_matching_backfill(tmp_path: Path):
+    rows = [{
+        "id": 91,
+        "generation": "g1",
+        "route_id": "R91",
+        "target": "pi5",
+        "status": "completed",
+        "verdict": "UNCERTAIN",
+        "completed_at": "2026-09-24T00:00:00Z",
+        "model": "model",
+        "result_json": '{"parsed":{"verdict":"UNCERTAIN"}}',
+        "artifact_path": "verification/result.json",
+        "error_type": "",
+        "error_message": "",
+        "stage2c_entry_state": "error",
+        "stage2c_entry_id": "g1:text:R91",
+        "stage2c_entry_error": "OSError: injected ledger write failure",
+    }]
+    (tmp_path / "correction_ledger.json").write_text('{"entries": []}', encoding="utf-8")
+    (tmp_path / "chunk_overlays.jsonl").write_text('', encoding="utf-8")
+    (tmp_path / "stage2c_backfill.json").write_text(json.dumps({
+        "status": "completed",
+        "verification_signature": verification_signature(rows),
+    }), encoding="utf-8")
+
+    info = stage2c_freshness(tmp_path, rows)
+    assert info["ready"] is False
+    assert info["reason"] == "stage2c_publication_incomplete"
+    assert info["publication_blocker_count"] == 1
+    assert info["publication_blocker_job_ids"] == [91]
+
+
+def test_stage2c_legacy_completed_uncertain_text_row_without_ledger_entry_blocks_stage3(tmp_path: Path):
+    rows = [{
+        "id": 92,
+        "generation": "legacy-g",
+        "route_id": "R00001",
+        "target": "pi5",
+        "status": "completed",
+        "verdict": "UNCERTAIN",
+        "completed_at": "2026-09-24T00:00:00Z",
+        "model": "model",
+        "source_json": json.dumps({"type": "text", "index": 5378, "page": 72}),
+        "result_json": '{"parsed":{"verdict":"UNCERTAIN"}}',
+        "artifact_path": "verification/result.json",
+        "error_type": "",
+        "error_message": "",
+        "stage2c_entry_state": None,
+    }]
+    (tmp_path / "correction_ledger.json").write_text('{"entries": []}', encoding="utf-8")
+    (tmp_path / "chunk_overlays.jsonl").write_text('', encoding="utf-8")
+    (tmp_path / "stage2c_backfill.json").write_text(json.dumps({
+        "status": "completed",
+        "verification_signature": verification_signature(rows),
+    }), encoding="utf-8")
+
+    info = stage2c_freshness(tmp_path, rows)
+    assert info["ready"] is False
+    assert info["reason"] == "stage2c_publication_incomplete"
+    assert info["publication_blocker_job_ids"] == [92]
+
+
+def test_reading_order_review_context_recovers_legacy_r_evidence_without_rerun(tmp_path: Path):
+    from app.pipeline_state import stage2a_structural_review_context
+    (tmp_path / "routes.json").write_text(json.dumps({"routes": [{
+        "route_id": "R00001",
+        "target": "human",
+        "code": "READING_ORDER_ANOMALY",
+        "status": "pending",
+        "source": {"type": "diagnostic_group", "count": 2},
+    }]}), encoding="utf-8")
+    (tmp_path / "diagnostics.json").write_text(json.dumps({"signals": [{
+        "code": "READING_ORDER_ANOMALY",
+        "classification": "HUMAN_REVIEW",
+        "count": 2,
+        "items": [
+            {"page": 7, "layout_model": "row_major", "score": 0.31, "body_order_sample": [{"type":"text","index":4,"text":"A"}]},
+            {"page": 11, "layout_model": "column_major", "score": 0.27, "body_order_sample": [{"type":"text","index":9,"text":"B"}]},
+        ],
+    }]}), encoding="utf-8")
+
+    context = stage2a_structural_review_context(tmp_path, "R00001")
+    assert context["required_pages"] == [7, 11]
+    assert [item["page"] for item in context["items"]] == [7, 11]
+    assert context["route"]["source"] == {"type": "diagnostic_group", "count": 2}
+
+
+def test_reading_order_review_cannot_be_resolved_blindly_and_records_reviewed_pages(tmp_path: Path):
+    from app.pipeline_state import set_stage2a_human_review_decision
+    (tmp_path / "routes.json").write_text(json.dumps({"routes": [{
+        "route_id": "R00001",
+        "target": "human",
+        "code": "READING_ORDER_ANOMALY",
+        "status": "pending",
+        "source": {"type": "diagnostic_group", "count": 2},
+    }]}), encoding="utf-8")
+    (tmp_path / "diagnostics.json").write_text(json.dumps({"signals": [{
+        "code": "READING_ORDER_ANOMALY",
+        "classification": "HUMAN_REVIEW",
+        "count": 2,
+        "items": [{"page": 7}, {"page": 11}],
+    }]}), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Review every flagged reading-order page"):
+        set_stage2a_human_review_decision(tmp_path, "R00001", decision="accepted", reviewed_pages=[7])
+    persisted = json.loads((tmp_path / "routes.json").read_text(encoding="utf-8"))
+    assert persisted["routes"][0]["status"] == "pending"
+
+    decided = set_stage2a_human_review_decision(
+        tmp_path, "R00001", decision="accepted", note="source pages checked", reviewed_pages=[11, 7]
+    )
+    assert decided["status"] == "accepted"
+    assert decided["human_reviewed_pages"] == [7, 11]
+
+
+def test_table_row_collapse_cannot_be_dismissed_without_source_review_marker(tmp_path: Path):
+    from app.pipeline_state import set_stage2a_human_review_decision
+    (tmp_path / "routes.json").write_text(json.dumps({"routes": [{
+        "route_id": "R00007", "target": "human", "code": "TABLE_ROW_COLLAPSE",
+        "status": "pending", "source": {"type": "table_structure", "table_index": 3, "page": 12},
+    }]}), encoding="utf-8")
+    with pytest.raises(ValueError, match="original source page"):
+        set_stage2a_human_review_decision(tmp_path, "R00007", decision="dismissed")
+    decided = set_stage2a_human_review_decision(
+        tmp_path, "R00007", decision="dismissed", reviewed_items=["table-source"]
+    )
+    assert decided["status"] == "dismissed"
+    assert decided["human_reviewed_evidence_ids"] == ["table-source"]

@@ -453,3 +453,35 @@ def test_run_in_power_limit_duration_query_prefers_row_with_percent_and_hours(tm
     _write_index(path, rows)
     results = search_indices([path], "A new hydraulic motor has not been run in yet; what power limit applies and for how many operating hours?", top_k=2)
     assert results[0]["chunk_id"] == "LIMIT"
+
+
+def test_canonical_exact_duplicates_with_same_provenance_are_diversified():
+    from app.retrieval import diversify_results
+    sig = "ede2638"
+    common = {"retrieval":{"signature":sig}, "result_dir":"grab", "page_numbers":[68], "doc_items":["#/tables/9"]}
+    rows = [
+        {**common, "chunk_id":"CHK-000224", "rank":1},
+        {**common, "chunk_id":"CHK-000235", "rank":2},
+        {**common, "chunk_id":"CHK-000246", "rank":3},
+        {"chunk_id":"OTHER", "rank":4, "result_dir":"grab", "retrieval":{"signature":"other"}, "page_numbers":[69], "doc_items":["#/texts/1"]},
+    ]
+    out = diversify_results(rows, top_k=3)
+    assert [row["chunk_id"] for row in out] == ["CHK-000224", "OTHER", "CHK-000235"]
+
+
+def test_canonical_same_text_on_different_pages_is_not_deduplicated():
+    from app.retrieval import diversify_results
+    rows = [
+        {"chunk_id":"A","rank":1,"result_dir":"book","retrieval":{"signature":"same"},"page_numbers":[1],"doc_items":["#/texts/1"]},
+        {"chunk_id":"B","rank":2,"result_dir":"book","retrieval":{"signature":"same"},"page_numbers":[2],"doc_items":["#/texts/2"]},
+    ]
+    assert [r["chunk_id"] for r in diversify_results(rows, top_k=2)] == ["A", "B"]
+
+
+def test_table_reference_with_no_raw_table_payload_is_ineligible():
+    from app.retrieval import retrieval_metadata
+    row = {"text":"10. Trouble and countermeasures", "raw_text":"", "num_tokens":4, "doc_items":["#/tables/5"], "page_numbers":[12]}
+    meta = retrieval_metadata(row, 256)
+    assert meta["content_type"] == "table_empty"
+    assert meta["eligible"] is False
+    assert "TABLE_EMPTY" in meta["warnings"]

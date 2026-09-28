@@ -79,17 +79,14 @@ async def test_stage3_uses_remote_docling_ip_and_applies_overlays_in_memory(tmp_
         "converted_zip": "book.zip",
         "converted_zip_sha256": "abc123",
     }))
-    (result_dir / "correction_ledger.json").write_text(json.dumps({"entries": []}))
-    (result_dir / "stage2c_backfill.json").write_text(json.dumps({"status": "completed"}))
-    (result_dir / "chunk_overlays.jsonl").write_text(json.dumps({
-        "entry_id": "g:text:R1",
-        "entry_type": "text_correction",
-        "page": 2,
-        "source_index": 1,
-        "text": "Pump motor running",
-        "provenance": "human_verified_manual_correction",
+    (result_dir / "correction_ledger.json").write_text(json.dumps({"entries": [{
+        "entry_id": "g:text:R1", "entry_type": "text_correction", "route_id": "R1",
+        "status": "applied", "status_reason": "HUMAN_VERIFIED", "page": 2,
+        "source_index": 1, "source_type": "text", "proposed_text": "Pump motor running",
         "human_verified": True,
-    }) + "\n")
+    }]}))
+    (result_dir / "stage2c_backfill.json").write_text(json.dumps({"status": "completed"}))
+    (result_dir / "chunk_overlays.jsonl").write_text("stale overlay should be rebuilt\n")
 
     cfg = AppConfig(
         docling_url="http://192.168.68.63:5001",
@@ -332,13 +329,14 @@ async def test_stage3_applies_table_cell_overlay_only_in_memory(tmp_path: Path):
     with zipfile.ZipFile(converted, "w") as archive:
         archive.writestr("table.json", json.dumps(raw_doc))
     (result_dir / "source_manifest.json").write_text(json.dumps({"converted_zip": "table.zip", "converted_zip_sha256": "abc"}))
-    (result_dir / "correction_ledger.json").write_text(json.dumps({"entries": []}))
-    (result_dir / "stage2c_backfill.json").write_text(json.dumps({"status": "completed"}))
-    (result_dir / "chunk_overlays.jsonl").write_text(json.dumps({
-        "entry_id": "g:text:R1", "entry_type": "text_correction", "page": 1,
+    (result_dir / "correction_ledger.json").write_text(json.dumps({"entries": [{
+        "entry_id": "g:text:R1", "entry_type": "text_correction", "route_id": "R1",
+        "status": "applied", "status_reason": "HUMAN_VERIFIED", "page": 1,
         "source_type": "table_cell", "table_index": 0, "cell_index": 0,
-        "text": "24 mA", "provenance": "source_image_direct_transcription", "human_verified": False,
-    }) + "\n")
+        "proposed_text": "24 mA", "human_verified": True,
+    }]}))
+    (result_dir / "stage2c_backfill.json").write_text(json.dumps({"status": "completed"}))
+    (result_dir / "chunk_overlays.jsonl").write_text("stale overlay should be rebuilt\n")
     cfg = AppConfig(output_dir=str(output), processed_dir=str(processed), database_path=str(tmp_path / "jobs.db"))
     docling = _Docling()
     builder = Stage3ChunkBuilder(lambda: cfg, _Store({"id": 1, "status": "completed", "result_dir": str(result_dir), "output_filename": "table.zip"}), docling, EventBroker())
@@ -502,3 +500,58 @@ def test_stage3_conservative_token_estimator_uses_dense_text_safety_bound():
     # dense-character bound must keep the reported estimate conservative.
     import math
     assert estimate >= math.ceil(len(dense) / 2.5)
+
+
+def test_stage3_preserves_missing_picture_child_technical_values_as_searchable_source_chunks():
+    doc = {
+        "name":"Anemometer",
+        "texts":[
+            {"self_ref":"#/texts/0","text":"+5V","prov":[{"page_no":17}]},
+            {"self_ref":"#/texts/1","text":"DOWN UP M/K T/R E +5V","prov":[{"page_no":18}]},
+            {"self_ref":"#/texts/2","text":"2450 Nm","prov":[{"page_no":43}]},
+        ],
+        "pictures":[
+            {"self_ref":"#/pictures/21","children":[{"$ref":"#/texts/0"},{"$ref":"#/texts/1"}],"prov":[{"page_no":17}]},
+            {"self_ref":"#/pictures/94","children":[{"$ref":"#/texts/2"}],"prov":[{"page_no":43}]},
+        ],
+    }
+    existing = [{"text":"Engineering drawing", "doc_items":["#/pictures/21"], "page_numbers":[17]}]
+    rows = Stage3ChunkBuilder._missing_picture_child_chunks(doc, existing, max_tokens=256)
+    joined = "\n".join(row["text"] for row in rows)
+    # The picture ref already being present must not hide missing child refs.
+    assert "+5V" in joined
+    assert "2450 Nm" in joined
+    assert any("#/texts/0" in row["doc_items"] for row in rows)
+    assert any("#/texts/2" in row["doc_items"] for row in rows)
+
+
+def test_stage3_does_not_duplicate_picture_child_text_already_present_in_chunks():
+    doc = {
+        "texts":[{"self_ref":"#/texts/0","text":"+5V","prov":[{"page_no":17}]}],
+        "pictures":[{"self_ref":"#/pictures/21","children":[{"$ref":"#/texts/0"}],"prov":[{"page_no":17}]}],
+    }
+    existing = [{"text":"+5V","doc_items":["#/texts/0"],"page_numbers":[17]}]
+    assert Stage3ChunkBuilder._missing_picture_child_chunks(doc, existing, max_tokens=256) == []
+
+
+def test_stage3_narrows_multi_page_chunk_when_extra_pages_are_only_generic_picture_placeholders():
+    doc = {
+        "texts":[{"self_ref":"#/texts/0","text":"DIP switch setting","prov":[{"page_no":14}]}],
+        "pictures":[
+            {"self_ref":"#/pictures/1","prov":[{"page_no":15}]},
+            {"self_ref":"#/pictures/2","prov":[{"page_no":16}]},
+            {"self_ref":"#/pictures/3","prov":[{"page_no":17}]},
+        ],
+    }
+    chunk = {
+        "text":"DIP switch setting\nEngineering drawing\nEngineering drawing\nEngineering drawing",
+        "raw_text":"DIP switch setting\nEngineering drawing\nEngineering drawing\nEngineering drawing",
+        "doc_items":["#/texts/0","#/pictures/1","#/pictures/2","#/pictures/3"],
+        "page_numbers":[14,15,16,17],
+    }
+    narrowed, changed = Stage3ChunkBuilder._narrow_generic_picture_placeholder_chunk(doc, chunk)
+    assert changed is True
+    assert narrowed["page_numbers"] == [14]
+    assert narrowed["doc_items"] == ["#/texts/0"]
+    assert narrowed["text"] == "DIP switch setting"
+    assert narrowed["stage3_postprocess"]["generic_picture_placeholders_removed"] == 3

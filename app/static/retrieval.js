@@ -13,8 +13,24 @@
   let sourcePageReturnFocus = null;
   let requestedJobId = Number(new URLSearchParams(window.location.search).get('job')) || null;
   let currentGenerationId = null;
+  let generationEpoch = 0;
+  const equipmentDeleteBusy = new Set();
+  let searchRequestId = 0;
+  let searchController = null;
   let generationStartedAt = 0;
   let generationElapsedTimer = null;
+
+  function invalidateActiveRequests({cancelGeneration=true} = {}) {
+    searchRequestId += 1;
+    if (searchController) { searchController.abort(); searchController = null; }
+    generationEpoch += 1;
+    const generationId = currentGenerationId;
+    currentGenerationId = null;
+    if (generationId && cancelGeneration) {
+      fetch(`/api/retrieval/generate/cancel/${encodeURIComponent(generationId)}`, {method:'POST'}).catch(() => {});
+    }
+    setGenerationUi(false);
+  }
 
   function feedback(message, tone = '') {
     const el = $('retrieval-feedback');
@@ -189,7 +205,7 @@
     $('equipment-groups').innerHTML = groups.length ? groups.map(group => {
       const status = !group.searchable ? 'Text index incomplete' : group.hybrid_ready ? 'Machine embeddings ready' : 'Machine embeddings needed';
       const statusClass = !group.searchable ? 'warning' : group.hybrid_ready ? 'ready' : 'neutral';
-      return `<article class="equipment-group-card"><div><div class="equipment-group-title"><strong>${esc(group.name)}</strong><span class="scope-readiness-badge ${statusClass}">${esc(status)}</span></div><p class="subtle">${esc([group.manufacturer, group.model].filter(Boolean).join(' · ') || 'Physical machine')} · ${Number(group.active_manual_count ?? group.manual_count ?? 0)} current RAG manual${Number(group.active_manual_count ?? group.manual_count ?? 0) === 1 ? '' : 's'}${Number(group.manual_count || 0) !== Number(group.active_manual_count ?? group.manual_count ?? 0) ? ` · ${Number(group.manual_count || 0)} total revisions` : ''}</p><p>${(group.manuals || []).map(manual => `${esc(String(manual.manual_type || 'other'))}${manual.revision ? ` · Rev ${esc(manual.revision)}` : ''}${manual.authority_status && manual.authority_status !== 'authoritative' ? ` · ${esc(manual.authority_status)}` : ''}: ${esc(cleanBook(manual.source_filename))}`).join('<br>')}</p></div><div class="equipment-group-actions"><button class="mini-action equipment-edit" type="button" data-id="${esc(group.equipment_id)}">Edit</button><button class="mini-action equipment-delete" type="button" data-id="${esc(group.equipment_id)}">Delete</button></div></article>`;
+      return `<article class="equipment-group-card"><div><div class="equipment-group-title"><strong>${esc(group.name)}</strong><span class="scope-readiness-badge ${statusClass}">${esc(status)}</span></div><p class="subtle">${esc([group.manufacturer, group.model].filter(Boolean).join(' · ') || 'Physical machine')} · ${Number(group.active_manual_count ?? group.manual_count ?? 0)} current RAG manual${Number(group.active_manual_count ?? group.manual_count ?? 0) === 1 ? '' : 's'}${Number(group.manual_count || 0) !== Number(group.active_manual_count ?? group.manual_count ?? 0) ? ` · ${Number(group.manual_count || 0)} total revisions` : ''}</p><p>${(group.manuals || []).map(manual => `${esc(String(manual.manual_type || 'other'))}${manual.revision ? ` · Rev ${esc(manual.revision)}` : ''}${manual.authority_status && manual.authority_status !== 'authoritative' ? ` · ${esc(manual.authority_status)}` : ''}: ${esc(cleanBook(manual.source_filename))}`).join('<br>')}</p></div><div class="equipment-group-actions"><button class="mini-action equipment-edit" type="button" data-id="${esc(group.equipment_id)}">Edit</button><button class="mini-action equipment-delete" type="button" data-id="${esc(group.equipment_id)}" ${equipmentDeleteBusy.has(String(group.equipment_id)) ? 'disabled' : ''}>${equipmentDeleteBusy.has(String(group.equipment_id)) ? 'Deleting…' : 'Delete'}</button></div></article>`;
     }).join('') : '<p class="empty-state">No machines yet. Create one above; all hybrid embeddings are built per physical machine.</p>';
     document.querySelectorAll('.equipment-edit').forEach(button => button.addEventListener('click', () => editEquipment(button.dataset.id)));
     document.querySelectorAll('.equipment-delete').forEach(button => button.addEventListener('click', () => deleteEquipment(button.dataset.id)));
@@ -207,12 +223,16 @@
   }
 
   async function deleteEquipment(id) {
+    const busyKey = String(id || '');
+    if (!busyKey || equipmentDeleteBusy.has(busyKey)) return;
     const group = (retrievalStatus.equipment || []).find(item => item.equipment_id === id);
     const name = group?.name || id;
     const manuals = Number(group?.manual_count || group?.active_manual_count || 0);
     if (!window.confirm(`Delete machine “${name}”?
 
 ${manuals} manual${manuals === 1 ? '' : 's'} will be unassigned from this machine. The manuals themselves are not deleted.`)) return;
+    equipmentDeleteBusy.add(busyKey);
+    renderEquipmentGroups();
     try {
       const response = await fetch(`/api/retrieval/equipment/${encodeURIComponent(id)}`, {method:'DELETE'});
       const data = await response.json();
@@ -221,6 +241,7 @@ ${manuals} manual${manuals === 1 ? '' : 's'} will be unassigned from this machin
       await loadStatus();
       resetEquipmentForm();
     } catch (error) { feedback(error.message, 'error'); }
+    finally { equipmentDeleteBusy.delete(busyKey); renderEquipmentGroups(); }
   }
 
   async function saveEquipment(event) {
@@ -268,7 +289,7 @@ ${manuals} manual${manuals === 1 ? '' : 's'} will be unassigned from this machin
     const select = $('retrieval-scope');
     const selected = select.value;
     const machineOptions = (data.equipment || []).map(group => `<option value="equipment:${esc(group.equipment_id)}">${esc(group.name)} · ${Number(group.manual_count || 0)} manuals${group.searchable ? '' : ' · text index incomplete'}${group.hybrid_ready ? ' · hybrid ready' : group.searchable ? ' · embed needed' : ''}</option>`).join('');
-    const bookOptions = (data.books || []).map(book => `<option value="book:${book.postprocess_job_id}">${esc(cleanBook(book.source_filename))}${book.index_ready ? '' : ' · text index needed'}</option>`).join('');
+    const bookOptions = (data.books || []).map(book => `<option value="book:${book.postprocess_job_id}">${esc(cleanBook(book.source_filename))}${book.index_ready ? '' : book.index_state === 'review_pending' ? ` · review pending (${Number(book.pending_human_review || 0)})` : book.index_state === 'rebuild_failed' ? ' · index rebuild failed' : ' · text index refresh needed'}</option>`).join('');
     select.innerHTML = `<option value="" disabled>Choose a machine or manual…</option>${machineOptions ? `<optgroup label="Machines · normal RAG">${machineOptions}</optgroup>` : ''}${bookOptions ? `<optgroup label="Single manuals · lexical inspection">${bookOptions}</optgroup>` : ''}`;
 
     let requestedValue = '';
@@ -543,14 +564,14 @@ ${manuals} manual${manuals === 1 ? '' : 's'} will be unassigned from this machin
     generationElapsedTimer = setInterval(tick, 1000);
   }
 
-  async function pollGeneration(requestId) {
-    while (currentGenerationId === requestId) {
+  async function pollGeneration(requestId, epoch) {
+    while (currentGenerationId === requestId && generationEpoch === epoch) {
       const response = await fetch(`/api/retrieval/generate/status/${encodeURIComponent(requestId)}`, {cache:'no-store'});
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || 'Generation status could not be loaded');
       if (data.elapsed_seconds != null) $('generation-elapsed').textContent = generationElapsedText(data.elapsed_seconds);
       if (data.status === 'completed') {
-        renderGeneratedAnswer(data.result || {});
+        if (currentGenerationId === requestId && generationEpoch === epoch) renderGeneratedAnswer(data.result || {});
         return;
       }
       if (data.status === 'failed') throw new Error(data.error || 'Answer generation failed');
@@ -566,6 +587,8 @@ ${manuals} manual${manuals === 1 ? '' : 's'} will be unassigned from this machin
   async function generateAnswer() {
     if (!currentQuery || (!currentResults.length && !currentVisualResults.length) || currentGenerationId) return;
     const provider = $('answer-provider').value;
+    const epoch = ++generationEpoch;
+    const querySnapshot = currentQuery;
     const label = {pi5:'Pi5', oneplus:'OnePlus', groq:'Groq'}[provider] || provider;
     resetGeneratedAnswer();
     setGenerationUi(true, `Generating on ${label}…`);
@@ -579,14 +602,20 @@ ${manuals} manual${manuals === 1 ? '' : 's'} will be unassigned from this machin
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || 'Answer generation could not be started');
+      if (generationEpoch !== epoch || currentQuery !== querySnapshot) {
+        if (data.request_id) fetch(`/api/retrieval/generate/cancel/${encodeURIComponent(data.request_id)}`, {method:'POST'}).catch(() => {});
+        return;
+      }
       currentGenerationId = data.request_id;
-      await pollGeneration(currentGenerationId);
+      await pollGeneration(currentGenerationId, epoch);
     } catch (error) {
       if (currentGenerationId) answerMessage(error.message, 'error');
       else answerMessage(error.message, 'error');
     } finally {
-      currentGenerationId = null;
-      setGenerationUi(false);
+      if (generationEpoch === epoch) {
+        currentGenerationId = null;
+        setGenerationUi(false);
+      }
     }
   }
 
@@ -683,15 +712,25 @@ ${manuals} manual${manuals === 1 ? '' : 's'} will be unassigned from this machin
     const query = $('retrieval-query').value.trim(); if (query.length < 2) return;
     const scope = scopeRequest(), submit = $('retrieval-search-form').querySelector('button[type="submit"]');
     if (!scope.postprocess_job_id && !scope.equipment_id) { feedback('Choose one machine or one manual before searching.', 'warning'); updateScopeControls({announceSwitch:false}); return; }
+    invalidateActiveRequests();
+    resetGeneratedAnswer();
+    const requestId = ++searchRequestId;
+    const controller = new AbortController();
+    searchController = controller;
     submit.disabled = true; submit.textContent = 'Searching…'; currentQuery = query; currentBookFilter = scope.postprocess_job_id; currentEquipmentFilter = scope.equipment_id; currentRetrievalMode = $('retrieval-mode').value || 'lexical';
     try {
-      const response = await fetch('/api/retrieval/search', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({query, top_k:5, postprocess_job_id: scope.postprocess_job_id, equipment_id: scope.equipment_id, retrieval_mode: currentRetrievalMode})});
-      const data = await response.json(); if (!response.ok) throw new Error(data.detail || 'Search failed'); renderResults(data.results || [], data.visual_results || []);
+      const response = await fetch('/api/retrieval/search', {method:'POST', headers:{'Content-Type':'application/json'}, signal:controller.signal, body: JSON.stringify({query, top_k:5, postprocess_job_id: scope.postprocess_job_id, equipment_id: scope.equipment_id, retrieval_mode: currentRetrievalMode})});
+      const data = await response.json(); if (!response.ok) throw new Error(data.detail || 'Search failed');
+      if (requestId !== searchRequestId) return;
+      renderResults(data.results || [], data.visual_results || []);
       const retrievalScope = data.retrieval_scope || {};
       if (retrievalScope.mode === 'equipment') feedback(`Searched ${data.searched_books} manual${data.searched_books === 1 ? '' : 's'} inside machine “${retrievalScope.equipment_name || 'selected machine'}” only.`, 'success');
       else if (retrievalScope.mode === 'single_book') feedback('Single-manual lexical inspection complete. Select its machine for hybrid semantic retrieval.', 'success');
-    } catch (error) { renderResults([], []); feedback(error.message, 'error'); }
-    finally { submit.disabled = false; submit.textContent = 'Search'; }
+    } catch (error) {
+      if (error.name !== 'AbortError' && requestId === searchRequestId) { renderResults([], []); feedback(error.message, 'error'); }
+    } finally {
+      if (requestId === searchRequestId) { submit.disabled = false; submit.textContent = 'Search'; if (searchController === controller) searchController = null; }
+    }
   }
 
   async function loadBenchmark() {
@@ -727,7 +766,7 @@ ${manuals} manual${manuals === 1 ? '' : 's'} will be unassigned from this machin
   $('build-hybrid-index').addEventListener('click', buildHybridIndex);
   $('equipment-form').addEventListener('submit', saveEquipment);
   $('equipment-cancel').addEventListener('click', resetEquipmentForm);
-  $('retrieval-scope').addEventListener('change', () => { renderResults([], []); updateScopeControls(); });
+  $('retrieval-scope').addEventListener('change', () => { invalidateActiveRequests(); resetGeneratedAnswer(); renderResults([], []); updateScopeControls(); });
   $('retrieval-search-form').addEventListener('submit', search);
   $('generate-answer').addEventListener('click', generateAnswer);
   $('cancel-answer').addEventListener('click', cancelGeneration);

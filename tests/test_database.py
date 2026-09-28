@@ -21,7 +21,7 @@ class JobStoreTests(unittest.IsolatedAsyncioTestCase):
             resumable = await store.list_resumable()
             self.assertEqual(resumable[0]["retry_count"], 1)
             self.assertEqual(resumable[0]["docling_task_id"], "task-123")
-            await store.mark_completed(job_id, 2.5, "report.zip")
+            self.assertTrue(await store.mark_completed(job_id, 2.5, "report.zip"))
             completed = await store.list_jobs()
             self.assertEqual(completed[0]["status"], "completed")
             self.assertEqual(completed[0]["output_filename"], "report.zip")
@@ -143,3 +143,19 @@ class DuplicateSubmissionRaceTests(unittest.IsolatedAsyncioTestCase):
             rows = await first.list_jobs(limit=20)
             matching = [r for r in rows if r["filename"] == "manual.pdf" and r.get("source_sha256") == "same-sha"]
             self.assertEqual(len(matching), 1)
+
+
+class JobStoreCASTests(unittest.IsolatedAsyncioTestCase):
+    async def test_deleting_status_cannot_be_overwritten_by_worker_transitions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = JobStore(str(Path(directory) / "jobs.db")); await store.initialize()
+            job_id = await store.create_pending("delete-me.pdf", "md")
+            self.assertTrue(await store.mark_processing(job_id))
+            self.assertTrue(await store.mark_failed(job_id, "x", "x"))
+            reserved = await store.reserve_terminal_deletion(job_id)
+            self.assertIsNotNone(reserved)
+            self.assertFalse(await store.mark_processing(job_id))
+            self.assertFalse(await store.mark_completed(job_id, 1.0, "bad.zip"))
+            self.assertFalse(await store.mark_failed(job_id, "late", "late"))
+            row = await store.get_job(job_id)
+            self.assertEqual(row["status"], "deleting")

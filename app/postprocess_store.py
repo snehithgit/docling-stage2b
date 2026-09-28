@@ -227,18 +227,19 @@ class PostprocessStore:
             ).fetchone()
             return dict(row) if row else None
 
-    async def mark_processing(self, job_id: int) -> None:
-        await self._run(self._mark_processing_sync, job_id)
+    async def mark_processing(self, job_id: int) -> bool:
+        return await self._run(self._mark_processing_sync, job_id)
 
-    def _mark_processing_sync(self, job_id: int) -> None:
+    def _mark_processing_sync(self, job_id: int) -> bool:
         with self._connection() as connection:
-            connection.execute(
+            cursor = connection.execute(
                 """UPDATE postprocess_jobs
                    SET status='processing', started_at=?, completed_at=NULL,
                        error_type=NULL, error_message=NULL
-                   WHERE id=?""",
+                   WHERE id=? AND status='pending'""",
                 (utcnow(), job_id),
             )
+            return cursor.rowcount == 1
 
     async def mark_completed(
         self,
@@ -248,8 +249,8 @@ class PostprocessStore:
         output_sha256: str,
         profile_kind: str,
         route_count: int,
-    ) -> None:
-        await self._run(
+    ) -> bool:
+        return bool(await self._run(
             self._mark_completed_sync,
             job_id,
             seconds,
@@ -257,7 +258,7 @@ class PostprocessStore:
             output_sha256,
             profile_kind,
             route_count,
-        )
+        ))
 
     def _mark_completed_sync(
         self,
@@ -267,36 +268,38 @@ class PostprocessStore:
         output_sha256: str,
         profile_kind: str,
         route_count: int,
-    ) -> None:
+    ) -> int:
         with self._connection() as connection:
-            connection.execute(
+            cursor = connection.execute(
                 """UPDATE postprocess_jobs
                    SET status='completed', completed_at=?, processing_seconds=?,
                        result_dir=?, output_sha256=?, profile_kind=?, route_count=?,
                        error_type=NULL, error_message=NULL
-                   WHERE id=?""",
+                   WHERE id=? AND status='processing'""",
                 (
                     utcnow(), seconds, result_dir, output_sha256,
                     profile_kind, route_count, job_id,
                 ),
             )
+            return int(cursor.rowcount)
 
     async def mark_failed(
         self, job_id: int, error_type: str, message: str, seconds: float | None = None
-    ) -> None:
-        await self._run(self._mark_failed_sync, job_id, error_type, message, seconds)
+    ) -> bool:
+        return bool(await self._run(self._mark_failed_sync, job_id, error_type, message, seconds))
 
     def _mark_failed_sync(
         self, job_id: int, error_type: str, message: str, seconds: float | None
-    ) -> None:
+    ) -> int:
         with self._connection() as connection:
-            connection.execute(
+            cursor = connection.execute(
                 """UPDATE postprocess_jobs
                    SET status='failed', completed_at=?, processing_seconds=?,
                        error_type=?, error_message=?
-                   WHERE id=?""",
+                   WHERE id=? AND status='processing'""",
                 (utcnow(), seconds, error_type, message[:2000], job_id),
             )
+            return int(cursor.rowcount)
 
     async def retry(self, job_id: int) -> bool:
         return await self._run(self._retry_sync, job_id)
@@ -354,6 +357,55 @@ class PostprocessStore:
                 (conversion_job_id,),
             ).fetchone()
             return dict(row) if row else None
+
+    async def reserve_book_deletion(self, job_id: int) -> dict[str, Any] | None:
+        """Atomically reserve a terminal book against new pipeline work."""
+        return await self._run(self._reserve_book_deletion_sync, job_id)
+
+    def _reserve_book_deletion_sync(self, job_id: int) -> dict[str, Any] | None:
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """SELECT p.*, j.status AS conversion_status
+                   FROM postprocess_jobs p
+                   LEFT JOIN jobs j ON j.id=p.conversion_job_id
+                   WHERE p.id=?""",
+                (job_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            status = str(row["status"] or "")
+            if status in {"pending", "processing", "deleting"}:
+                raise RuntimeError("Book is queued, processing, or already being deleted.")
+            if str(row["conversion_status"] or "") in {"pending", "processing", "deleting"}:
+                raise RuntimeError("Docling conversion is queued or processing this book.")
+            active = connection.execute(
+                """SELECT COUNT(*) FROM verification_jobs
+                   WHERE postprocess_job_id=? AND is_current=1 AND status IN ('pending','processing')""",
+                (job_id,),
+            ).fetchone()[0]
+            if int(active or 0):
+                raise RuntimeError("Book has pending or active verification work. Finish/cancel it before deleting the book.")
+            original = dict(row)
+            cursor = connection.execute(
+                "UPDATE postprocess_jobs SET status='deleting' WHERE id=? AND status=?",
+                (job_id, status),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("Book changed state while deletion was being reserved.")
+            original["original_status"] = status
+            return original
+
+    async def cancel_book_deletion(self, job_id: int, original_status: str) -> bool:
+        return await self._run(self._cancel_book_deletion_sync, job_id, original_status)
+
+    def _cancel_book_deletion_sync(self, job_id: int, original_status: str) -> bool:
+        with self._connection() as connection:
+            cursor = connection.execute(
+                "UPDATE postprocess_jobs SET status=? WHERE id=? AND status='deleting'",
+                (original_status, job_id),
+            )
+            return cursor.rowcount == 1
 
     async def delete_book_records(self, job_id: int) -> dict[str, Any] | None:
         """Atomically remove one book's queue records from all pipeline tables.

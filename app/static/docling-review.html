@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Docling page review · Marine Pipeline Studio</title>
+<link rel="stylesheet" href="/assets/styles.css?v=2026.09.28.40.11W" />
+<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.28.40.11W" />
+<style>
+.doc-review-main{max-width:1900px!important;padding:24px 26px 40px!important}.doc-review-head{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:14px}.doc-review-head h1{margin:.15rem 0 .3rem}.doc-review-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.doc-review-toolbar input[type=number]{width:86px}.doc-review-grid{display:grid;grid-template-columns:190px minmax(520px,1fr) 420px;gap:14px;align-items:start}.doc-panel{border:1px solid var(--line);border-radius:14px;background:#fff;box-shadow:var(--shadow-small);min-width:0}.doc-panel-head{padding:14px 15px 10px;border-bottom:1px solid var(--line)}.doc-panel-head h2,.doc-panel-head h3{margin:0}.doc-panel-body{padding:13px 15px}.page-nav{max-height:76vh;overflow:auto;padding:8px}.page-nav button{display:grid;grid-template-columns:42px 1fr;gap:8px;width:100%;padding:8px 9px;border:0;border-radius:9px;background:transparent;text-align:left;color:var(--ink);cursor:pointer}.page-nav button:hover{background:#f7f5fb}.page-nav button.active{background:var(--purple-soft);color:var(--purple)}.page-nav small{display:block;color:var(--muted);font-size:10px}.viewer-panel{overflow:hidden}.viewer-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 12px;border-bottom:1px solid var(--line);background:#fbfbfd}.viewer-tools .spacer{flex:1}.viewer-scroll{height:76vh;overflow:auto;background:#e9ebef;padding:18px}.page-stage{position:relative;margin:0 auto;background:white;box-shadow:0 4px 22px rgba(26,24,37,.14);width:100%;min-width:420px;line-height:0;user-select:none}.page-stage img{display:block;width:100%;height:auto;pointer-events:none}.bbox-layer{position:absolute;inset:0;cursor:default}.bbox{position:absolute;border:2px solid;box-sizing:border-box;background:transparent;cursor:pointer;line-height:normal}.bbox:hover{box-shadow:0 0 0 2px rgba(255,255,255,.8)}.bbox.selected{border-width:3px;z-index:20;box-shadow:0 0 0 2px #fff,0 0 0 4px #5b45d8}.bbox.paragraph{border-color:#238636}.bbox.heading{border-color:#b36b00}.bbox.table{border-color:#2563eb}.bbox.picture{border-color:#8b5cf6}.coverage-mode .page-stage img{opacity:.5;filter:saturate(.35)}.coverage-mode .bbox{background:rgba(49,120,198,.06)}.bbox .tag{position:absolute;top:-19px;left:-2px;max-width:170px;padding:2px 5px;border-radius:5px;background:#20212a;color:#fff;font-size:9px;line-height:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}.bbox .handle{display:none;position:absolute;width:11px;height:11px;border-radius:50%;background:#fff;border:2px solid #5b45d8;z-index:3}.bbox.selected.editable .handle{display:block}.bbox.jump-highlight{outline:4px solid #f59e0b;outline-offset:3px;box-shadow:0 0 0 7px rgba(245,158,11,.22);animation:doclingJumpPulse .7s ease-in-out 3}@keyframes doclingJumpPulse{0%,100%{filter:none}50%{filter:brightness(1.25)}}.handle.nw{left:-7px;top:-7px;cursor:nwse-resize}.handle.ne{right:-7px;top:-7px;cursor:nesw-resize}.handle.sw{left:-7px;bottom:-7px;cursor:nesw-resize}.handle.se{right:-7px;bottom:-7px;cursor:nwse-resize}.draw-mode .bbox-layer{cursor:crosshair}.draft-box{position:absolute;border:2px dashed #d12f2f;background:rgba(209,47,47,.08);pointer-events:none}.legend{display:flex;gap:10px;flex-wrap:wrap;font-size:11px}.legend span::before{content:"";display:inline-block;width:10px;height:10px;margin-right:4px;border:2px solid;vertical-align:-1px}.legend .p::before{border-color:#238636}.legend .h::before{border-color:#b36b00}.legend .t::before{border-color:#2563eb}.legend .i::before{border-color:#8b5cf6}.inspector{max-height:86vh;overflow:auto}.inspector section{padding:14px 15px;border-bottom:1px solid var(--line)}.inspector section:last-child{border-bottom:0}.inspector h3{margin:0 0 9px}.field{display:grid;gap:5px;margin:9px 0}.field label{font-size:11px;font-weight:800;color:var(--muted-strong);text-transform:uppercase;letter-spacing:.04em}.field textarea,.field select,.field input{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;padding:9px;background:#fff;color:var(--ink)}.field textarea{min-height:88px;resize:vertical;font:inherit;line-height:1.45}.field textarea.code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre;min-height:160px}.bbox-values{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.bbox-values div{padding:7px;border-radius:7px;background:#f6f5f9}.bbox-values span{display:block;color:var(--muted);font-size:9px}.bbox-values strong{font-size:11px}.crop-preview{display:block;width:100%;max-height:260px;object-fit:contain;border:1px solid var(--line);border-radius:9px;background:#f5f6f8}.table-preview{overflow:auto;max-height:250px;border:1px solid var(--line);border-radius:8px}.table-preview table{border-collapse:collapse;width:100%;font-size:11px}.table-preview td,.table-preview th{border:1px solid var(--line);padding:5px;vertical-align:top}.table-preview th{background:#f3f1fb;text-align:left}.repair-card{padding:9px;border:1px solid var(--line);border-radius:9px;margin:7px 0;background:#fafbfc}.repair-card code{font-size:10px}.repair-card .actions{margin-top:7px}.tiny-button{min-height:32px!important;padding:5px 9px!important;font-size:11px!important}.sticky-actions{position:sticky;bottom:0;background:#fff;padding-top:10px;border-top:1px solid var(--line);z-index:4}.source-warning{padding:10px 12px;border-radius:9px;background:#fff7df;color:#6f561c;font-size:12px}.help-list{margin:7px 0 0 18px;padding:0;color:var(--muted-strong);font-size:12px;line-height:1.5}.check-row{display:flex;align-items:center;gap:6px;font-size:11px}.model-meta{font-size:11px;color:var(--muted);overflow-wrap:anywhere}.empty-inspector{padding:36px 18px;text-align:center;color:var(--muted)}@media(max-width:1250px){.doc-review-grid{grid-template-columns:150px minmax(480px,1fr) 360px}}@media(max-width:980px){.doc-review-grid{grid-template-columns:1fr}.page-nav-panel{display:none}.viewer-scroll{height:64vh}.inspector{max-height:none}.doc-review-main{padding:18px 14px 30px!important}}@media(max-width:640px){.doc-review-head{flex-direction:column}.viewer-scroll{padding:7px}.doc-review-toolbar{width:100%}.page-stage{min-width:320px}.bbox .tag{display:none}}
+</style>
+</head>
+<body class="ui29">
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<div class="app-shell review-workspace-shell">
+<main class="main-content review-workspace-main doc-review-main" id="main-content">
+  <a class="back-link" id="back-link" href="/">← Book workflow</a>
+  <div class="doc-review-head">
+    <div><p class="eyebrow">Docling reconstruction</p><h1>Page review &amp; bbox repair</h1><p class="subtle" id="subtitle">Loading Docling page geometry…</p></div>
+    <div class="doc-review-toolbar">
+      <button class="secondary-button" id="prev-page" type="button">← Previous</button>
+      <label class="subtle" for="page-input">Page</label><input id="page-input" type="number" min="1" value="1" />
+      <span class="subtle" id="page-total">/ —</span>
+      <button class="secondary-button" id="go-page" type="button">Go</button>
+      <button class="secondary-button" id="next-page" type="button">Next →</button>
+    </div>
+  </div>
+  <div id="feedback" class="status-message page-feedback" hidden role="status" aria-live="polite"></div>
+  <div class="source-warning"><strong>Raw Docling stays immutable.</strong> Boxes and reconstructed content saved here are human-approved downstream overlays. Existing Stage 2A/2B work is not rerun; an approved repair makes Stage 3 stale so it can be rebuilt from the corrected overlay.</div>
+  <div class="doc-review-grid" style="margin-top:14px">
+    <aside class="doc-panel page-nav-panel"><div class="doc-panel-head"><h3>Pages</h3></div><div class="page-nav" id="page-nav"></div></aside>
+    <section class="doc-panel viewer-panel" id="viewer-panel">
+      <div class="viewer-tools">
+        <button class="secondary-button tiny-button" id="draw-region" type="button">+ Draw missing region</button>
+        <button class="secondary-button tiny-button" id="reset-box" type="button" disabled>Reset bbox</button>
+        <label class="check-row"><input id="coverage" type="checkbox" /> Coverage view</label>
+        <label class="check-row"><input class="type-toggle" data-type="paragraph" type="checkbox" checked /> Text</label>
+        <label class="check-row"><input class="type-toggle" data-type="heading" type="checkbox" checked /> Headings</label>
+        <label class="check-row"><input class="type-toggle" data-type="table" type="checkbox" checked /> Tables</label>
+        <label class="check-row"><input class="type-toggle" data-type="picture" type="checkbox" checked /> Pictures</label>
+        <span class="spacer"></span><label class="subtle">Zoom <input id="zoom" type="range" min="60" max="220" value="100" /></label>
+      </div>
+      <div class="viewer-scroll" id="viewer-scroll"><div class="page-stage" id="page-stage"><img id="page-image" alt="Original PDF page" /><div class="bbox-layer" id="bbox-layer"></div></div></div>
+      <div class="doc-panel-body"><div class="legend"><span class="p">paragraph</span><span class="h">heading</span><span class="t">table</span><span class="i">picture</span></div></div>
+    </section>
+    <aside class="doc-panel inspector" id="inspector">
+      <div id="empty-inspector" class="empty-inspector"><strong>Select a Docling box</strong><p>Or draw a box around content Docling missed.</p></div>
+      <div id="selection-inspector" hidden>
+        <section><h3>Selected region</h3><div class="model-meta" id="source-meta"></div><div class="bbox-values" id="bbox-values"></div>
+          <div class="field"><label for="region-type">Region type</label><select id="region-type"><option value="paragraph">Paragraph / text</option><option value="heading">Heading</option><option value="table">Table</option><option value="picture">Picture / diagram</option></select></div>
+          <div class="field"><label>Current Docling text</label><textarea id="original-text" readonly></textarea></div>
+        </section>
+        <section><h3>Source crop</h3><p class="subtle">Move or resize the selected box, then inspect the exact source crop before re-extracting.</p><button class="secondary-button tiny-button" id="preview-crop" type="button">Preview crop</button><div style="margin-top:8px"><img class="crop-preview" id="crop-preview" alt="Selected source crop" hidden /></div></section>
+        <section><h3>Re-extract</h3><div class="field"><label for="processor-role">Processor</label><select id="processor-role"><option value="auto">Auto · text role for text, vision role for table</option><option value="pi5">Text-role selected processor</option><option value="oneplus">Vision-role selected processor</option></select></div><button class="primary-button" id="reextract" type="button">Re-extract selected bbox</button><p class="model-meta" id="model-meta"></p></section>
+        <section><h3>Reviewed reconstruction</h3><div class="field"><label id="proposal-label" for="proposal">Proposed text</label><textarea class="code" id="proposal" placeholder="Re-extracted text appears here. You may correct it manually after comparing with the PDF crop."></textarea></div><div class="field" id="header-rows-field" hidden><label for="header-rows">Table header rows</label><input id="header-rows" type="number" min="0" max="100" value="1" /><span class="subtle">How many leading reconstructed rows are column headers. Set 0 when the table has no header row.</span></div><div id="table-preview" class="table-preview" hidden></div><div class="field"><label for="repair-note">Reviewer note</label><textarea id="repair-note" placeholder="Optional reason for this bbox/content repair"></textarea></div>
+          <div class="sticky-actions"><button class="primary-button" id="save-repair" type="button">Approve &amp; save overlay</button></div>
+        </section>
+      </div>
+      <section><h3>Approved repairs on this page</h3><div id="repair-list"><p class="subtle">None.</p></div></section>
+      <section><h3>How to use</h3><ul class="help-list"><li>Select an existing Docling bbox to inspect or resize it.</li><li>Use <strong>Draw missing region</strong> for text/table content with no Docling box.</li><li>For tables, re-extraction returns TSV; compare and edit cells before approval.</li><li>Approved repairs affect downstream Stage 3 only; the converted Docling ZIP never changes.</li></ul></section>
+    </aside>
+  </div>
+</main>
+</div>
+<script src="/assets/docling-review.js?v=2026.09.28.40.11W"></script>
+</body>
+</html>

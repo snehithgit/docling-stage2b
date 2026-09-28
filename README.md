@@ -1,3 +1,55 @@
+## 2026.09.28.40.11W — Text / Vision / Artifact worker interlock
+
+- Replaces independent Verification-page Start/Stop/Auto controls with one **Text · Vision · Artifact** scheduler interlock.
+- **Start** authorizes a manual snapshot across normal Text/Vision work and releases already-eligible artifacts; **Stop** pauses all new dispatch while current requests finish; **Auto** continuously runs normal verification and gives idle Pi5/OnePlus capacity to eligible Artifact work.
+- Adds scheduler-level physical-provider reservations so Text, Vision and Artifact lanes cannot claim the same Pi5/OnePlus/Groq provider concurrently; normal Text/Vision work has priority over Artifact work.
+- Fixes stranded legacy artifact rows with `pending + authorized=0 + run_mode=NULL` and preserves dependency-ready artifact authorization across Stop/Auto transitions.
+- Adds an Artifact shared-idle-pool status card plus logical Text/Vision/Artifact counts and interlock state to the Stage 2B status API.
+- No Stage 2A/2B rerun is required solely for this upgrade.
+- Regression validation: **609 passed, 1 skipped**; Python compileall and all frontend JavaScript syntax checks pass.
+- Full details: `docs/RELEASE_VALIDATION_2026.09.28.40.11W.md`.
+
+## 2026.09.28.40.11V — review-to-Docling exact bbox deep links
+
+- Adds **Open Docling PDF bbox** actions to Text Audit, the full Human Text Review editor, Artifact Audit, and Vision Audit.
+- Deep links carry the current post-process job, source page, and immutable Docling source ref so Page Review opens the exact source object instead of only the book/page.
+- Text blocks target `#/texts/<index>`; table-cell reviews target their parent `#/tables/<table_index>`; artifact/vision reviews target `#/pictures/<picture_index>`.
+- Docling Page Review now accepts `ref=` and automatically selects, highlights, and scrolls the matching bbox into view. If the item exists but has no usable Docling bbox, the workspace fails visibly and asks the reviewer to draw a replacement region rather than pretending a box exists.
+- Deep links also carry a same-origin return target, so the Page Review back link returns to the originating audit/review surface.
+- This is navigation/review UX only: raw Docling, Stage 2A/2B data, repair ledgers, Stage 2C rules and Stage 3 rule version are unchanged. No processing rerun is required for upgrade.
+- Regression validation: **604 passed, 1 skipped**; Python compileall and all frontend JavaScript syntax checks pass.
+- Full details: `docs/RELEASE_VALIDATION_2026.09.28.40.11V.md`.
+
+## 2026.09.28.40.11U — Docling page review and human bbox reconstruction
+
+- Adds a dedicated **Docling Page Review** workspace reachable from the Stage 2A book card. Reviewers can page through the original PDF with Docling text/table/picture bounding boxes overlaid, filter bbox types, use a coverage view, and zoom the page.
+- Existing Docling regions can be selected, moved and corner-resized. Reviewers can also draw a new missing paragraph/heading/table region directly over the source PDF.
+- The exact selected source region can be rendered as a crop and re-extracted with the configured local Stage 2B processor roles. Paragraph/heading crops request literal source transcription; table crops request TSV reconstruction. Re-extraction is only a proposal until a human approves it.
+- Reconstructed tables have an editable TSV preview and explicit header-row count. New picture regions fail closed in this first release; existing picture bboxes may be adjusted, but missing-picture creation is left for a dedicated visual-evidence workflow.
+- Approved changes are stored in `docling_page_repairs.json`; the converted Docling ZIP stays immutable. Repairs carry page/bbox provenance, source-item signatures, source-ZIP identity when available, extraction metadata and human approval state. Stale source repairs are not silently reused.
+- Existing Docling text/table repairs are applied only to the in-memory Stage 3 document. Human-drawn missing text/table regions become dedicated provenance-rich Stage 3 chunks. Saving/deactivating a page repair makes Stage 3 stale without forcing Stage 2A/2B reruns.
+- Stage 3 rule version advances to `stage3-canonical-integrity-v5` so existing canonical chunks are rebuilt under the new overlay semantics.
+- Regression validation: **603 passed, 1 skipped**; Python compileall and all frontend JavaScript syntax checks pass.
+- Full details: `docs/RELEASE_VALIDATION_2026.09.28.40.11U.md`.
+
+## 2026.09.28.40.11T — structural-review workspace and evidence gates
+
+- Fixes the broken standalone review layout caused by using the two-column app shell without a sidebar and by reusing workflow `stage-card` grid classes as ordinary review panels.
+- Gives every Stage 2A HUMAN_REVIEW structural route an evidence-first review path: collapsed tables keep the dedicated repair workspace, reading order keeps its dedicated page, and heading/archive/geometry/table-grid/graph findings use a generic structural evidence workspace.
+- Removes blind Accept/Dismiss controls from the Book workflow. Every structural decision now requires opening the appropriate review page and explicitly reviewing all persisted evidence.
+- Existing R/S processed results remain compatible; review evidence is recovered from `diagnostics.json`, so this UI fix does not require a Stage 2A/2B rerun.
+- Table-row-collapse repair/dismissal now requires explicit original-page review before the UI enables the destructive decision. Raw Docling remains immutable.
+- Full validation: `docs/RELEASE_VALIDATION_2026.09.28.40.11T.md`.
+
+## 2026.09.28.40.11S — evidence-first reading-order structural review
+
+- Replaces blind `READING_ORDER_ANOMALY` Accept/Dismiss controls with a dedicated evidence review page.
+- Reuses the page-level evidence already persisted in `diagnostics.json`, so existing 40.11R runs do **not** need Stage 2A/2B reruns just to review the anomaly.
+- Shows the original PDF page with sampled Docling items highlighted, layout model, inversion metrics and Docling's current body-order sample.
+- Requires every flagged page to be explicitly marked reviewed before Accept or Dismiss is enabled. The backend independently enforces the same requirement and records `human_reviewed_pages`.
+- Raw Docling remains immutable. If ordering is genuinely wrong, the operator leaves the route unresolved rather than approving guessed ordering.
+- Future Stage 2A route generation also stores the affected page numbers as route hints while `diagnostics.json` remains the detailed evidence source.
+
 ## 2026.09.22.40.11I — Telegram review-count authority fix
 
 - Fixes contradictory Telegram audit counts such as `/audit` showing visual work while `/visionaudit` says complete.

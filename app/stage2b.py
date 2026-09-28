@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 from .archive import select_docling_document
 from .artifact_sweep import build_artifact_sweep_plan
+from .book_lifecycle_lock import LifecycleLockGetter
 from .verifier_checkpoint import CheckpointVerifier
 from .oneplus_workload import OnePlusCooldownActive, OnePlusWorkloadGovernor
 from .events import EventBroker
@@ -2463,12 +2464,14 @@ class Stage2BWorker:
         events: EventBroker,
         groq_quota: GroqQuotaGuard | None = None,
         oneplus_restart: Any | None = None,
+        lifecycle_lock_getter: LifecycleLockGetter | None = None,
     ) -> None:
         self._config_getter = config_getter
         self._store = store
         self._postprocess_store = postprocess_store
         self._events = events
         self._groq_quota = groq_quota
+        self._lifecycle_lock_getter = lifecycle_lock_getter
         self._stopping = asyncio.Event()
         self._tasks: list[asyncio.Task[Any]] = []
         self.worker_state: dict[str, dict[str, Any]] = {
@@ -2493,6 +2496,13 @@ class Stage2BWorker:
         # and CRC-scanned for every local-model call.
         self._doc_cache: dict[str, tuple[tuple[int, int], dict[str, Any]]] = {}
         self._device_locks = {"pi5": asyncio.Lock(), "oneplus": asyncio.Lock(), "groq": asyncio.Lock()}
+        # Scheduler-level provider reservations keep Text, Vision and the
+        # shared Artifact pool from claiming the same physical provider at once.
+        # The existing device locks remain the final inference single-flight gate;
+        # this reservation prevents a second queue row being marked processing
+        # merely to wait behind work already assigned to that provider.
+        self._dispatch_lock = asyncio.Lock()
+        self._provider_reservations: dict[str, str] = {}
         # The provider lock above already guarantees one physical OnePlus
         # inference at a time. The workload governor adds a persisted, adaptive
         # time/throughput budget so long batches rest before the phone reaches
@@ -2557,6 +2567,40 @@ class Stage2BWorker:
         if provider not in self._device_locks:
             raise ValueError("Provider must be pi5, oneplus, or groq")
         return self._device_locks[provider]
+
+    @property
+    def dispatch_reservations(self) -> dict[str, str]:
+        return dict(self._provider_reservations)
+
+    async def _reserve_provider(self, provider: str, owner: str) -> bool:
+        """Reserve one physical provider before a queue row is claimed."""
+        if provider not in self._device_locks:
+            return False
+        async with self._dispatch_lock:
+            if provider in self._provider_reservations:
+                return False
+            # Also respect explicit/manual/RAG calls that already hold the final
+            # provider lock even though they are outside the Stage 2B scheduler.
+            if self._device_locks[provider].locked():
+                return False
+            self._provider_reservations[provider] = owner
+            return True
+
+    async def _release_provider(self, provider: str, owner: str) -> None:
+        async with self._dispatch_lock:
+            if self._provider_reservations.get(provider) == owner:
+                self._provider_reservations.pop(provider, None)
+
+    async def _normal_work_waiting_for_provider(self, provider: str) -> bool:
+        """Artifact work yields to runnable Text/Vision work for a provider."""
+        for role_target in ("pi5", "oneplus"):
+            if self._paused(role_target):
+                continue
+            if self._selected_provider(role_target) != provider:
+                continue
+            if await self._store.next_runnable(role_target, self._auto_run(role_target)) is not None:
+                return True
+        return False
 
     async def start(self) -> None:
         await self._store.initialize()
@@ -2761,7 +2805,8 @@ class Stage2BWorker:
                             _target, before_anchors, after_anchors = _table_cell_context_parts(doc, table_index, cell_index)
                         else:
                             _target, before_anchors, after_anchors = _text_context_parts(doc, source_index, source_page)
-                    except Exception:
+                    except Exception as exc:
+                        logger.warning("Could not derive manual crosscheck context for job %s: %s", job.get("id"), exc)
                         before_anchors, after_anchors = [], []
                 checked = await _oneplus_text_crosscheck(
                     client, image_bytes, image_mime, original, "", model,
@@ -2981,7 +3026,7 @@ class Stage2BWorker:
                     else:
                         state["unchanged_or_rejected"] += 1
                     backfill_result = {"parsed": parsed, "correction": correction}
-                    await self._record_stage2c_entry(
+                    await self._publish_stage2c_entry(
                         "pi5", row, request, backfill_result, parsed.get("verdict") or "UNCERTAIN",
                         row.get("model") or pi5_model,
                     )
@@ -3160,6 +3205,13 @@ class Stage2BWorker:
         return {"accepted": True, "postprocess_job_id": postprocess_job_id, **counts}
 
     async def start_stage2c_backfill(self, postprocess_job_id: int) -> dict[str, Any]:
+        postprocess_job_id = int(postprocess_job_id)
+        if self._lifecycle_lock_getter is not None:
+            async with self._lifecycle_lock_getter(postprocess_job_id):
+                return await self._start_stage2c_backfill_locked(postprocess_job_id)
+        return await self._start_stage2c_backfill_locked(postprocess_job_id)
+
+    async def _start_stage2c_backfill_locked(self, postprocess_job_id: int) -> dict[str, Any]:
         """Build the Stage 2C ledger from persisted Stage 2B results.
 
         This is intentionally a reconciliation/backfill, not a live verifier rerun.
@@ -3317,7 +3369,7 @@ class Stage2BWorker:
                                 state["corrections_attempted"] += 1
                             if current_correction.get("status") == "applied":
                                 state["corrections_applied"] += 1
-                            await self._record_stage2c_entry(
+                            await self._publish_stage2c_entry(
                                 "pi5", row, request, stored_result, current_verdict, row.get("model")
                             )
                             state["reused"] += 1
@@ -3384,7 +3436,7 @@ class Stage2BWorker:
                         if correction.get("status") == "applied":
                             state["corrections_applied"] += 1
                         backfill_result = {"parsed": parsed, "correction": correction}
-                        await self._record_stage2c_entry(
+                        await self._publish_stage2c_entry(
                             "pi5", row, request, backfill_result, parsed.get("verdict") or "UNCERTAIN",
                             row.get("model") or pi5_model,
                         )
@@ -3408,7 +3460,7 @@ class Stage2BWorker:
                                 parsed = _apply_vision_structural_gate(parsed, structure)
                             except Exception:
                                 logger.exception("Stage 2C backfill could not recompute image structure for route %s", row.get("route_id"))
-                        await self._record_stage2c_entry(
+                        await self._publish_stage2c_entry(
                             "oneplus", row, request, {"parsed": parsed}, parsed.get("verdict") or "UNCERTAIN",
                             row.get("model"),
                         )
@@ -3500,6 +3552,8 @@ class Stage2BWorker:
             "eligible_sweep_jobs": int(plan.get("eligible_sweep_jobs") or 0),
             "skipped_normal_picture_routes": int(plan.get("skipped_normal_picture_routes") or 0),
             "suppressed_legacy_overlap_routes": len(suppressed_routes),
+            "unclassified_picture_count": int(plan.get("unclassified_picture_count") or 0),
+            "unclassified_pictures": list(plan.get("unclassified_pictures") or []),
         }
 
     async def _discovery_loop(self) -> None:
@@ -3832,30 +3886,54 @@ class Stage2BWorker:
                 if normal_role_available and normal_provider in self._endpoint_circuit:
                     normal_role_available = await self._endpoint_provider_ready(normal_provider)
 
-                # Normal Stage 2B work keeps its existing role/provider rules.
-                # Only when this physical worker has no normal job does it steal
-                # one row from the shared technical-artifact pool.
+                # One scheduler interlock covers Text, Vision and Artifact work.
+                # Normal work has first refusal on its explicitly selected physical
+                # provider. A row is not claimed until that provider is reserved.
                 job = None
                 if normal_role_available:
                     job = await self._store.next_runnable(target, self._auto_run(target))
                 if job is not None:
-                    await self._run_job(target, job)
-                    continue
+                    owner = f"{target}:normal:{int(job.get('id') or 0)}"
+                    if await self._reserve_provider(normal_provider, owner):
+                        self.worker_state[target]["dispatch_provider"] = normal_provider
+                        try:
+                            await self._run_job(target, job)
+                        finally:
+                            self.worker_state[target]["dispatch_provider"] = None
+                            await self._release_provider(normal_provider, owner)
+                        continue
 
+                # FULL_TECHNICAL_VISUAL is a shared local pool. It may borrow Pi5
+                # or OnePlus only when that physical device is idle *and* no
+                # runnable normal Text/Vision route currently needs that provider.
                 artifact_ready = self._artifact_worker_available(target)
+                if artifact_ready and await self._normal_work_waiting_for_provider(target):
+                    artifact_ready = False
                 if artifact_ready and target == "oneplus":
                     artifact_ready = await self._oneplus_workload.can_start()
                 if artifact_ready:
                     artifact_ready = await self._endpoint_provider_ready(target)
                 if artifact_ready:
-                    released = await self._store.release_ready_artifact_sweeps()
-                    if released:
-                        self._events.notify("stage2b_artifact_sweep_released")
-                    artifact_job = await self._store.claim_next_artifact(target)
-                    if artifact_job is not None:
-                        artifact_job["_artifact_worker"] = target
-                        await self._run_job(target, artifact_job, preclaimed=True, run_mode_override="artifact_shared")
-                        continue
+                    artifact_owner = f"{target}:artifact"
+                    if await self._reserve_provider(target, artifact_owner):
+                        self.worker_state[target]["dispatch_provider"] = target
+                        try:
+                            # Re-scan every idle cycle. This both releases newly
+                            # eligible books and recovers legacy prepared rows.
+                            released = await self._store.release_ready_artifact_sweeps()
+                            if released:
+                                self._events.notify("stage2b_artifact_sweep_released")
+                            artifact_job = await self._store.claim_next_artifact(target)
+                            if artifact_job is not None:
+                                artifact_job["_artifact_worker"] = target
+                                await self._run_job(
+                                    target, artifact_job, preclaimed=True,
+                                    run_mode_override="artifact_shared",
+                                )
+                                continue
+                        finally:
+                            self.worker_state[target]["dispatch_provider"] = None
+                            await self._release_provider(target, artifact_owner)
 
                 # Evidence-recovery jobs are background tasks rather than queue
                 # rows. Resume them only after the same physical-phone cooldown
@@ -3897,7 +3975,8 @@ class Stage2BWorker:
         if postprocess_job_id:
             try:
                 book = await self._postprocess_store.get_job(postprocess_job_id)
-            except Exception:
+            except Exception as exc:
+                logger.warning("Could not load notification book context for job %s: %s", job.get("id"), exc)
                 book = None
             if book:
                 filename = str(book.get("source_filename") or book.get("output_filename") or filename).strip()
@@ -4074,6 +4153,12 @@ class Stage2BWorker:
             artifact = await asyncio.to_thread(
                 self._write_result_artifact, job, request, result, verdict, seconds, model, endpoint
             )
+            # Publish readiness is a distinct lifecycle from verifier success.
+            # Record it before exposing this row as completed so UI consumers
+            # never assume a review ledger entry already exists.
+            await self._set_stage2c_publication_state(
+                job, "publishing", entry_id=self.stage2c_entry_id_for_job(job)
+            )
             await self._store.mark_completed(
                 int(job["id"]), seconds, model, endpoint, verdict, request, result, artifact
             )
@@ -4089,10 +4174,11 @@ class Stage2BWorker:
                     self.worker_state[target].get("artifact_jobs_completed") or 0
                 ) + 1
             try:
-                await self._record_stage2c_entry(target, job, request, result, verdict, model)
+                await self._publish_stage2c_entry(target, job, request, result, verdict, model)
             except Exception as exc:
                 # Verification is authoritative Stage 2B output. A ledger write
                 # problem must never convert a completed verifier job into failure.
+                # Publication failure remains visible/repairable independently.
                 logger.exception("Stage 2C ledger update failed for %s job %s", target, job.get("id"))
                 self._notify_event(
                     "stage2c_ledger_error",
@@ -4223,6 +4309,89 @@ class Stage2BWorker:
             if target == "oneplus":
                 self.worker_state[target]["active_started_epoch"] = None
 
+    @staticmethod
+    def stage2c_entry_id_for_job(job: dict[str, Any]) -> str:
+        """Return the stable Stage-2C ledger id expected for a verification row."""
+        try:
+            source = json.loads(job.get("source_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            source = {}
+        target = str(job.get("target") or "")
+        kind = "text" if target == "pi5" and str(source.get("type") or "") != "picture" else "vision"
+        return f"{str(job.get('generation') or '')}:{kind}:{str(job.get('route_id') or '')}"
+
+    async def _set_stage2c_publication_state(
+        self,
+        job: dict[str, Any],
+        state: str,
+        *,
+        entry_id: str | None = None,
+        error: Exception | str | None = None,
+    ) -> None:
+        if self._store is None or job.get("id") is None or not hasattr(self._store, "set_stage2c_entry_state"):
+            return
+        error_text = None
+        if error is not None:
+            error_text = f"{type(error).__name__}: {error}" if isinstance(error, BaseException) else str(error)
+        try:
+            await self._store.set_stage2c_entry_state(
+                int(job["id"]), state, entry_id=entry_id, error=error_text
+            )
+        except Exception:
+            # Observability state must never turn a valid verifier result into a
+            # failed verifier job. Stage-2C backfill remains the recovery path.
+            logger.exception("Could not persist Stage 2C publication state for job %s", job.get("id"))
+
+    async def _publish_stage2c_entry(
+        self,
+        target: str,
+        job: dict[str, Any],
+        request: dict[str, Any],
+        result: dict[str, Any],
+        verdict: str,
+        model: str | None,
+    ) -> dict[str, Any]:
+        entry_id = self.stage2c_entry_id_for_job(job)
+        try:
+            entry = await self._record_stage2c_entry(target, job, request, result, verdict, model)
+        except Exception as exc:
+            await self._set_stage2c_publication_state(
+                job, "error", entry_id=entry_id, error=exc
+            )
+            raise
+        state = "ready" if entry is not None else "not_required"
+        await self._set_stage2c_publication_state(
+            job, state, entry_id=(entry_id if entry is not None else None)
+        )
+        return {"state": state, "entry_id": entry_id if entry is not None else None, "entry": entry}
+
+    async def ensure_stage2c_entry(self, verification_job_id: int) -> dict[str, Any]:
+        """Idempotently republish a missing Stage-2C entry from persisted Stage-2B data.
+
+        No verifier/model call is made. Existing human decisions remain
+        authoritative because ``upsert_ledger_entry`` preserves them.
+        """
+        if self._store is None:
+            raise ValueError("Stage 2B store is unavailable")
+        row = await self._store.get_job(int(verification_job_id))
+        if not row or int(row.get("is_current") or 0) != 1:
+            raise ValueError("Current verification job not found")
+        if str(row.get("status") or "") != "completed":
+            raise ValueError("Verification must be completed before its review entry can be repaired")
+        try:
+            request = json.loads(row.get("request_json") or "{}")
+            result = json.loads(row.get("result_json") or "{}")
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise ValueError("Persisted verification payload is invalid") from exc
+        if not isinstance(request, dict) or not isinstance(result, dict):
+            raise ValueError("Persisted verification payload is invalid")
+        outcome = await self._publish_stage2c_entry(
+            str(row.get("target") or ""), row, request, result,
+            str(row.get("verdict") or "UNCERTAIN"), row.get("model"),
+        )
+        outcome["verification_job_id"] = int(row["id"])
+        return outcome
+
     async def _record_stage2c_entry(
         self,
         target: str,
@@ -4231,10 +4400,15 @@ class Stage2BWorker:
         result: dict[str, Any],
         verdict: str,
         model: str | None,
-    ) -> None:
+    ) -> dict[str, Any] | None:
         config = self._config_getter()
         if not bool(config.stage2c_enabled):
-            return
+            return None
+        if self._store is not None and job.get("id") is not None:
+            own_row = await self._store.get_job(int(job["id"]))
+            if not own_row or int(own_row.get("is_current") or 0) != 1:
+                logger.info("Skipping Stage 2C ledger write for superseded Stage 2B job %s", job.get("id"))
+                return
         current = await self._postprocess_store.get_job(int(job["postprocess_job_id"]))
         if (not current or current.get("status") != "completed"
                 or current.get("result_dir") != job.get("result_dir")):
@@ -4348,6 +4522,7 @@ class Stage2BWorker:
         async with self._stage2c_ledger_lock:
             await asyncio.to_thread(upsert_ledger_entry, result_dir, source_zip_sha, entry)
         self._events.notify("stage2c_ledger_updated")
+        return entry
 
     async def _document_for(self, zip_path: Path) -> dict[str, Any]:
         stat = await asyncio.to_thread(zip_path.stat)
@@ -4509,6 +4684,107 @@ class Stage2BWorker:
         wrapped.provider = provider
         return wrapped
 
+    async def manual_docling_region_extract(
+        self,
+        *,
+        postprocess_job_id: int,
+        result_dir_name: str,
+        image: bytes,
+        mime_type: str,
+        region_type: str,
+        original_hint: str = "",
+        role_target: str | None = None,
+    ) -> dict[str, Any]:
+        """Re-read one human-selected source crop with the configured vision model.
+
+        This is an interactive Docling-review helper, not an automatic correction
+        route. The returned transcription is only a proposal until the user saves
+        an approved page repair. Device locks/governors are shared with Stage 2B so
+        interactive review cannot race the normal Pi5/OnePlus workload.
+        """
+        kind = str(region_type or "paragraph").strip().lower()
+        if kind not in {"paragraph", "heading", "table", "picture"}:
+            raise ValueError(f"Unsupported Docling-review region type: {kind}")
+        role = str(role_target or ("oneplus" if kind == "table" else "pi5")).lower()
+        if role not in {"pi5", "oneplus"}:
+            raise ValueError("Docling-review processor role must be pi5 or oneplus")
+
+        # A stable dedicated checkpoint file safely caches identical crop/model
+        # requests without reusing normal verification-job checkpoint state.
+        fake_job = {
+            "id": 0,
+            "postprocess_job_id": int(postprocess_job_id),
+            "result_dir": str(result_dir_name),
+            "generation": "docling-page-review-v1",
+            "source_json": "{}",
+            "output_filename": str(result_dir_name),
+        }
+        client = self._vision_client_for_role(role, fake_job)
+        provider = str(getattr(client, "provider", self._selected_provider(role)) or self._selected_provider(role))
+        endpoint = str(getattr(client, "endpoint", self._endpoint_for_provider(provider)))
+        client.path = Path(self._config_getter().processed_dir) / Path(str(result_dir_name)).name / "docling_review_inference_checkpoint.json"
+        client.identity = f"docling-review:{provider}:{role}:{endpoint}:{kind}:v1"
+        model = await self._model_for(f"docling-review:{provider}:{role}", endpoint, client)
+
+        if kind == "table":
+            prompt = (
+                "The attached image is an exact crop selected by a human reviewer from a technical manual. "
+                "Reconstruct ONLY the visible table in this crop as TSV. Output one physical table row per line "
+                "and separate cells with TAB characters. Preserve visible spelling, numbers, units, identifiers, "
+                "blank cells and row order. Do not use Markdown. Do not add explanations, headings that are not "
+                "inside the table, inferred values, or guessed cells. If the table cannot be read reliably, return "
+                "exactly [UNREADABLE]."
+            )
+            max_tokens = 2048
+        elif kind == "picture":
+            prompt = (
+                "The attached image is an exact crop selected by a human reviewer. Transcribe ONLY text visibly "
+                "present in the crop, preserving line breaks, spelling, numbers, units and identifiers. Do not "
+                "describe or interpret the picture. If no reliable visible text can be read, return exactly [UNREADABLE]."
+            )
+            max_tokens = 1024
+        else:
+            prompt = (
+                "The attached image is an exact crop selected by a human reviewer from a technical manual. "
+                "Transcribe ALL and ONLY text visibly present in this crop. Preserve visible spelling, capitalization, "
+                "punctuation, symbols, numbers, units, identifiers and line breaks. Do not summarize, correct grammar, "
+                "infer missing words, or include text outside the crop. Return plain text only. If it cannot be read "
+                "reliably, return exactly [UNREADABLE]."
+            )
+            if str(original_hint or "").strip():
+                prompt += " The current Docling text below is only a locator/checking hint; do not copy it when pixels disagree:\n" + str(original_hint)[:2000]
+            max_tokens = max(768, min(1536, int(len(str(original_hint or "")) / 2) + 512))
+
+        cfg = self._config_getter()
+        raw = await client.inspect_image_stream(
+            image,
+            prompt,
+            mime_type=mime_type,
+            model=model,
+            max_tokens=max_tokens,
+            first_token_timeout_seconds=int(getattr(cfg, "stage2b_oneplus_first_token_timeout_seconds", 1200)),
+            idle_timeout_seconds=int(getattr(cfg, "stage2b_oneplus_stream_idle_timeout_seconds", 300)),
+            schema_mode="docling_review_region",
+        )
+        text = _crosscheck_content(raw).strip()
+        text = re.sub(r"(?is)^\s*```(?:text|plaintext|tsv|csv|markdown)?\s*", "", text)
+        text = re.sub(r"(?is)\s*```\s*$", "", text).strip()
+        text = re.sub(r"(?is)<think>.*?</think>", "", text).strip()
+        truncated = _source_transcription_truncated(raw)
+        unreadable = not text or text.upper() in {"[UNREADABLE]", "UNREADABLE"}
+        return {
+            "usable": bool(not truncated and not unreadable),
+            "text": "" if unreadable else text[:12000],
+            "provider": provider,
+            "role_target": role,
+            "model": model,
+            "endpoint": endpoint,
+            "region_type": kind,
+            "truncated": bool(truncated),
+            "finish_reason": _response_finish_reason(raw),
+            "raw_response_sha256": hashlib.sha256(json.dumps(raw, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")).hexdigest(),
+        }
+
     async def _run_pi5(self, job: dict[str, Any]):
         """Process a TEXT route by reading the original page image.
 
@@ -4642,25 +4918,31 @@ class Stage2BWorker:
             }
         else:
             verdict = "UNCERTAIN"
+            finish_reason = str(reconstructed.get("finish_reason") or "").lower()
+            truncated = bool(reconstructed.get("truncated")) or finish_reason == "length" or str(reconstructed.get("error_type") or "") == "SourceTranscriptionTruncated"
+            reason_code = "VERIFIER_TRANSCRIPTION_TRUNCATED" if truncated else "SOURCE_IMAGE_UNREADABLE"
+            correction_reason = "VERIFIER_TRANSCRIPTION_TRUNCATED_KEEP_ORIGINAL" if truncated else "SOURCE_IMAGE_UNREADABLE_KEEP_ORIGINAL"
             parsed = {
                 "verdict": verdict,
                 "model_verdict": verdict,
                 "confidence": 0.0,
-                "reason_code": "SOURCE_IMAGE_UNREADABLE",
+                "reason_code": reason_code,
                 "evidence": "",
                 "evidence_valid": False,
                 "segment_count": 1,
-                "source_image_status": "UNREADABLE",
+                "source_image_status": "TRANSCRIPTION_TRUNCATED" if truncated else "UNREADABLE",
                 "source_image_reconstruction": "",
                 "provider": provider,
                 "method": "FILL_THE_MIDDLE_SOURCE_IMAGE",
+                "finish_reason": reconstructed.get("finish_reason"),
+                "truncated": truncated,
                 "error_type": reconstructed.get("error_type"),
                 "error_message": reconstructed.get("error_message"),
             }
             correction = {
                 "attempted": False,
                 "status": "pending",
-                "reason": "SOURCE_IMAGE_UNREADABLE_KEEP_ORIGINAL",
+                "reason": correction_reason,
                 "proposed_text": None,
                 "direct_source_transcription": True,
                 "scope_guard": reconstructed.get("scope_guard"),

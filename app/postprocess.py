@@ -23,6 +23,7 @@ from .events import EventBroker
 from .groq_quota import GroqQuotaGuard
 from .postprocess_store import PostprocessStore
 from .verifier_clients import GroqStructuredVerifier, OpenAICompatibleVerifier
+from .table_repair import detect_table_row_collapses, group_collapse_findings, TABLE_ROW_COLLAPSE_CODE
 
 
 TECH_VALUE_RE = re.compile(
@@ -79,6 +80,20 @@ def _generic_ocr_garble_reasons(value: str) -> list[str]:
         after = (value or "")[match.end():match.end() + 1]
         return before in {"'", "’"} or after in {"'", "’"}
 
+    # Four or more consecutive lowercase single-letter tokens are a strong
+    # OCR-fragmentation shape even when the letters happen to be multilingual
+    # short words (for example ``e e b s``). Uppercase one-letter engineering
+    # identifiers such as ``R S T N`` remain protected.
+    consecutive_single_letter_run = 0
+    longest_single_letter_run = 0
+    for match in matches:
+        original = match.group(0)
+        if len(original) == 1 and original.isalpha() and not original.isupper() and not is_apostrophe_contraction(match):
+            consecutive_single_letter_run += 1
+            longest_single_letter_run = max(longest_single_letter_run, consecutive_single_letter_run)
+        else:
+            consecutive_single_letter_run = 0
+
     fragments: list[str] = []
     singles: list[str] = []
     for match, token in zip(matches, tokens):
@@ -95,6 +110,8 @@ def _generic_ocr_garble_reasons(value: str) -> list[str]:
             singles.append(token)
 
     reasons: list[str] = []
+    if longest_single_letter_run >= 4:
+        reasons.append("consecutive_single_letter_run")
     if len(singles) >= 3 and len(singles) / len(tokens) >= 0.15:
         reasons.append("excessive_single_letter_fragments")
     elif singles and len(fragments) >= 3 and len(fragments) / len(tokens) >= 0.20:
@@ -110,6 +127,64 @@ def _generic_ocr_garble_reasons(value: str) -> list[str]:
         reasons.append("repeated_short_ocr_fragments")
 
     return reasons
+
+
+_CMAP_CIPHER_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9])[0-9]?[A-Z]{3,}(?![A-Za-z0-9])")
+_CMAP_COMMON_UPPER_WORDS = {
+    "THE", "AND", "FOR", "WITH", "FROM", "THIS", "THAT", "ERROR", "CODE",
+    "CAUSE", "REMEDY", "WARNING", "CAUTION", "CONTROL", "SYSTEM", "MOTOR",
+    "PUMP", "PRESSURE", "TEMPERATURE", "VOLTAGE", "CURRENT", "OPEN", "CLOSE",
+}
+
+def _text_layer_mapping_suspect(value: str) -> bool:
+    """Conservative review-only detector for one observed broken-font text-layer shape.
+
+    A broken PDF cmap can yield token-shaped gibberish that ordinary OCR-garble
+    heuristics consider structurally normal.  We do not decode or rewrite it.
+    We only surface dense all-cap cipher-like regions containing digit-leading
+    pseudo-words (e.g. ``6LQJOH DQG 7ZLQ UDQHV``) for source-image verification.
+    This is intentionally a high-precision signature, not a claim to cover all
+    possible cmap failures.
+    """
+    tokens = _CMAP_CIPHER_TOKEN_RE.findall(str(value or ""))
+    if len(tokens) < 4:
+        return False
+    digit_leading = sum(bool(re.match(r"^[0-9][A-Z]{3,}$", token)) for token in tokens)
+    if digit_leading < 1:
+        return False
+    alpha_tokens = [re.sub(r"^[0-9]", "", token) for token in tokens]
+    common = sum(token in _CMAP_COMMON_UPPER_WORDS for token in alpha_tokens)
+    # Require the region to remain overwhelmingly lexically implausible.
+    return common == 0 and len(tokens) >= 4
+
+def _text_layer_mapping_candidates(doc: dict[str, Any]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for index, item in enumerate(doc.get("texts") or []):
+        value = str(item.get("text") or "")
+        if _text_layer_mapping_suspect(value):
+            candidates.append({
+                "text_index": index, "page": _page_of(item),
+                "contains_technical_value": bool(TECH_VALUE_RE.search(value)),
+                "reasons": ["cipher_like_digital_text_layer"],
+                "sample": value[:500],
+            })
+    for table_index, table in enumerate(doc.get("tables") or []):
+        for cell_index, cell in enumerate(((table.get("data") or {}).get("table_cells") or [])):
+            value = str(cell.get("text") or "")
+            if not _text_layer_mapping_suspect(value):
+                continue
+            candidates.append({
+                "table_index": table_index, "cell_index": cell_index,
+                "page": _page_of(table),
+                "row_start": cell.get("start_row_offset_idx"),
+                "row_end": cell.get("end_row_offset_idx"),
+                "col_start": cell.get("start_col_offset_idx"),
+                "col_end": cell.get("end_col_offset_idx"),
+                "contains_technical_value": bool(TECH_VALUE_RE.search(value)),
+                "reasons": ["cipher_like_digital_text_layer"],
+                "sample": value[:500],
+            })
+    return candidates
 
 
 LEXICAL_TOKEN_RE = re.compile(r"(?<![\w-])[^\W\d_]+(?:[’'][^\W\d_]+)?(?![\w-])", re.UNICODE)
@@ -233,8 +308,14 @@ def _document_ocr_recall_candidates(texts: list[dict[str, Any]], config: AppConf
         if count > rare_max or len(token) < 6 or token in common:
             continue
         surface = token_surfaces[token].most_common(1)[0][0]
-        if _technical_or_identifier_token(surface):
+        # Digits/underscores are hard identifier protection. All-uppercase
+        # alphabetic words are allowed through only under a stricter one-edit,
+        # high-document-support rule below so OCR like RELEASFD can be reviewed
+        # without opening model/terminal identifiers to fuzzy matching.
+        hard_identifier = any(ch.isdigit() for ch in surface) or "_" in surface
+        if hard_identifier:
             continue
+        all_caps_alpha = bool(surface) and surface.isalpha() and surface.isupper()
         pool: set[str] = set()
         grams = _word_ngrams(token)
         for gram in grams:
@@ -252,16 +333,49 @@ def _document_ocr_recall_candidates(texts: list[dict[str, Any]], config: AppConf
             if dist is None or dist == 0:
                 continue
             similarity = 1.0 - (dist / max(len(target), len(token)))
-            if similarity < 0.84:
+            # One-edit substitutions in 6-character words (damaga/damage) are
+            # 0.833 similar and were falling just below the former 0.84 cut.
+            minimum_similarity = 0.82 if dist == 1 and min(len(target), len(token)) >= 5 else 0.84
+            if similarity < minimum_similarity:
                 continue
             target_count = token_counts[target]
             if target_count < max(common_min, count * 4):
+                continue
+            if all_caps_alpha and not (
+                dist == 1
+                and min(len(target), len(token)) >= 7
+                and target_count >= max(common_min * 2, count * 6)
+            ):
                 continue
             ranked.append((similarity, target_count, -dist, target))
         if ranked:
             ranked.sort(reverse=True)
             similarity, _target_count, neg_dist, target = ranked[0]
             candidate_word_map[token] = (target, -neg_dist, similarity)
+
+    # Repeated all-cap labels can be mutually inconsistent even when the
+    # document contains no frequent/correct spelling.  Treat a one-edit pair of
+    # long rare labels as review evidence only (never as a correction target).
+    # This catches document-local label families such as RELEASFD/RELEASFT
+    # without requiring an external dictionary or guessing which spelling wins.
+    rare_variant_map: dict[str, tuple[str, int, float]] = {}
+    rare_upper = []
+    for token, count in token_counts.items():
+        if count > rare_max or len(token) < 7:
+            continue
+        surface = token_surfaces[token].most_common(1)[0][0]
+        if surface.isalpha() and surface.isupper():
+            rare_upper.append(token)
+    for i, token in enumerate(rare_upper):
+        for peer in rare_upper[i + 1:]:
+            if abs(len(token) - len(peer)) > 1:
+                continue
+            dist = _bounded_edit_distance(token, peer, 1)
+            if dist != 1:
+                continue
+            similarity = 1.0 - (1.0 / max(len(token), len(peer)))
+            rare_variant_map.setdefault(token, (peer, 1, similarity))
+            rare_variant_map.setdefault(peer, (token, 1, similarity))
 
     # Repeated-block consistency. If the document itself repeats the same long
     # block at least twice, variants sharing the same opening tokens can be
@@ -335,6 +449,24 @@ def _document_ocr_recall_candidates(texts: list[dict[str, Any]], config: AppConf
             frequency_strength = min(1.0, token_counts[target] / 50.0)
             lexical_score = 0.75 * similarity + 0.25 * frequency_strength
             best_score = max(best_score, lexical_score)
+
+        for surface, norm in tokens:
+            variant = rare_variant_map.get(norm)
+            if not variant:
+                continue
+            peer, distance, similarity = variant
+            evidence.append({
+                "kind": "rare_label_variant_cluster",
+                "observed": surface,
+                "observed_count": token_counts[norm],
+                "document_variant": token_surfaces[peer].most_common(1)[0][0],
+                "variant_count": token_counts[peer],
+                "edit_distance": distance,
+                "similarity": round(similarity, 4),
+            })
+            reasons.append("rare_all_caps_label_has_inconsistent_document_variant")
+            best_score = max(best_score, 0.80 * similarity)
+            break
 
         # Split/join evidence: only fire when one side is a single letter or the
         # source visibly separates an apostrophe. This avoids treating normal
@@ -1676,6 +1808,22 @@ def build_diagnostics(doc: dict[str, Any], config: AppConfig, integrity: dict[st
             "checked": evaluable_headings, "total": total_headings,
             "reason": "most section headings do not use a supported numbering scheme; hierarchy correctness is not established",
         })
+    if total_headings == 0:
+        page_count = len(doc.get("pages") or {})
+        text_item_count = len(doc.get("texts") or [])
+        # Zero headings can be legitimate for a drawing package. Surface the
+        # blind spot only for document-scale/manual-like sources where losing
+        # navigable structure materially weakens citations and ranking.
+        if page_count >= 10 and text_item_count >= 100:
+            signals.append({
+                "code": "NO_SECTION_HEADERS_DETECTED",
+                "classification": "INFO",
+                "severity": "info",
+                "count": 1,
+                "items": [{"pages": page_count, "text_items": text_item_count}],
+                "samples": [{"pages": page_count, "text_items": text_item_count}],
+                "note": "Large manual-like document has no Docling section_header items; heading-based navigation and ranking will be limited.",
+            })
     if coverage_warnings:
         signals.append({
             "code": "VALIDATION_COVERAGE_LIMITED",
@@ -1743,6 +1891,20 @@ def build_diagnostics(doc: dict[str, Any], config: AppConfig, integrity: dict[st
             "count": len(json_quality["table_grid"]), "items": json_quality["table_grid"],
             "samples": json_quality["table_grid"][:40],
             "note": "Invalid spans, overlapping logical cells, or extremely sparse tables can corrupt troubleshooting chunks.",
+        })
+    # A valid-looking grid can still be semantically destroyed when Docling
+    # collapses many source rows into one logical cell.  Detect only strong
+    # numbered-record evidence and route the whole physical table for human
+    # structure repair; never infer row-to-column associations automatically.
+    collapse_groups = group_collapse_findings(detect_table_row_collapses(doc))
+    if collapse_groups:
+        structural_json_count += len(collapse_groups)
+        signals.append({
+            "code": TABLE_ROW_COLLAPSE_CODE, "classification": "HUMAN_REVIEW", "severity": "high",
+            "action": "repair_table_structure_before_chunking",
+            "count": len(collapse_groups), "items": collapse_groups,
+            "samples": collapse_groups[:20],
+            "note": "Multiple numbered logical records appear collapsed into one or more single Docling table cells. Verify the source page and save a whole-table repair; no row associations are inferred automatically.",
         })
     graph_items = json_quality["broken_reference"] + json_quality["reference_cycle"] + json_quality["unreachable_text"]
     if graph_items:
@@ -1939,6 +2101,18 @@ def build_diagnostics(doc: dict[str, Any], config: AppConfig, integrity: dict[st
             "check": "ocr_document_consistency_scan", "status": "truncated",
             "count": recall_stats["omitted_due_to_cap"],
             "reason": "document-internal OCR recall produced more candidates than the configured cap",
+        })
+
+    text_layer_mapping = _text_layer_mapping_candidates(doc)
+    if text_layer_mapping:
+        signals.append({
+            "code": "TEXT_LAYER_MAPPING_SUSPECT",
+            "classification": "TEXT_REVIEW",
+            "severity": "high",
+            "count": len(text_layer_mapping),
+            "items": text_layer_mapping,
+            "samples": text_layer_mapping[:50],
+            "note": "Digital PDF text has a conservative cipher-like broken-font/cmap signature. Verify against the rendered source; never auto-decode the text layer.",
         })
 
     table_cell_ocr = _table_cell_ocr_candidates(doc)
@@ -2263,7 +2437,11 @@ def build_routes(doc: dict[str, Any], diagnostics: dict[str, Any], config: AppCo
 
     def add(target: str, code: str, priority: str, source: dict[str, Any], action: str, reason: str) -> None:
         source = with_page_risk(source)
-        key = (target, source.get("type"), source.get("index"), source.get("table_index"), source.get("cell_index"), source.get("page"))
+        key = (
+            target, source.get("type"), source.get("index"), source.get("table_index"),
+            source.get("cell_index"), source.get("page"),
+            code if source.get("type") == "diagnostic_group" else None,
+        )
         if key in route_keys:
             existing = route_by_key[key]
             es = existing.get("source") or {}
@@ -2352,14 +2530,39 @@ def build_routes(doc: dict[str, Any], diagnostics: dict[str, Any], config: AppCo
                     sample.get("reason") or "visual ambiguity",
                 )
         elif cls == "HUMAN_REVIEW":
-            add(
-                "human",
-                code,
-                signal.get("severity", "medium"),
-                {"type": "diagnostic_group", "count": signal.get("count", 0)},
-                signal.get("action") or "review_before_chunking",
-                signal.get("note") or code,
-            )
+            if code == TABLE_ROW_COLLAPSE_CODE:
+                # One route per affected physical table. Multiple collapsed
+                # cells in that table are one structure-repair obligation.
+                for sample in signal.get("items", signal.get("samples", [])):
+                    add(
+                        "human", code, signal.get("severity", "high"),
+                        {
+                            "type": "table_structure",
+                            "table_index": sample.get("table_index"),
+                            "page": sample.get("page"),
+                            "cell_indexes": sample.get("cell_indexes") or [],
+                            "source_signature": sample.get("source_signature"),
+                            "findings": sample.get("findings") or [],
+                        },
+                        signal.get("action") or "repair_table_structure_before_chunking",
+                        signal.get("note") or code,
+                    )
+            else:
+                source = {"type": "diagnostic_group", "count": signal.get("count", 0)}
+                if code == "READING_ORDER_ANOMALY":
+                    source["pages"] = sorted({
+                        int(item.get("page"))
+                        for item in (signal.get("items") or signal.get("samples") or [])
+                        if isinstance(item, dict) and isinstance(item.get("page"), (int, float)) and int(item.get("page")) > 0
+                    })
+                add(
+                    "human",
+                    code,
+                    signal.get("severity", "medium"),
+                    source,
+                    signal.get("action") or "review_before_chunking",
+                    signal.get("note") or code,
+                )
         elif cls == "RULE_FIX":
             # Rule fixes are represented as grouped operations rather than one
             # route per header/table to avoid huge queues.
@@ -2542,7 +2745,9 @@ class PostprocessWorker:
         output_path = Path(config.output_dir) / job["output_filename"]
         started = time.monotonic()
         try:
-            await self._store.mark_processing(job["id"])
+            claimed = await self._store.mark_processing(job["id"])
+            if not claimed:
+                return
             self._events.notify("postprocess_started")
             if not output_path.is_file():
                 raise FileNotFoundError(f"Converted ZIP not found: {output_path}")

@@ -1,4 +1,5 @@
 const $ = (selector) => document.querySelector(selector);
+const busyRetries = new Set();
 
 function escapeHtml(value = "") {
   return String(value).replace(/[&<>'"]/g, (char) => ({
@@ -57,7 +58,7 @@ async function refresh() {
           <p class="error-message">${escapeHtml(job.error_message || "No error message was returned.")}</p>
           <p class="retry-feedback" data-retry-feedback="${job.id}" role="status" aria-live="polite" hidden></p>
         </div>
-        <button class="retry-button" data-job-id="${job.id}" type="button">Retry conversion</button>
+        <button class="retry-button" data-job-id="${job.id}" type="button" ${busyRetries.has(String(job.id)) ? "disabled" : ""}>${busyRetries.has(String(job.id)) ? "Re-queuing…" : "Retry conversion"}</button>
       </article>
     `).join("");
     document.querySelectorAll("[data-job-id]").forEach((button) =>
@@ -80,8 +81,11 @@ async function refresh() {
 }
 
 async function retry(button) {
+  const busyKey = String(button.dataset.jobId || "");
+  if (!busyKey || busyRetries.has(busyKey)) return;
   const feedback = document.querySelector(`[data-retry-feedback="${button.dataset.jobId}"]`);
   const originalLabel = "Retry conversion";
+  busyRetries.add(busyKey);
   button.disabled = true;
   button.textContent = "Re-queuing…";
   if (feedback) { feedback.hidden = true; feedback.textContent = ""; }
@@ -93,12 +97,13 @@ async function retry(button) {
     if (!response.ok) throw new Error(body.detail || "Retry could not be queued.");
     await refresh();
   } catch (error) {
-    button.disabled = false;
-    button.textContent = originalLabel;
     if (feedback) {
       feedback.textContent = error.message;
       feedback.hidden = false;
     }
+  } finally {
+    busyRetries.delete(busyKey);
+    if (button.isConnected) { button.disabled = false; button.textContent = originalLabel; }
   }
 }
 

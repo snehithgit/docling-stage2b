@@ -253,3 +253,19 @@ async def test_transport_failure_reservation_can_be_released_without_consuming_q
     assert snap["tokens_reserved_in_flight"] == 0
     assert snap["tokens_used_24h"] == 0
     assert snap["requests_used_24h"] == 0
+
+@pytest.mark.asyncio
+async def test_resume_time_uses_reservation_adjusted_server_remaining(tmp_path: Path):
+    config = cfg(tmp_path)
+    guard = GroqQuotaGuard(lambda: config)
+    await guard.record_response(FakeResponse(headers={
+        "x-ratelimit-limit-requests": "1000",
+        "x-ratelimit-remaining-requests": "101",
+        "x-ratelimit-reset-requests": "30s",
+    }), usage_tokens=1)
+    reservation = await guard.reserve_request(0)
+    snap = await guard.snapshot()
+    assert snap["paused"] is True
+    assert "GROQ_RPD_RESERVE" in snap["reason_codes"]
+    assert snap["resume_at_epoch"] is not None
+    await guard.release_reservation(reservation["reservation_id"])

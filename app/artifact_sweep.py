@@ -80,9 +80,15 @@ def build_artifact_sweep_plan(zip_path: Path, existing_rows: list[dict[str, Any]
     jobs: list[dict[str, Any]] = []
     technical_visuals = 0
     skipped_normal_picture_routes = 0
+    unclassified_pictures: list[dict[str, Any]] = []
 
     for picture_index, picture in enumerate(pictures):
         class_name, confidence = picture_top_class(picture)
+        if class_name is None:
+            prov = picture.get("prov") or []
+            page = int(prov[0]["page_no"]) if prov and isinstance(prov[0], dict) and isinstance(prov[0].get("page_no"), (int, float)) else None
+            unclassified_pictures.append({"picture_index": picture_index, "page": page, "artifact": ((picture.get("image") or {}).get("uri"))})
+            continue
         if not is_technical_picture_class(class_name):
             continue
         technical_visuals += 1
@@ -118,4 +124,6 @@ def build_artifact_sweep_plan(zip_path: Path, existing_rows: list[dict[str, Any]
         "eligible_sweep_jobs": len(jobs),
         "skipped_normal_picture_routes": skipped_normal_picture_routes,
         "normal_picture_indices": sorted(normal_indices),
+        "unclassified_picture_count": len(unclassified_pictures),
+        "unclassified_pictures": unclassified_pictures[:100],
     }

@@ -104,7 +104,21 @@
     const routeCandidates = Number(book.route_candidates_detected ?? routeCreated);
     const routeDeferred = Number(book.route_deferred || 0);
     const routeText = routeDeferred > 0 ? `${routeCreated} / ${routeCandidates} · ${routeDeferred} deferred` : `${routeCreated} / ${routeCandidates}`;
-    cards.push(stageCard('2A','Extraction analysis','Check text, tables, pictures, reading order and structural integrity',aState,book.status==='completed'?'Complete':book.status==='failed'?'Failed':'Running',`<div class="stage-summary-grid"><div><span>Quality</span><strong>${esc(book.quality_display_label || '—')}</strong></div><div><span>Integrity</span><strong>${esc(book.integrity_display_label || '—')}</strong></div><div><span>Routes</span><strong>${esc(routeText)}</strong></div></div>`,`<a class="secondary-button" href="/quality?job=${jobId}">Open 2A details</a>`)); rail.push(aState==='done'?'done':aState);
+    const structural = book.stage2a_human_review || {};
+    const structuralPending = Number(structural.blocking_review_required || 0);
+    const structuralRoutes = (structural.pending_routes || []).slice(0, 6);
+    const structuralReviewHtml = structuralPending ? `<div class="stage-note warning-note"><strong>${structuralPending} structural review item${structuralPending===1?'':'s'} must be resolved before Stage 3.</strong>${structuralRoutes.map(r => {
+      const code=String(r.code||'');
+      const collapse=code==='TABLE_ROW_COLLAPSE';
+      const readingOrder=code==='READING_ORDER_ANOMALY';
+      const actions = collapse
+        ? `<a class="secondary-button" href="/table-repair?job=${jobId}&route=${encodeURIComponent(r.route_id||'')}">Review / repair</a>`
+        : readingOrder
+          ? `<a class="secondary-button" href="/reading-order-review?job=${jobId}&route=${encodeURIComponent(r.route_id||'')}">Review anomaly</a>`
+          : `<a class="secondary-button" href="/structural-review?job=${jobId}&route=${encodeURIComponent(r.route_id||'')}">Review finding</a>`;
+      return `<div class="review-queue-row"><div><strong>${esc(r.code || r.route_id || 'Structural review')}</strong><p>${esc(r.reason || r.action || '')}</p></div><div>${actions}</div></div>`;
+    }).join('')}${structuralPending>structuralRoutes.length?`<p class="subtle">${structuralPending-structuralRoutes.length} more structural item(s) are shown in 2A details.</p>`:''}</div>` : `<div class="stage-note success-note">No unresolved structural human-review routes.</div>`;
+    cards.push(stageCard('2A','Extraction analysis','Check text, tables, pictures, reading order and structural integrity',aState,book.status==='completed'?'Complete':book.status==='failed'?'Failed':'Running',`<div class="stage-summary-grid"><div><span>Quality</span><strong>${esc(book.quality_display_label || '—')}</strong></div><div><span>Integrity</span><strong>${esc(book.integrity_display_label || '—')}</strong></div><div><span>Routes</span><strong>${esc(routeText)}</strong></div><div><span>Structural review</span><strong>${structuralPending}</strong></div></div>${structuralReviewHtml}`,`<div class="stage-actions-inline"><a class="secondary-button" href="/quality?job=${jobId}">Open 2A details</a><a class="secondary-button" href="/docling-review?job=${jobId}&page=1">Review Docling pages</a></div>`)); rail.push(aState==='done'?'done':aState);
 
     let bState='blocked', bLabel='Waiting', bActions='';
     if (book.status==='completed') {

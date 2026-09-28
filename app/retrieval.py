@@ -20,7 +20,7 @@ from .archive import select_docling_document
 _SCHEMA_INDEX = "docling-retrieval-index/v1"
 _SCHEMA_QUALITY = "docling-retrieval-quality/v1"
 _SCHEMA_BENCHMARK = "docling-retrieval-benchmark/v3"
-RETRIEVAL_RULE_VERSION = "retrieval-source-integrity-v5"
+RETRIEVAL_RULE_VERSION = "retrieval-source-integrity-v6"
 
 # Generic technical-reference and identifier handling. These rules deliberately
 # know nothing about manufacturers or individual books.
@@ -911,6 +911,12 @@ def _content_type(chunk: dict[str, Any]) -> tuple[str, bool]:
     flattened_table = _looks_like_space_delimited_table(raw)
     if header_only:
         return "table_header_only", True
+    # A Docling table reference does not prove the chunk contains table data.
+    # If HybridChunker emitted no raw table payload, inherited heading text must
+    # not make an empty table-associated chunk look like perfect evidence.
+    raw_payload = re.sub(r"[|:\-+_=`~\s]", "", raw)
+    if references_table and not re.search(r"[A-Za-z0-9]", raw_payload):
+        return "table_empty", True
     if fragment_like:
         return "table_fragment", True
     if table_like or references_table or flattened_table:
@@ -959,6 +965,8 @@ def retrieval_metadata(chunk: dict[str, Any], max_tokens: int) -> dict[str, Any]
         warnings.append("TABLE_FRAGMENT")
     if content_type == "table_header_only":
         warnings.append("TABLE_HEADER_ONLY")
+    if content_type == "table_empty":
+        warnings.append("TABLE_EMPTY")
     alpha_labels = numeric_values = 0
     label_density = 1.0
     if table_related:
@@ -974,12 +982,13 @@ def retrieval_metadata(chunk: dict[str, Any], max_tokens: int) -> dict[str, Any]
     eligible = (
         bool(text)
         and len(token_list) >= 2
-        and content_type != "table_header_only"
+        and content_type not in {"table_header_only", "table_empty"}
         and repetition_ratio < 0.40
     )
     quality = 100
     quality -= 20 if "OVERSIZED_CHUNK" in warnings else 0
     quality -= 12 if "TABLE_FRAGMENT" in warnings else 0
+    quality -= 55 if "TABLE_EMPTY" in warnings else 0
     quality -= 35 if "TABLE_DATA_WITHOUT_HEADER" in warnings else 0
     quality -= 10 if "PAGE_UNKNOWN" in warnings else 0
     quality -= 8 if "NO_DOCLING_ITEM_REFERENCE" in warnings else 0
@@ -1172,6 +1181,10 @@ def _write_jsonl_atomic(path: Path, rows: Iterable[dict[str, Any]]) -> None:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
     tmp.replace(path)
+    if path.name == "retrieval_index.jsonl":
+        cached_loader = globals().get("_load_index_cached")
+        if cached_loader is not None and hasattr(cached_loader, "cache_clear"):
+            cached_loader.cache_clear()
 
 
 def write_retrieval_artifacts(result_dir: Path, chunks: list[dict[str, Any]], *, max_tokens: int = 256) -> dict[str, Any]:
@@ -1298,27 +1311,37 @@ def _structurally_related_context(anchor: dict[str, Any], other: dict[str, Any])
 
 
 def _table_diversity_key(row: dict[str, Any]) -> str | None:
-    """Return a conservative duplicate-cluster key for reconstructed table evidence.
+    """Return a conservative duplicate-cluster key for equivalent evidence.
 
-    Only synthetic stitched rows are clustered. Canonical source chunks remain
-    independently rankable so a useful source row is never hidden behind a
-    synthetic representative.
+    Reconstructed variants are grouped by table identity. Canonical chunks are
+    grouped only when their normalized text signature *and* physical provenance
+    (page set + Docling refs) are identical. Repeated warnings on different
+    pages therefore remain independently rankable.
     """
-    if not row.get("stitched_table"):
-        return None
-    table_ref = str(row.get("table_ref") or "").strip()
-    if not table_ref:
-        return None
     scope = str(row.get("result_dir") or row.get("source_filename") or "")
-    return f"{scope}::{table_ref}"
+    if row.get("stitched_table"):
+        table_ref = str(row.get("table_ref") or "").strip()
+        return f"{scope}::table::{table_ref}" if table_ref else None
+    retrieval = row.get("retrieval") if isinstance(row.get("retrieval"), dict) else {}
+    signature = str(retrieval.get("signature") or row.get("signature") or "").strip()
+    if not signature:
+        normalized = _normalized(str(row.get("text") or ""))
+        if not normalized:
+            return None
+        signature = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    pages = tuple(sorted({int(v) for v in (row.get("page_numbers") or []) if str(v).lstrip("-").isdigit()}))
+    refs = tuple(sorted({str(v) for v in (row.get("doc_items") or []) if str(v).strip()}))
+    if not pages and not refs:
+        return None
+    return f"{scope}::canonical::{signature}::{pages}::{refs}"
 
 
 def diversify_results(rows: list[dict[str, Any]], *, top_k: int) -> list[dict[str, Any]]:
-    """Keep near-duplicate stitched rows from consuming the entire early Top-K.
+    """Keep equivalent evidence from consuming the entire early Top-K.
 
-    The best synthetic representative for a table is kept in the first pass.
-    Deferred variants are only used when there are not enough distinct results.
-    This preserves recall while improving evidence diversity.
+    The best representative for a stitched table or exact same-provenance
+    canonical duplicate is kept first. Deferred variants only fill remaining
+    slots when distinct evidence is insufficient, preserving recall.
     """
     limit = max(1, int(top_k))
     selected: list[dict[str, Any]] = []

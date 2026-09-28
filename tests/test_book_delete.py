@@ -53,11 +53,13 @@ def test_delete_book_records_removes_all_three_pipeline_tables_atomically(tmp_pa
     asyncio.run(verify.initialize())
 
     conversion_id = asyncio.run(jobs.create_pending("manual.pdf", ["md", "json"], 10, 20, "sha-source"))
-    asyncio.run(jobs.mark_completed(conversion_id, 1.0, "manual.zip"))
+    assert asyncio.run(jobs.mark_processing(conversion_id)) is True
+    assert asyncio.run(jobs.mark_completed(conversion_id, 1.0, "manual.zip")) is True
     assert asyncio.run(post.discover_completed_conversions()) == 1
     post_row = next(row for row in asyncio.run(post.list_jobs()) if row["conversion_job_id"] == conversion_id)
     post_id = int(post_row["id"])
-    asyncio.run(post.mark_completed(post_id, 1.0, "manual__job1__run0", "sha-output", "document", 1))
+    assert asyncio.run(post.mark_processing(post_id)) is True
+    assert asyncio.run(post.mark_completed(post_id, 1.0, "manual__job1__run0", "sha-output", "document", 1)) is True
     asyncio.run(verify.sync_routes(
         post_id, conversion_id, "generation-1",
         [{"route_id": "R1", "target": "pi5", "code": "OCR_GARBLE", "priority": "medium", "source": {"type": "text", "index": 1}}],
@@ -116,10 +118,42 @@ def test_delete_terminal_queue_job_rejects_active_or_managed_rows(tmp_path: Path
     assert asyncio.run(jobs.get_job(failed_id)) is None
 
     managed_id = asyncio.run(jobs.create_pending("managed.pdf", "md"))
-    asyncio.run(jobs.mark_completed(managed_id, 1.0, "managed.zip"))
+    assert asyncio.run(jobs.mark_processing(managed_id)) is True
+    assert asyncio.run(jobs.mark_completed(managed_id, 1.0, "managed.zip")) is True
     assert asyncio.run(post.discover_completed_conversions()) == 1
     try:
         asyncio.run(jobs.delete_terminal_job(managed_id))
         assert False, "managed conversion should use the book delete lifecycle"
     except RuntimeError as exc:
         assert "managed book" in str(exc)
+
+
+def test_book_delete_reservation_blocks_new_pipeline_work_and_pending_verification(tmp_path: Path):
+    db = tmp_path / "jobs.db"
+    jobs = JobStore(str(db)); post = PostprocessStore(str(db)); verify = Stage2BStore(str(db))
+    asyncio.run(jobs.initialize()); asyncio.run(post.initialize()); asyncio.run(verify.initialize())
+    conversion_id = asyncio.run(jobs.create_pending("manual.pdf", "md"))
+    assert asyncio.run(jobs.mark_processing(conversion_id)) is True
+    assert asyncio.run(jobs.mark_completed(conversion_id, 0.1, "manual.zip")) is True
+    assert asyncio.run(post.discover_completed_conversions()) == 1
+    row = asyncio.run(post.list_jobs())[0]; post_id = int(row["id"])
+    assert asyncio.run(post.mark_processing(post_id)) is True
+    assert asyncio.run(post.mark_completed(post_id, 0.1, "book__job1", "sha", "document", 0)) is True
+
+    asyncio.run(verify.sync_routes(post_id, conversion_id, "g", [{
+        "route_id":"R1", "target":"pi5", "code":"OCR_GARBLE", "priority":"medium",
+        "source":{"type":"text", "index":1},
+    }], "book__job1", "manual.zip"))
+    try:
+        asyncio.run(post.reserve_book_deletion(post_id))
+        assert False, "pending current verification must block destructive book deletion"
+    except RuntimeError as exc:
+        assert "verification" in str(exc).lower()
+
+    with verify._connection() as connection:
+        connection.execute("UPDATE verification_jobs SET status='completed' WHERE postprocess_job_id=?", (post_id,))
+    reserved = asyncio.run(post.reserve_book_deletion(post_id))
+    assert reserved and reserved["original_status"] == "completed"
+    assert asyncio.run(post.get_job(post_id))["status"] == "deleting"
+    assert asyncio.run(post.cancel_book_deletion(post_id, "completed")) is True
+    assert asyncio.run(post.get_job(post_id))["status"] == "completed"

@@ -982,3 +982,92 @@ def test_body_flattener_handles_adversarial_deep_group_tree_without_recursion_er
     }
     flat = _flatten_body_items(doc)
     assert [(kind, idx) for kind, idx, _ in flat] == [("texts", 0)]
+
+
+def test_generic_ocr_garble_catches_common_short_word_fragment_run_and_protects_uppercase_terminals(tmp_path):
+    cfg = AppConfig(database_path=str(tmp_path / "jobs.db"))
+    bad = "tos ost e e, b s soled Key operations should be done while the present temperature is displayed."
+    clean = [
+        "Connect R S T N to the incoming supply before energizing the panel.",
+        "Motor terminals U V W X are shown below for the selected configuration.",
+        "Contacts A B C D shall remain open during this test procedure.",
+        "Phases R Y B N are monitored by the protection relay during operation.",
+        "Terminals L N E PE are provided inside the junction box for connection.",
+    ]
+    def doc_for(text):
+        return {"schema_name":"DoclingDocument","version":"1.0","pages":{"1":{"page_no":1,"size":{"width":595,"height":842}}},"body":{"children":[{"$ref":"#/texts/0"}]},"groups":[],"tables":[],"pictures":[],"texts":[{"label":"text","text":text,"prov":[_bbox(1,50,700,540,650)]}]}
+    diagnostics = build_diagnostics(doc_for(bad), cfg)
+    signal = next(s for s in diagnostics["signals"] if s["code"] == "SUSPICIOUS_OCR_TEXT")
+    assert "consecutive_single_letter_run" in signal["items"][0]["reasons"]
+    for text in clean:
+        diagnostics = build_diagnostics(doc_for(text), cfg)
+        assert not any(s["code"] == "SUSPICIOUS_OCR_TEXT" for s in diagnostics["signals"]), text
+
+
+def test_document_local_recall_routes_damaga_and_releasfd_for_review_only(tmp_path):
+    cfg = AppConfig(database_path=str(tmp_path / "jobs.db"), stage2a_ocr_recall_common_min_count=3)
+    texts = []
+    values = [
+        "Damage may occur if the pressure is too high.",
+        "Damage to the pump can result from contamination.",
+        "Inspect for damage before operation.",
+        "Check damage after transport and before installation.",
+        "The released drawing shall be used for reference.",
+        "Use the RELEASED drawing for installation.",
+        "RELEASED DRAWING",
+        "The RELEASED drawing is the approved source.",
+        "Refer only to the RELEASED drawing revision.",
+        "A RELEASED drawing supersedes the draft.",
+        "Failure may cause damaga to the device during operation.",
+        "RELEASFD DRAWING",
+    ]
+    for i, value in enumerate(values):
+        texts.append({"label":"text","text":value,"prov":[_bbox(1,50,780-i*50,540,750-i*50)]})
+    doc={"schema_name":"DoclingDocument","version":"1.0","pages":{"1":{"page_no":1,"size":{"width":595,"height":842}}},"body":{"children":[{"$ref":f"#/texts/{i}"} for i in range(len(texts))]},"groups":[],"tables":[],"pictures":[],"texts":texts}
+    diagnostics=build_diagnostics(doc,cfg)
+    signal=next(s for s in diagnostics["signals"] if s["code"]=="DOCUMENT_INTERNAL_OCR_RECALL")
+    candidates={item.get("candidate_token") or item.get("token") or item.get("surface") or "": item for item in signal["items"]}
+    rendered=json.dumps(signal).casefold()
+    assert "damaga" in rendered
+    assert "releasfd" in rendered
+    routes=build_routes(doc,diagnostics,cfg)["routes"]
+    assert any(r["target"]=="pi5" and r["code"]=="DOCUMENT_INTERNAL_OCR_RECALL" for r in routes)
+
+
+def test_broken_font_cmap_signature_routes_source_text_for_review(tmp_path):
+    cfg = AppConfig(database_path=str(tmp_path / "jobs.db"))
+    doc={"schema_name":"DoclingDocument","version":"1.0","pages":{"1":{"page_no":1,"size":{"width":595,"height":842}}},"body":{"children":[{"$ref":"#/texts/0"}]},"groups":[],"tables":[],"pictures":[],"texts":[{"label":"text","text":"6LQJOH DQG 7ZLQ UDQHV","prov":[_bbox(1,50,700,540,650)]}]}
+    diagnostics=build_diagnostics(doc,cfg)
+    signal=next(s for s in diagnostics["signals"] if s["code"]=="TEXT_LAYER_MAPPING_SUSPECT")
+    assert signal["classification"]=="TEXT_REVIEW"
+    routes=build_routes(doc,diagnostics,cfg)["routes"]
+    assert any(r["target"]=="pi5" and r["code"]=="TEXT_LAYER_MAPPING_SUSPECT" for r in routes)
+
+
+def test_zero_headings_large_manual_gets_visibility_but_small_drawing_does_not(tmp_path):
+    cfg=AppConfig(database_path=str(tmp_path/"jobs.db"))
+    def make(pages, texts):
+        items=[]
+        for i in range(texts):
+            p=(i%pages)+1
+            items.append({"label":"text","text":f"Normal body instruction number {i} for pump operation.","prov":[{"page_no":p}]})
+        return {"schema_name":"DoclingDocument","version":"1.0","pages":{str(i):{"page_no":i} for i in range(1,pages+1)},"body":{"children":[]},"groups":[],"tables":[],"pictures":[],"texts":items}
+    large=build_diagnostics(make(10,100),cfg)
+    assert any(s["code"]=="NO_SECTION_HEADERS_DETECTED" for s in large["signals"])
+    small=build_diagnostics(make(2,10),cfg)
+    assert not any(s["code"]=="NO_SECTION_HEADERS_DETECTED" for s in small["signals"])
+
+
+def test_document_local_recall_routes_inconsistent_rare_all_caps_labels_without_dictionary(tmp_path):
+    cfg = AppConfig(database_path=str(tmp_path / "jobs.db"))
+    texts = [
+        {"label":"text","text":"RELEASFD DRAWING","prov":[_bbox(1,50,700,540,650)]},
+        {"label":"text","text":"RELEASFT DRAWING","prov":[_bbox(1,50,640,540,590)]},
+        {"label":"text","text":"Normal installation instructions for the controller are provided here.","prov":[_bbox(1,50,580,540,530)]},
+    ]
+    doc={"schema_name":"DoclingDocument","version":"1.0","pages":{"1":{"page_no":1,"size":{"width":595,"height":842}}},"body":{"children":[{"$ref":f"#/texts/{i}"} for i in range(len(texts))]},"groups":[],"tables":[],"pictures":[],"texts":texts}
+    diagnostics=build_diagnostics(doc,cfg)
+    signal=next(s for s in diagnostics["signals"] if s["code"]=="DOCUMENT_INTERNAL_OCR_RECALL")
+    blob=json.dumps(signal).casefold()
+    assert "releasfd" in blob and "releasft" in blob
+    assert "rare_label_variant_cluster" in blob

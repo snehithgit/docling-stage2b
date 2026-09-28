@@ -91,6 +91,9 @@ class Stage2BStore:
                     error_type TEXT,
                     error_message TEXT,
                     claimed_by TEXT,
+                    stage2c_entry_state TEXT,
+                    stage2c_entry_id TEXT,
+                    stage2c_entry_error TEXT,
                     is_current INTEGER NOT NULL DEFAULT 1,
                     UNIQUE(postprocess_job_id, generation, route_id, target)
                 )"""
@@ -105,24 +108,39 @@ class Stage2BStore:
                 conn.execute("ALTER TABLE verification_jobs ADD COLUMN priority_score INTEGER NOT NULL DEFAULT 0")
             if "claimed_by" not in columns:
                 conn.execute("ALTER TABLE verification_jobs ADD COLUMN claimed_by TEXT")
+            if "stage2c_entry_state" not in columns:
+                conn.execute("ALTER TABLE verification_jobs ADD COLUMN stage2c_entry_state TEXT")
+            if "stage2c_entry_id" not in columns:
+                conn.execute("ALTER TABLE verification_jobs ADD COLUMN stage2c_entry_id TEXT")
+            if "stage2c_entry_error" not in columns:
+                conn.execute("ALTER TABLE verification_jobs ADD COLUMN stage2c_entry_error TEXT")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_verification_runnable ON verification_jobs(target, is_current, status, authorized, next_attempt_at)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_verification_postprocess ON verification_jobs(postprocess_job_id, is_current)")
             conn.execute("""CREATE TABLE IF NOT EXISTS stage2b_migrations (
                 name TEXT PRIMARY KEY,
                 applied_at TEXT NOT NULL
             )""")
+            # Older releases could leave a prepared artifact row with no run_mode.
+            # Treat that as the dependency-gated awaiting state so idle workers can
+            # release it once the book's normal Text/Vision routes are complete.
+            conn.execute(
+                """UPDATE verification_jobs
+                   SET run_mode='awaiting_normal'
+                   WHERE is_current=1 AND code='FULL_TECHNICAL_VISUAL'
+                     AND status='pending' AND authorized=0 AND run_mode IS NULL"""
+            )
 
     async def recover_interrupted(self) -> int:
         return await self._run(self._recover_interrupted_sync)
 
     def _recover_interrupted_sync(self) -> int:
         with self._connection() as conn:
-            count = conn.execute("SELECT COUNT(*) FROM verification_jobs WHERE status='processing'").fetchone()[0]
+            count = conn.execute("SELECT COUNT(*) FROM verification_jobs WHERE status='processing' AND is_current=1").fetchone()[0]
             conn.execute(
                 """UPDATE verification_jobs
                    SET status='pending', started_at=NULL, next_attempt_at=NULL,
                        error_type='Interrupted', error_message='Recovered after restart'
-                   WHERE status='processing'"""
+                   WHERE status='processing' AND is_current=1"""
             )
             return int(count)
 
@@ -252,7 +270,8 @@ class Stage2BStore:
             cursor = conn.execute(
                 """UPDATE verification_jobs
                    SET authorized=0, run_mode=NULL
-                   WHERE target=? AND is_current=1 AND status='pending' AND authorized=1""",
+                   WHERE target=? AND is_current=1 AND status='pending' AND authorized=1
+                     AND COALESCE(code,'')<>'FULL_TECHNICAL_VISUAL'""",
                 (target,),
             )
             return int(cursor.rowcount)
@@ -350,7 +369,8 @@ class Stage2BStore:
             books = conn.execute(
                 f"""SELECT DISTINCT postprocess_job_id FROM verification_jobs
                    WHERE is_current=1 AND code='FULL_TECHNICAL_VISUAL'
-                     AND status='pending' AND authorized=0 AND run_mode='awaiting_normal'
+                     AND status='pending' AND authorized=0
+                     AND (run_mode='awaiting_normal' OR run_mode IS NULL)
                      {book_filter}""",
                 params,
             ).fetchall()
@@ -370,7 +390,8 @@ class Stage2BStore:
                        SET authorized=1, run_mode='artifact_ready', next_attempt_at=NULL
                        WHERE postprocess_job_id=? AND is_current=1
                          AND code='FULL_TECHNICAL_VISUAL' AND status='pending'
-                         AND authorized=0 AND run_mode='awaiting_normal'""",
+                         AND authorized=0
+                         AND (run_mode='awaiting_normal' OR run_mode IS NULL)""",
                     (book_id,),
                 )
                 released += int(cursor.rowcount)
@@ -489,11 +510,39 @@ class Stage2BStore:
                 """UPDATE verification_jobs
                    SET status='processing', started_at=?, completed_at=NULL,
                        attempt_count=attempt_count+1, run_mode=?, next_attempt_at=NULL,
-                       error_type=NULL, error_message=NULL
-                   WHERE id=? AND status='pending'""",
+                       error_type=NULL, error_message=NULL,
+                       stage2c_entry_state=NULL, stage2c_entry_id=NULL, stage2c_entry_error=NULL
+                   WHERE id=? AND is_current=1 AND status='pending' """,
                 (utcnow(), run_mode, job_id),
             )
             return cursor.rowcount == 1
+
+    async def set_stage2c_entry_state(
+        self,
+        job_id: int,
+        state: str | None,
+        *,
+        entry_id: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        await self._run(
+            self._set_stage2c_entry_state_sync, job_id, state, entry_id, error
+        )
+
+    def _set_stage2c_entry_state_sync(
+        self,
+        job_id: int,
+        state: str | None,
+        entry_id: str | None,
+        error: str | None,
+    ) -> None:
+        with self._connection() as conn:
+            conn.execute(
+                """UPDATE verification_jobs
+                   SET stage2c_entry_state=?, stage2c_entry_id=?, stage2c_entry_error=?
+                   WHERE id=?""",
+                (state, entry_id, (error[:2000] if error else None), job_id),
+            )
 
     async def mark_completed(
         self,
@@ -569,7 +618,8 @@ class Stage2BStore:
             conn.execute(
                 """UPDATE verification_jobs
                    SET status='failed', completed_at=?, authorized=0, next_attempt_at=NULL,
-                       error_type=?, error_message=?, artifact_path=?
+                       error_type=?, error_message=?, artifact_path=?,
+                       stage2c_entry_state=NULL, stage2c_entry_id=NULL, stage2c_entry_error=NULL
                    WHERE id=?""",
                 (utcnow(), error_type, error_message[:2000], artifact_path, job_id),
             )
@@ -585,7 +635,8 @@ class Stage2BStore:
                        started_at=NULL, completed_at=NULL, processing_seconds=NULL,
                        verdict=NULL, request_json=NULL, result_json=NULL, artifact_path=NULL,
                        retry_count=0, next_attempt_at=NULL,
-                       error_type=NULL, error_message=NULL
+                       error_type=NULL, error_message=NULL,
+                       stage2c_entry_state=NULL, stage2c_entry_id=NULL, stage2c_entry_error=NULL
                    WHERE id=? AND is_current=1 AND status IN ('completed','failed')""",
                 (job_id,),
             )
@@ -600,7 +651,8 @@ class Stage2BStore:
                 """UPDATE verification_jobs
                    SET status='pending', authorized=1, run_mode='manual',
                        started_at=NULL, completed_at=NULL, retry_count=0, next_attempt_at=NULL,
-                       error_type=NULL, error_message=NULL
+                       error_type=NULL, error_message=NULL,
+                       stage2c_entry_state=NULL, stage2c_entry_id=NULL, stage2c_entry_error=NULL
                    WHERE id=? AND status='failed' AND is_current=1""",
                 (job_id,),
             )
@@ -783,6 +835,38 @@ class Stage2BStore:
                     ).fetchone()[0]
                 )
                 result[target] = counts
+        return result
+
+    async def workload_counts(self) -> dict[str, dict[str, int]]:
+        return await self._run(self._workload_counts_sync)
+
+    def _workload_counts_sync(self) -> dict[str, dict[str, int]]:
+        """Logical Text / Vision / Artifact counts independent of legacy lanes."""
+        result: dict[str, dict[str, int]] = {}
+        scopes = {
+            "text": "target='pi5' AND COALESCE(code,'')<>'FULL_TECHNICAL_VISUAL'",
+            "vision": "target='oneplus' AND COALESCE(code,'')<>'FULL_TECHNICAL_VISUAL'",
+            "artifact": "code='FULL_TECHNICAL_VISUAL'",
+        }
+        with self._connection() as conn:
+            for name, where in scopes.items():
+                rows = conn.execute(
+                    f"SELECT status, COUNT(*) AS n FROM verification_jobs WHERE is_current=1 AND {where} GROUP BY status"
+                ).fetchall()
+                counts = {row["status"]: int(row["n"]) for row in rows}
+                counts["total"] = sum(counts.values())
+                if name == "artifact":
+                    counts["ready"] = int(conn.execute(
+                        """SELECT COUNT(*) FROM verification_jobs
+                           WHERE is_current=1 AND code='FULL_TECHNICAL_VISUAL'
+                             AND status='pending' AND authorized=1"""
+                    ).fetchone()[0])
+                    counts["waiting_dependency"] = int(conn.execute(
+                        """SELECT COUNT(*) FROM verification_jobs
+                           WHERE is_current=1 AND code='FULL_TECHNICAL_VISUAL'
+                             AND status='pending' AND authorized=0"""
+                    ).fetchone()[0])
+                result[name] = counts
         return result
 
     async def list_jobs(self, limit: int = 100, current_only: bool = True) -> list[dict[str, Any]]:

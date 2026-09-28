@@ -23,6 +23,16 @@ class DoclingApiError(RuntimeError):
 
 
 
+class DoclingTransientSubmitError(DoclingApiError):
+    """A submit failed before a response could establish a remote task.
+
+    Only connection-establishment failures use this type. Read/write timeouts are
+    intentionally left ambiguous and are not automatically retried because the
+    server may already have accepted the conversion.
+    """
+
+
+
 @dataclass
 class ResultPayload:
     content: bytes
@@ -116,6 +126,8 @@ class DoclingClient:
             if not task_id:
                 raise DoclingApiError("Docling Serve returned no task_id for the submitted document.")
             return str(task_id)
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            raise DoclingTransientSubmitError(f"Unable to connect while submitting document: {exc}") from exc
         except (OSError, httpx.HTTPError, ValueError) as exc:
             raise DoclingApiError(f"Unable to submit document: {exc}") from exc
 

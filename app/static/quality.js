@@ -40,16 +40,19 @@ window.retryPostprocess = retryJob;
 
 async function rerunJob(id, button) {
   if (!window.confirm("Re-run Stage 2A analysis?\n\nThis creates a new analysis generation and may require verification, Stage 2C finalization, chunks, retrieval indexes and machine embeddings to rebuild. Historical runs and human decisions are preserved.")) return;
+  const label = button?.textContent || "Rerun";
   if (button) { button.disabled = true; button.textContent = "Queuing…"; }
-  const response = await fetch(`/api/postprocess/jobs/${id}/rerun`, {method: "POST"});
-  let data = {}; try { data = await response.json(); } catch (_) {}
-  if (!response.ok) {
-    if (button) { button.disabled = false; button.textContent = "Rerun"; }
-    showQualityFeedback(data.detail || "Rerun could not be queued.");
-    return;
+  try {
+    const response = await fetch(`/api/postprocess/jobs/${id}/rerun`, {method: "POST"});
+    let data = {}; try { data = await response.json(); } catch (_) {}
+    if (!response.ok) throw new Error(data.detail || "Rerun could not be queued.");
+    showQualityFeedback("Quality analysis rerun queued.", "success");
+    await load();
+  } catch (error) {
+    showQualityFeedback(error.message || "Rerun could not be queued.");
+  } finally {
+    if (button?.isConnected) { button.disabled = false; button.textContent = label; }
   }
-  showQualityFeedback("Quality analysis rerun queued.", "success");
-  await load();
 }
 window.rerunPostprocess = rerunJob;
 

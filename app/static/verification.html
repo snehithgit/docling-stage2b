@@ -4,8 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Verification · Docling Auto-Convert</title>
-<link rel="stylesheet" href="/assets/styles.css?v=2026.09.23.40.11O" />
-<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.23.40.11O" />
+<link rel="stylesheet" href="/assets/styles.css?v=2026.09.28.40.11W" />
+<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.28.40.11W" />
 </head>
 <body class="ui29">
 <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -47,7 +47,12 @@
     <section class="panel verifier-controls-panel ui29-primary-panel" aria-label="Verifier status and controls">
       <div class="panel-heading verifier-controls-heading">
         <div><p class="eyebrow">Live verifier status</p><h2 id="verifier-pair-title">Text + Vision</h2><p class="format-note" id="verifier-status-note">Selected processors only. There is no automatic provider fallback.</p></div>
-        <button class="auto-run-control verification-master-switch" id="auto-all" type="button" role="switch" aria-checked="false" onclick="toggleAutoAll(this)"><span class="switch-track"><span class="switch-thumb"></span></span><span class="switch-copy"><strong>Auto verify all</strong><small>Off</small></span></button>
+        <div class="verification-interlock-controls" aria-label="Text Vision Artifact scheduler controls">
+          <button class="secondary-button" id="interlock-start" type="button" onclick="setInterlockMode('start', this)">Start</button>
+          <button class="secondary-button danger-outline" id="interlock-stop" type="button" onclick="setInterlockMode('stop', this)">Stop</button>
+          <button class="primary-button" id="interlock-auto" type="button" onclick="setInterlockMode('auto', this)">Auto</button>
+          <span class="mode-badge paused" id="interlock-mode">Stopped</span>
+        </div>
       </div>
       <div class="verification-device-grid always-visible-devices" aria-label="Verification devices">
         <article class="verification-device-card compact-device-card">
@@ -56,11 +61,7 @@
           <div class="device-health device-health-primary" id="pi5-health">Checking verifier…</div>
           <div class="active-stage" id="pi5-stage">Idle</div>
           <div class="verification-big-stats"><strong id="pi5-done">0</strong><span>completed</span><strong id="pi5-failed">0</strong><span>failed</span></div>
-          <div class="verifier-control-actions">
-            <button class="secondary-button" id="pi5-start" type="button" onclick="startVerifier('pi5', this)">Start verifier</button>
-            <button class="secondary-button danger-outline" id="pi5-stop" type="button" onclick="stopVerifier('pi5', this)">Stop verifier</button>
-            <button class="auto-run-control" id="pi5-auto" type="button" role="switch" aria-checked="false" onclick="toggleDeviceAuto('pi5', this)"><span class="switch-track"><span class="switch-thumb"></span></span><span class="switch-copy"><strong>Auto Run</strong><small>Off</small></span></button>
-          </div>
+          <p class="interlock-card-note">Controlled by the shared Text · Vision · Artifact interlock.</p>
         </article>
         <article class="verification-device-card compact-device-card">
           <div class="device-card-top"><div><p class="eyebrow">Vision verifier</p><h2 id="oneplus-title">Vision</h2></div><span class="mode-badge paused" id="oneplus-mode">Manual</span></div>
@@ -68,12 +69,15 @@
           <div class="device-health device-health-primary" id="oneplus-health">Checking verifier…</div>
           <div class="active-stage" id="oneplus-stage">Idle</div>
           <div class="verification-big-stats"><strong id="oneplus-done">0</strong><span>completed</span><strong id="oneplus-failed">0</strong><span>failed</span></div>
-          <div class="verifier-control-actions">
-            <button class="secondary-button" id="oneplus-start" type="button" onclick="startVerifier('oneplus', this)">Start verifier</button>
-            <button class="secondary-button danger-outline" id="oneplus-stop" type="button" onclick="stopVerifier('oneplus', this)">Stop verifier</button>
-            <button class="auto-run-control" id="oneplus-auto" type="button" role="switch" aria-checked="false" onclick="toggleDeviceAuto('oneplus', this)"><span class="switch-track"><span class="switch-thumb"></span></span><span class="switch-copy"><strong>Auto Run</strong><small>Off</small></span></button>
-          </div>
+          <p class="interlock-card-note">Controlled by the shared Text · Vision · Artifact interlock.</p>
           <div class="device-server-link" id="oneplus-server-link"><a class="mini-action" href="/oneplus">Phone server controls</a></div>
+        </article>
+        <article class="verification-device-card compact-device-card artifact-worker-card">
+          <div class="device-card-top"><div><p class="eyebrow">Artifact verifier</p><h2>Shared idle pool</h2></div><span class="mode-badge paused" id="artifact-mode">Waiting</span></div>
+          <div class="device-health device-health-primary"><span class="status completed">Pi5 + OnePlus</span><span class="device-model">Work stealing</span><small>Normal Text/Vision work has priority. Artifacts use whichever local device becomes idle.</small></div>
+          <div class="active-stage" id="artifact-stage">Waiting for eligible artifacts</div>
+          <div class="verification-big-stats"><strong id="artifact-done">0</strong><span>completed</span><strong id="artifact-pending">0</strong><span>pending</span><strong id="artifact-failed">0</strong><span>failed</span></div>
+          <p class="interlock-card-note">Auto continuously releases eligible artifacts after their book's normal routes finish.</p>
         </article>
       </div>
       <div class="verification-failure-strip" id="retry-failed-strip" hidden>
@@ -160,8 +164,8 @@
 
   </main>
 </div>
-<script src="/assets/nav.js?v=2026.09.23.40.11O"></script>
-<script src="/assets/verification.js?v=2026.09.23.40.11O"></script>
+<script src="/assets/nav.js?v=2026.09.28.40.11W"></script>
+<script src="/assets/verification.js?v=2026.09.28.40.11W"></script>
 </body>
 </html>
 

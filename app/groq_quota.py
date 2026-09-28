@@ -220,7 +220,7 @@ class GroqQuotaGuard:
             "token_stop_at": max(1, math.floor(token_limit * stop_fraction)),
         }
 
-    def _resume_at_sync(self, now: float, *, requests_used: int, tokens_used: int, limits: dict[str, Any], estimated_next_tokens: int = 0) -> float | None:
+    def _resume_at_sync(self, now: float, *, requests_used: int, tokens_used: int, limits: dict[str, Any], estimated_next_tokens: int = 0, reserved_requests: int = 0, reserved_tokens: int = 0) -> float | None:
         candidates: list[float] = []
         temp = self._state.get("temporary_pause_until_epoch")
         try:
@@ -235,7 +235,7 @@ class GroqQuotaGuard:
             if server_remaining is not None:
                 effective_limit = int(server_limit or limits["request_limit"])
                 server_stop_remaining = max(1, effective_limit - math.floor(effective_limit * limits["stop_fraction"]))
-                if int(server_remaining) <= server_stop_remaining and server_reset is not None:
+                if int(server_remaining) - int(reserved_requests) <= server_stop_remaining and server_reset is not None:
                     candidates.append(float(server_reset))
         except (TypeError, ValueError):
             pass
@@ -249,7 +249,7 @@ class GroqQuotaGuard:
         try:
             if tpm_remaining is not None and tpm_limit is not None and estimated_next_tokens > 0:
                 tpm_reserve = max(1, int(int(tpm_limit) * (1.0 - limits["stop_fraction"])))
-                if int(tpm_remaining) - int(estimated_next_tokens) < tpm_reserve and tpm_reset is not None and float(tpm_reset) > now:
+                if int(tpm_remaining) - int(reserved_tokens) - int(estimated_next_tokens) < tpm_reserve and tpm_reset is not None and float(tpm_reset) > now:
                     candidates.append(float(tpm_reset))
         except (TypeError, ValueError):
             pass
@@ -329,8 +329,9 @@ class GroqQuotaGuard:
         paused = enabled and bool(reasons)
         state = "paused" if paused else "warning" if enabled and warnings else "ok"
         resume_at = self._resume_at_sync(
-            now, requests_used=requests_used, tokens_used=tokens_used, limits=limits,
+            now, requests_used=effective_requests, tokens_used=effective_tokens, limits=limits,
             estimated_next_tokens=max(0, int(estimated_next_tokens)),
+            reserved_requests=reserved_requests, reserved_tokens=reserved_tokens,
         ) if paused else None
 
         if paused:

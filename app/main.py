@@ -11,7 +11,7 @@ import sqlite3
 import time
 import uuid
 import zipfile
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -42,7 +42,16 @@ from .maintenance_cleanup import clear_stale_files, scan_stale_files
 from .oneplus_control import OnePlusControlError, OnePlusController
 from .postprocess import PostprocessWorker
 from .postprocess_store import PostprocessStore
-from .pipeline_state import identity_metadata_status, repair_identity_metadata, stage2c_freshness, stage3_freshness, verification_rows_for_stage2c
+from .pipeline_state import (
+    identity_metadata_status,
+    repair_identity_metadata,
+    stage2a_human_review_summary,
+    stage2a_structural_review_context,
+    set_stage2a_human_review_decision,
+    stage2c_freshness,
+    stage3_freshness,
+    verification_rows_for_stage2c,
+)
 from .retrieval import (
     add_benchmark_item,
     delete_benchmark_item,
@@ -63,10 +72,20 @@ from .stage2b import Stage2BWorker
 from .stage2c import STAGE2C_RULE_VERSION, apply_human_correction_to_entry, human_review_summary, upsert_ledger_entry, verifier_audit_summary, apply_human_visual_decision, set_audit_gate_bypass
 from .visual_evidence import ensure_visual_evidence_fresh, normalize_visual_entry, search_visual_indices
 from .stage3 import STAGE3_RULE_VERSION, Stage3ChunkBuilder
+from .book_lifecycle_lock import BookLifecycleLocks
 from .telegram_bot import TelegramBotService
 from .stage2b_store import Stage2BStore
 from .worker import ConversionWorker
 from .version import APP_VERSION
+from .table_repair import (
+    TABLE_ROW_COLLAPSE_CODE, ensure_collapse_scan, table_repair_context, parse_tsv_matrix,
+    load_document_from_zip, save_table_repair, deactivate_table_repair,
+)
+from .docling_review import (
+    page_items as docling_review_page_items, load_repairs as load_docling_page_repairs,
+    active_repairs as active_docling_page_repairs, save_approved_repair as save_docling_page_repair,
+    deactivate_repair as deactivate_docling_page_repair, crop_pdf_region,
+)
 
 
 TECHNICAL_PICTURE_CLASSES = {
@@ -81,6 +100,24 @@ def _load_json_file(path: Path) -> dict:
         return data if isinstance(data, dict) else {}
     except (OSError, json.JSONDecodeError, TypeError):
         return {}
+
+
+def _converted_zip_for_postprocess_job(job: dict, result_dir: Path) -> Path | None:
+    manifest = _load_json_file(Path(result_dir) / "source_manifest.json")
+    converted_name = Path(str(manifest.get("converted_zip") or job.get("output_filename") or "")).name
+    if not converted_name:
+        return None
+    path = Path(runtime.config.output_dir) / converted_name
+    return path if path.is_file() else None
+
+
+async def _ensure_table_collapse_compatibility(job: dict, result_dir: Path) -> dict:
+    converted_zip = _converted_zip_for_postprocess_job(job, result_dir)
+    if converted_zip is None:
+        return {"status": "unavailable", "added": 0}
+    job_id = int(job.get("id") or 0)
+    async with runtime.book_lifecycle_locks.get(job_id):
+        return await asyncio.to_thread(ensure_collapse_scan, result_dir, converted_zip)
 
 
 def _entry_source_identity(entry: dict) -> tuple:
@@ -356,6 +393,53 @@ class HumanCorrectionUpdate(BaseModel):
 
 class VisualAuditDecisionRequest(BaseModel):
     decision: str = Field(pattern="^(technical|decorative|useful|not_useful)$")
+
+
+class StructuralReviewDecisionRequest(BaseModel):
+    decision: str = Field(pattern="^(accepted|dismissed)$")
+    note: str = Field(default="", max_length=1000)
+    reviewed_pages: list[int] = Field(default_factory=list, max_length=500)
+    reviewed_items: list[str] = Field(default_factory=list, max_length=5000)
+
+
+class TableRepairSaveRequest(BaseModel):
+    tsv: str = Field(min_length=1, max_length=500000)
+    header_rows: int = Field(default=1, ge=0, le=100)
+    note: str = Field(default="", max_length=2000)
+    source_reviewed: bool = False
+
+
+class NormalizedBBox(BaseModel):
+    x0: float = Field(ge=0.0, le=1.0)
+    y0: float = Field(ge=0.0, le=1.0)
+    x1: float = Field(ge=0.0, le=1.0)
+    y1: float = Field(ge=0.0, le=1.0)
+
+
+class DoclingReviewCropRequest(BaseModel):
+    page: int = Field(ge=1)
+    bbox: NormalizedBBox
+
+
+class DoclingReviewExtractRequest(BaseModel):
+    page: int = Field(ge=1)
+    bbox: NormalizedBBox
+    region_type: str = Field(pattern="^(paragraph|heading|table|picture)$")
+    source_ref: str | None = Field(default=None, max_length=200)
+    original_text: str = Field(default="", max_length=12000)
+    processor_role: str = Field(default="auto", pattern="^(auto|pi5|oneplus)$")
+
+
+class DoclingReviewSaveRequest(BaseModel):
+    page: int = Field(ge=1)
+    bbox: NormalizedBBox
+    region_type: str = Field(pattern="^(paragraph|heading|table|picture)$")
+    source_ref: str | None = Field(default=None, max_length=200)
+    proposed_text: str = Field(default="", max_length=50000)
+    table_tsv: str = Field(default="", max_length=500000)
+    header_rows: int = Field(default=1, ge=0, le=100)
+    note: str = Field(default="", max_length=2000)
+    extraction: dict = Field(default_factory=dict)
 
 
 class AuditBypassRequest(BaseModel):
@@ -738,13 +822,17 @@ class Runtime:
             lambda: self.config, self.postprocess_store, self.events, self.groq_quota
         )
         self.stage2b_store = Stage2BStore(self.config.database_path)
+        self.book_lifecycle_locks = BookLifecycleLocks()
         self.oneplus_controller = OnePlusController(lambda: self.config)
         self.stage2b_worker = Stage2BWorker(
             lambda: self.config, self.stage2b_store, self.postprocess_store, self.events,
             self.groq_quota, self.oneplus_controller.restart,
+            lifecycle_lock_getter=self.book_lifecycle_locks.get,
         )
         self.stage3_builder = Stage3ChunkBuilder(
-            lambda: self.config, self.postprocess_store, self.client, self.events, self.stage2b_store
+            lambda: self.config, self.postprocess_store, self.client, self.events, self.stage2b_store,
+            lifecycle_lock_getter=self.book_lifecycle_locks.get,
+            ledger_lock=self.stage2b_worker._stage2c_ledger_lock,
         )
         self.telegram_bot = TelegramBotService(
             lambda: self.config, self.telegram_command, lambda: self.events.stream(maxsize=0), self.telegram_audit
@@ -760,6 +848,9 @@ class Runtime:
             "status": "idle", "total_books": 0, "processed_books": 0,
             "current_book": None, "current_stage": None, "results": [], "errors": 0,
         }
+
+    async def start_stage2c_book(self, postprocess_job_id: int) -> dict:
+        return await self.stage2b_worker.start_stage2c_backfill(int(postprocess_job_id))
 
     async def update_settings(self, update: SettingsUpdate) -> AppConfig:
         # Watcher formats are an explicit multi-select. The exact selected
@@ -859,6 +950,82 @@ class Runtime:
             await self.stage2b_store.clear_manual_authorizations("oneplus")
         self.events.notify("stage2b_mode_updated")
         return revised
+
+    def stage2b_interlock_mode(self) -> str:
+        pi_paused = bool(self.config.stage2b_pi5_paused)
+        one_paused = bool(self.config.stage2b_oneplus_paused)
+        pi_auto = bool(self.config.stage2b_pi5_auto_run)
+        one_auto = bool(self.config.stage2b_oneplus_auto_run)
+        if pi_paused and one_paused:
+            return "stopped"
+        if (not pi_paused) and (not one_paused) and pi_auto and one_auto:
+            return "auto"
+        if (not pi_paused) and (not one_paused) and (not pi_auto) and (not one_auto):
+            return "started"
+        return "mixed"
+
+    async def set_stage2b_interlock_started(self) -> dict:
+        """Start one manual snapshot across Text, Vision and Artifact lanes."""
+        revised = AppConfig(**{
+            **self.config.__dict__,
+            "stage2b_pi5_auto_run": False,
+            "stage2b_oneplus_auto_run": False,
+            "stage2b_pi5_paused": False,
+            "stage2b_oneplus_paused": False,
+        })
+        revised.validate()
+        save_config(self.config_file, revised)
+        self.config = revised
+        text_count = await self.stage2b_store.start_manual_batch("pi5")
+        vision_count = await self.stage2b_store.start_manual_batch("oneplus")
+        released = await self.stage2b_store.release_ready_artifact_sweeps()
+        self.events.notify("stage2b_interlock_started")
+        if released:
+            self.events.notify("stage2b_artifact_sweep_released")
+        return {
+            "mode": "started",
+            "text_authorized": int(text_count),
+            "vision_authorized": int(vision_count),
+            "artifact_released": int(released),
+        }
+
+    async def set_stage2b_interlock_stopped(self) -> dict:
+        """Pause new dispatch globally; in-flight requests finish safely."""
+        revised = AppConfig(**{
+            **self.config.__dict__,
+            "stage2b_pi5_auto_run": False,
+            "stage2b_oneplus_auto_run": False,
+            "stage2b_pi5_paused": True,
+            "stage2b_oneplus_paused": True,
+        })
+        revised.validate()
+        save_config(self.config_file, revised)
+        self.config = revised
+        # Clear only normal manual snapshots. Artifact authorization represents
+        # dependency readiness, not ownership by a specific device.
+        await self.stage2b_store.clear_manual_authorizations("pi5")
+        await self.stage2b_store.clear_manual_authorizations("oneplus")
+        self.events.notify("stage2b_interlock_stopped")
+        active = {
+            name: state.get("active_job_id")
+            for name, state in self.stage2b_worker.worker_state.items()
+            if state.get("active_job_id")
+        }
+        return {"mode": "stopped", "active_jobs_finishing": active}
+
+    async def set_stage2b_interlock_auto(self) -> dict:
+        """Enable continuous interlocked scheduling for all verification work."""
+        revised = await self.set_stage2b_auto_run_all(True)
+        released = await self.stage2b_store.release_ready_artifact_sweeps()
+        self.events.notify("stage2b_interlock_auto")
+        if released:
+            self.events.notify("stage2b_artifact_sweep_released")
+        return {
+            "mode": "auto",
+            "pi5": bool(revised.stage2b_pi5_auto_run),
+            "oneplus": bool(revised.stage2b_oneplus_auto_run),
+            "artifact_released": int(released),
+        }
 
 
     async def start_safety_refresh_all(self) -> dict:
@@ -1027,6 +1194,17 @@ class Runtime:
                             except ValueError:
                                 pass
                     else:
+                        await _ensure_table_collapse_compatibility(job, result_dir)
+                        structural_gate = await asyncio.to_thread(stage2a_human_review_summary, result_dir)
+                        if structural_gate.get("blocking_review_required", 0):
+                            book_catalog.append({
+                                "postprocess_job_id": job_id,
+                                "result_dir": result_dir,
+                                "stage3_current": False,
+                                "structural_review_waiting": structural_gate.get("blocking_review_required", 0),
+                            })
+                            self.pipeline_sequence_state.update({"current_book": job_id, "current_stage": "stage2a_human_review"})
+                            continue
                         audit_gate = await asyncio.to_thread(
                             verifier_audit_summary, result_dir,
                             text_require_human=bool(self.config.stage2c_require_human_review),
@@ -1574,7 +1752,7 @@ class Runtime:
             for book in books
             for key in ("text_failed", "vision_failed", "artifact_failed")
         )
-        conversion_failed_rows = await self.store.list_jobs(limit=200, failures_only=True)
+        conversion_failed_rows = await self.store.list_jobs(limit=-1, failures_only=True)
         stage2a_failed = [job for job in jobs if str(job.get("status") or "") == "failed"]
         stage2c_failed = [job for job in jobs if str(job.get("stage2c_status") or "") == "failed"]
         stage3_failed = [job for job in jobs if str(job.get("stage3_status") or "") == "failed"]
@@ -2098,6 +2276,10 @@ def enrich_postprocess_jobs(rows: list[dict]) -> list[dict]:
             row["result_counts"] = None
         review = human_review_summary(result_path, require_human=bool(runtime.config.stage2c_require_human_review))
         row.update(review)
+        structural_review = stage2a_human_review_summary(result_path)
+        row["structural_review_total"] = int(structural_review.get("total") or 0)
+        row["structural_review_pending"] = int(structural_review.get("blocking_review_required") or 0)
+        row["structural_review_resolved"] = int(structural_review.get("resolved") or 0)
         state = runtime.stage2b_worker.stage2c_state_for(int(row.get("id") or 0))
         if state:
             row["stage2c_status"] = state.get("status") or "not_built"
@@ -2200,7 +2382,7 @@ def _audit_diagnostic_row(result_dir: Path) -> dict:
 
 @app.get("/api/errors")
 async def errors() -> dict:
-    conversion_jobs = enrich_jobs(await runtime.store.list_jobs(limit=200, failures_only=True))
+    conversion_jobs = enrich_jobs(await runtime.store.list_jobs(limit=-1, failures_only=True))
     raw_postprocess = await runtime.postprocess_store.list_jobs(limit=-1)
     postprocess_rows = await asyncio.to_thread(enrich_postprocess_jobs, raw_postprocess)
     current_verification = await runtime.stage2b_store.list_jobs(limit=10000, current_only=True)
@@ -2504,6 +2686,10 @@ async def documents() -> dict:
             ))
             pipeline["stage2b_ready"] = bool(total and blockers == 0 and (verification["pi5_completed"] + verification["oneplus_completed"] == total))
             result_dir = Path(runtime.config.processed_dir) / Path(str(row.get("result_dir"))).name
+            await _ensure_table_collapse_compatibility(row, result_dir)
+            structural_review = await asyncio.to_thread(stage2a_human_review_summary, result_dir)
+            row["stage2a_human_review"] = structural_review
+            pipeline["stage2a_human_review_pending"] = int(structural_review.get("blocking_review_required") or 0)
             verification_rows = await runtime.stage2b_store.list_book_jobs_raw(job_id) if total else []
             s2c = stage2c_freshness(result_dir, verification_rows, rule_version=STAGE2C_RULE_VERSION, artifact_sweep_required=bool(getattr(runtime.config, "stage2b_artifact_sweep_required_for_finalize", True)))
             s3 = stage3_freshness(result_dir, s2c, stage3_rule_version=STAGE3_RULE_VERSION, retrieval_rule_version=RETRIEVAL_RULE_VERSION)
@@ -2523,6 +2709,9 @@ async def documents() -> dict:
             elif not pipeline["stage2c_ready"]:
                 pipeline["next_stage"] = "stage2c"
                 pipeline["blocked_reason"] = s2c.get("reason")
+            elif int(pipeline.get("stage2a_human_review_pending") or 0) > 0:
+                pipeline["next_stage"] = "stage2a_human_review"
+                pipeline["blocked_reason"] = f"{int(pipeline['stage2a_human_review_pending'])} structural review item(s) must be resolved before Stage 3."
             elif not pipeline["stage3_ready"]:
                 pipeline["next_stage"] = "stage3"
                 pipeline["blocked_reason"] = s3.get("reason")
@@ -2759,38 +2948,38 @@ async def delete_conversion_queue_item(job_id: int, request: DeleteBookRequest) 
 
 @app.post("/api/postprocess/jobs/{job_id}/delete")
 async def delete_book(job_id: int, request: DeleteBookRequest) -> dict:
-    """Remove one book from the active pipeline without destroying source files.
+    async with runtime.book_lifecycle_locks.get(int(job_id)):
+        return await _delete_book_locked(job_id, request)
 
-    The original input, converted Docling ZIP and processed result directory are
-    moved into per-root ``_deleted_books`` quarantine folders before their DB
-    rows are removed.  Because the watcher/importer scan only the root folders,
-    the deleted book stays deleted until the operator explicitly restores it.
-    """
+
+async def _delete_book_locked(job_id: int, request: DeleteBookRequest) -> dict:
+    """Reserve, quarantine, then atomically remove one terminal book."""
     if not request.confirm:
         raise HTTPException(status_code=422, detail="Explicit delete confirmation is required.")
-    job = await runtime.postprocess_store.get_job(job_id)
+    try:
+        job = await runtime.postprocess_store.reserve_book_deletion(job_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if job is None:
         raise HTTPException(status_code=404, detail="Book not found.")
-    if str(job.get("status") or "") in {"pending", "processing"}:
-        raise HTTPException(status_code=409, detail="Stage 2A is queued or processing this book. Wait for it to finish before deleting.")
+    original_status = str(job.get("original_status") or "completed")
+
+    async def cancel_reservation() -> None:
+        await runtime.postprocess_store.cancel_book_deletion(job_id, original_status)
 
     conversion = await runtime.postprocess_store.get_conversion_job(int(job.get("conversion_job_id") or 0))
-    if conversion and str(conversion.get("status") or "") in {"pending", "processing"}:
-        raise HTTPException(status_code=409, detail="Docling conversion is queued or processing this book. Wait for it to finish before deleting.")
-
-    verification_rows = await runtime.stage2b_store.list_book_jobs_raw(job_id)
-    if any(str(row.get("status") or "") == "processing" for row in verification_rows):
-        raise HTTPException(status_code=409, detail="Verification is currently processing this book. Stop/wait for it before deleting.")
-
     stage2c_state = runtime.stage2b_worker.stage2c_state_for(job_id) or {}
     if str(stage2c_state.get("status") or "") in {"queued", "running"}:
+        await cancel_reservation()
         raise HTTPException(status_code=409, detail="Stage 2C is currently building this book. Wait for it to finish before deleting.")
     stage3_state = runtime.stage3_builder.state_for(job_id) or {}
     if str(stage3_state.get("status") or "") in {"queued", "running"}:
+        await cancel_reservation()
         raise HTTPException(status_code=409, detail="Stage 3 is currently building this book. Wait for it to finish before deleting.")
 
     delete_row = {
         **job,
+        "status": original_status,
         "conversion_filename": (conversion or {}).get("filename"),
         "conversion_output_filename": (conversion or {}).get("output_filename"),
         "conversion_source_kind": (conversion or {}).get("source_kind") or job.get("source_kind"),
@@ -2798,25 +2987,32 @@ async def delete_book(job_id: int, request: DeleteBookRequest) -> dict:
     try:
         quarantine = await asyncio.to_thread(quarantine_book_artifacts, runtime.config, delete_row)
     except OSError as exc:
+        await cancel_reservation()
         raise HTTPException(status_code=500, detail=f"Could not quarantine the book files: {exc}") from exc
 
     try:
         deleted = await runtime.postprocess_store.delete_book_records(job_id)
     except RuntimeError as exc:
         rollback_errors = await asyncio.to_thread(restore_quarantined_artifacts, quarantine)
+        await cancel_reservation()
         detail = str(exc)
         if rollback_errors:
             detail += " File rollback also reported: " + "; ".join(rollback_errors)
         raise HTTPException(status_code=409, detail=detail) from exc
     except Exception as exc:
         rollback_errors = await asyncio.to_thread(restore_quarantined_artifacts, quarantine)
+        await cancel_reservation()
         detail = f"Database deletion failed: {exc}"
         if rollback_errors:
             detail += " File rollback also reported: " + "; ".join(rollback_errors)
         raise HTTPException(status_code=500, detail=detail) from exc
     if deleted is None:
-        await asyncio.to_thread(restore_quarantined_artifacts, quarantine)
-        raise HTTPException(status_code=404, detail="Book disappeared before it could be deleted.")
+        rollback_errors = await asyncio.to_thread(restore_quarantined_artifacts, quarantine)
+        await cancel_reservation()
+        detail = "Book disappeared before it could be deleted."
+        if rollback_errors:
+            detail += " File rollback also reported: " + "; ".join(rollback_errors)
+        raise HTTPException(status_code=404, detail=detail)
 
     equipment = await asyncio.to_thread(remove_manual_from_equipment, Path(runtime.config.processed_dir), job_id)
     runtime.events.notify("book_deleted")
@@ -2828,7 +3024,6 @@ async def delete_book(job_id: int, request: DeleteBookRequest) -> dict:
         "equipment": equipment,
         "message": "Book removed from the active pipeline. Source files were quarantined, not destroyed.",
     }
-
 
 def _verifier_provider_label(provider: str, kind: str) -> str:
     if provider == "pi5":
@@ -2871,12 +3066,18 @@ async def stage2b_status() -> dict:
             "pi5": {"auto_run": runtime.config.stage2b_pi5_auto_run, "paused": runtime.config.stage2b_pi5_paused},
             "oneplus": {"auto_run": runtime.config.stage2b_oneplus_auto_run, "paused": runtime.config.stage2b_oneplus_paused},
         },
+        "interlock": {
+            "mode": runtime.stage2b_interlock_mode(),
+            "priority": ["text_vision", "artifact_when_idle"],
+            "provider_reservations": runtime.stage2b_worker.dispatch_reservations,
+        },
         "artifact_sweep": {
             "enabled": bool(getattr(runtime.config, "stage2b_artifact_sweep_enabled", True)),
             "required_for_finalize": bool(getattr(runtime.config, "stage2b_artifact_sweep_required_for_finalize", True)),
-            "sequence": "after_normal_text_vision",
+            "sequence": "normal_text_vision_first_then_idle_local_worker",
         },
         "counts": await runtime.stage2b_store.counts(),
+        "workloads": await runtime.stage2b_store.workload_counts(),
         "workers": runtime.stage2b_worker.worker_state,
         "manual_crosschecks": {str(k): v for k, v in runtime.stage2b_worker.manual_crosscheck_state.items()},
         "jobs": await runtime.stage2b_store.list_jobs(limit=100),
@@ -2893,11 +3094,56 @@ async def stage2b_queue(target: str) -> dict:
     }
 
 
+async def _enrich_text_review_entry_state(jobs: list[dict]) -> list[dict]:
+    """Attach review-entry readiness to completed text-verifier results.
+
+    A verifier completion is durable before its Stage-2C correction-ledger entry
+    is necessarily published.  Public result rows must therefore distinguish a
+    completed verifier result from a review record that is actually ready.
+    """
+    ledger_cache: dict[str, dict] = {}
+    enriched: list[dict] = []
+    for original in jobs:
+        row = dict(original)
+        source = row.get("source") if isinstance(row.get("source"), dict) else {}
+        verdict = str(row.get("verdict") or "").upper()
+        review_candidate = (
+            str(row.get("status") or "") == "completed"
+            and str(row.get("target") or "") == "pi5"
+            and str(source.get("type") or "") != "picture"
+            and verdict in {"LIKELY_CORRUPT", "UNCERTAIN"}
+        )
+        if review_candidate:
+            entry_id = runtime.stage2b_worker.stage2c_entry_id_for_job(row)
+            result_dir_name = Path(str(row.get("result_dir") or "")).name
+            ledger = {}
+            if result_dir_name:
+                if result_dir_name not in ledger_cache:
+                    ledger_path = Path(runtime.config.processed_dir) / result_dir_name / "correction_ledger.json"
+                    ledger_cache[result_dir_name] = await asyncio.to_thread(_load_json_file, ledger_path)
+                ledger = ledger_cache[result_dir_name]
+            present = any(
+                str(item.get("entry_id") or "") == entry_id
+                for item in (ledger.get("entries") or [])
+                if isinstance(item, dict)
+            )
+            row["review_entry_id"] = entry_id
+            row["review_entry_ready"] = bool(present)
+            row["review_entry_state"] = "ready" if present else str(row.get("stage2c_entry_state") or "missing")
+            if not present and row.get("stage2c_entry_error"):
+                row["review_entry_error"] = row.get("stage2c_entry_error")
+        enriched.append(row)
+    return enriched
+
+
 @app.get("/api/stage2b/results/{target}")
 async def stage2b_results(target: str) -> dict:
     if target not in {"pi5", "oneplus"}:
         raise HTTPException(status_code=404, detail="Unknown verification device.")
-    return {"target": target, "jobs": await runtime.stage2b_store.list_results(target, limit=5000)}
+    jobs = await runtime.stage2b_store.list_results(target, limit=5000)
+    if target == "pi5":
+        jobs = await _enrich_text_review_entry_state(jobs)
+    return {"target": target, "jobs": jobs}
 
 
 def _audit_json(value: str | None) -> dict:
@@ -2941,11 +3187,16 @@ async def stage2b_text_audit(
         postprocess_id = int(row.get("postprocess_job_id") or 0)
         result_dir_name = current_result_dirs.get(postprocess_id) or Path(str(row.get("result_dir") or "")).name
         downstream = None
+        entry_id = f"{row.get('generation')}:text:{row.get('route_id')}"
+        row_verdict = str(row.get("verdict") or parsed.get("verdict") or "").upper()
+        review_candidate = (
+            str(row.get("status") or "") == "completed"
+            and row_verdict in {"LIKELY_CORRUPT", "UNCERTAIN"}
+        )
         if result_dir_name:
             if result_dir_name not in ledger_cache:
                 ledger_path = Path(runtime.config.processed_dir) / result_dir_name / "correction_ledger.json"
                 ledger_cache[result_dir_name] = await asyncio.to_thread(_load_json_file, ledger_path)
-            entry_id = f"{row.get('generation')}:text:{row.get('route_id')}"
             entry = _authoritative_text_entry(ledger_cache[result_dir_name], entry_id)
             if isinstance(entry, dict):
                 downstream = {
@@ -2958,13 +3209,28 @@ async def stage2b_text_audit(
                     "entry_id": entry.get("entry_id"),
                     "verification_verdict": entry.get("verification_verdict"),
                     "current_authoritative": True,
+                    "publication_ready": True,
+                    "publication_state": "ready",
                 }
+        if downstream is None and review_candidate:
+            downstream = {
+                "status": "publication_missing",
+                "status_reason": "STAGE2C_REVIEW_ENTRY_NOT_PUBLISHED",
+                "entry_type": "text_correction",
+                "human_verified": False,
+                "proposed_text": correction.get("proposed_text"),
+                "raw_docling_immutable": True,
+                "entry_id": entry_id,
+                "verification_verdict": row_verdict,
+                "current_authoritative": False,
+                "publication_ready": False,
+                "publication_state": str(row.get("stage2c_entry_state") or "missing"),
+                "publication_error": row.get("stage2c_entry_error"),
+            }
 
         disposition = "failed" if row.get("status") == "failed" else str(correction.get("status") or "verified_original")
         human_review_required = bool(
-            downstream
-            and not downstream.get("human_verified")
-            and str(downstream.get("verification_verdict") or "").upper() in {"LIKELY_CORRUPT", "UNCERTAIN"}
+            review_candidate and downstream and not downstream.get("human_verified")
         )
         jobs.append({
             "id": int(row.get("id") or 0),
@@ -3265,6 +3531,231 @@ async def vision_audit_human_decision(job_id: int, entry_id: str, request: Visua
     return {"ok": True, "entry": entry, "audit": audit, "evidence_recovery": recovery}
 
 
+def _structural_evidence_refs(item: dict) -> list[str]:
+    """Return Docling refs that can be safely highlighted for one diagnostic item."""
+    refs: list[str] = []
+    for key, collection in (("text_index", "texts"), ("table_index", "tables"), ("picture_index", "pictures")):
+        value = item.get(key)
+        try:
+            index = int(value)
+        except (TypeError, ValueError):
+            continue
+        if index >= 0:
+            refs.append(f"#/{collection}/{index}")
+    ref = str(item.get("ref") or "").strip()
+    if re.fullmatch(r"#/(?:texts|tables|pictures)/\d+", ref):
+        refs.append(ref)
+    return list(dict.fromkeys(refs))
+
+
+@app.get("/api/postprocess/jobs/{job_id}/structural-review")
+async def stage2a_structural_review(job_id: int) -> dict:
+    job = await runtime.postprocess_store.get_job(job_id)
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Post-process job not found.")
+    result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+    await _ensure_table_collapse_compatibility(job, result_dir)
+    return await asyncio.to_thread(stage2a_human_review_summary, result_dir)
+
+
+@app.get("/api/postprocess/jobs/{job_id}/structural-review/{route_id}")
+async def stage2a_structural_review_detail(job_id: int, route_id: str) -> dict:
+    """Expose evidence for structural HUMAN_REVIEW routes without source mutation.
+
+    Reading-order and collapsed-table findings keep their specialized workspaces;
+    every other structural route uses this generic evidence-first review context.
+    Legacy R/S result folders are supported because the evidence is recovered
+    from diagnostics.json rather than requiring Stage 2A to run again.
+    """
+    job = await runtime.postprocess_store.get_job(job_id)
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Post-process job not found.")
+    result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+    await _ensure_table_collapse_compatibility(job, result_dir)
+    try:
+        context = await asyncio.to_thread(stage2a_structural_review_context, result_dir, route_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Structural-review route not found.") from exc
+    code = str(context.get("code") or "")
+    if code == "READING_ORDER_ANOMALY":
+        raise HTTPException(status_code=409, detail="Open the dedicated reading-order review workspace for this route.")
+    if code == TABLE_ROW_COLLAPSE_CODE:
+        raise HTTPException(status_code=409, detail="Open the dedicated table-repair workspace for this route.")
+    evidence = []
+    for row in context.get("evidence_items") or []:
+        item = dict((row or {}).get("data") or {})
+        try:
+            page = int((row or {}).get("page") or item.get("page") or 0)
+        except (TypeError, ValueError):
+            page = 0
+        refs = _structural_evidence_refs(item)
+        highlight = quote(",".join(refs), safe=",") if refs else ""
+        source_page_url = None
+        if page > 0:
+            source_page_url = f"/api/postprocess/jobs/{job_id}/source-page/{page}"
+            if highlight:
+                source_page_url += f"?highlight={highlight}"
+        evidence.append({
+            "evidence_id": str((row or {}).get("evidence_id") or ""),
+            "page": page or None,
+            "requires_source_page": bool(page > 0),
+            "source_page_url": source_page_url,
+            "data": item,
+        })
+    if not evidence:
+        raise HTTPException(status_code=409, detail="Structural-review evidence is unavailable. Keep this route unresolved rather than accepting it blindly.")
+    return {
+        "route": context.get("route") or {},
+        "signal": context.get("signal") or {},
+        "code": code,
+        "evidence": evidence,
+        "required_evidence_ids": context.get("required_evidence_ids") or [],
+    }
+
+
+@app.get("/api/postprocess/jobs/{job_id}/reading-order-review/{route_id}")
+async def reading_order_review_context(job_id: int, route_id: str) -> dict:
+    """Expose the exact evidence needed to review a reading-order anomaly.
+
+    This is backward-compatible with 40.11R result directories: those grouped
+    routes retained only a count, while the page-level evidence remains in
+    ``diagnostics.json``. No Stage 2A rerun is required to inspect them.
+    """
+    job = await runtime.postprocess_store.get_job(job_id)
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Post-process job not found.")
+    result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+    try:
+        context = await asyncio.to_thread(stage2a_structural_review_context, result_dir, route_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Structural-review route not found.") from exc
+    if str(context.get("code") or "") != "READING_ORDER_ANOMALY":
+        raise HTTPException(status_code=409, detail="Route is not a reading-order anomaly.")
+    anomalies = []
+    for item in context.get("items") or []:
+        anomaly = dict(item)
+        try:
+            page = int(anomaly.get("page"))
+        except (TypeError, ValueError):
+            page = 0
+        refs = []
+        for sample in anomaly.get("body_order_sample") or []:
+            if not isinstance(sample, dict):
+                continue
+            kind = str(sample.get("type") or "")
+            if kind not in {"text", "table"}:
+                continue
+            try:
+                index = int(sample.get("index"))
+            except (TypeError, ValueError):
+                continue
+            refs.append(f"#/{kind}s/{index}")
+        highlight = quote(",".join(refs), safe=",") if refs else ""
+        anomaly["source_page_url"] = (
+            f"/api/postprocess/jobs/{job_id}/source-page/{page}?highlight={highlight}"
+            if page > 0 and highlight
+            else (f"/api/postprocess/jobs/{job_id}/source-page/{page}" if page > 0 else None)
+        )
+        anomalies.append(anomaly)
+    if not anomalies:
+        raise HTTPException(status_code=409, detail="Reading-order evidence is unavailable. Keep this route unresolved rather than accepting it blindly.")
+    return {
+        "route": context.get("route") or {},
+        "signal": context.get("signal") or {},
+        "anomalies": anomalies,
+        "required_pages": context.get("required_pages") or [],
+    }
+
+
+@app.post("/api/postprocess/jobs/{job_id}/structural-review/{route_id}")
+async def stage2a_structural_review_decision(job_id: int, route_id: str, request: StructuralReviewDecisionRequest) -> dict:
+    job = await runtime.postprocess_store.get_job(job_id)
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Post-process job not found.")
+    result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+    async with runtime.book_lifecycle_locks.get(int(job_id)):
+        summary_before = await asyncio.to_thread(stage2a_human_review_summary, result_dir)
+        route_before = next((r for r in summary_before.get("routes", []) if str(r.get("route_id") or "") == str(route_id)), None)
+        if not route_before:
+            raise HTTPException(status_code=404, detail="Structural-review route not found.")
+        if str(route_before.get("code") or "") == TABLE_ROW_COLLAPSE_CODE and request.decision == "accepted":
+            raise HTTPException(status_code=409, detail="Collapsed table rows cannot be plain-accepted. Open Repair table and save a human-verified structure repair, or dismiss only if this is a false positive.")
+        try:
+            decided = await asyncio.to_thread(
+                set_stage2a_human_review_decision, result_dir, route_id,
+                decision=request.decision, note=request.note, reviewed_pages=request.reviewed_pages,
+                reviewed_items=request.reviewed_items,
+            )
+            if str(route_before.get("code") or "") == TABLE_ROW_COLLAPSE_CODE and request.decision == "dismissed":
+                source = route_before.get("source") or {}
+                if source.get("table_index") is not None:
+                    await asyncio.to_thread(
+                        deactivate_table_repair, result_dir, int(source.get("table_index")),
+                        route_id=route_id, reason="false_positive_dismissed",
+                    )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Structural-review route not found.") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    runtime.events.notify("stage2a_human_review_decided", postprocess_job_id=job_id, route_id=route_id)
+    return {"decision": decided, "summary": await asyncio.to_thread(stage2a_human_review_summary, result_dir)}
+
+
+@app.get("/api/postprocess/jobs/{job_id}/table-repair/{route_id}")
+async def get_table_structure_repair(job_id: int, route_id: str) -> dict:
+    job = await runtime.postprocess_store.get_job(job_id)
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Post-process job not found.")
+    result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+    await _ensure_table_collapse_compatibility(job, result_dir)
+    converted_zip = _converted_zip_for_postprocess_job(job, result_dir)
+    if converted_zip is None:
+        raise HTTPException(status_code=404, detail="Immutable converted Docling ZIP is not available.")
+    try:
+        context = await asyncio.to_thread(table_repair_context, result_dir, converted_zip, route_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Collapsed-table structural-review route not found.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    context["source_page_url"] = f"/api/postprocess/jobs/{job_id}/source-page/{int(context.get('page') or 1)}?highlight=%23/tables/{int(context['table_index'])}"
+    return context
+
+
+@app.post("/api/postprocess/jobs/{job_id}/table-repair/{route_id}")
+async def save_table_structure_repair(job_id: int, route_id: str, request: TableRepairSaveRequest) -> dict:
+    job = await runtime.postprocess_store.get_job(job_id)
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Post-process job not found.")
+    result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+    converted_zip = _converted_zip_for_postprocess_job(job, result_dir)
+    if converted_zip is None:
+        raise HTTPException(status_code=404, detail="Immutable converted Docling ZIP is not available.")
+    if not request.source_reviewed:
+        raise HTTPException(status_code=409, detail="Review the original PDF page before saving a human-authoritative table repair.")
+    try:
+        matrix = parse_tsv_matrix(request.tsv)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    async with runtime.book_lifecycle_locks.get(int(job_id)):
+        try:
+            context = await asyncio.to_thread(table_repair_context, result_dir, converted_zip, route_id)
+            document, _ = await asyncio.to_thread(load_document_from_zip, converted_zip)
+            repair = await asyncio.to_thread(
+                save_table_repair, result_dir, document, int(context["table_index"]),
+                matrix=matrix, header_rows=request.header_rows, route_id=route_id, note=request.note,
+            )
+            decided = await asyncio.to_thread(
+                set_stage2a_human_review_decision, result_dir, route_id,
+                decision="accepted", note=request.note or "Human table structure repair saved",
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Collapsed-table structural-review route not found.") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    runtime.events.notify("table_structure_repair_saved", postprocess_job_id=job_id, route_id=route_id)
+    return {"saved": True, "repair": repair, "decision": decided, "summary": await asyncio.to_thread(stage2a_human_review_summary, result_dir)}
+
+
 @app.get("/api/postprocess/jobs/{job_id}/verifier-audit")
 async def verifier_audit_gate_status(job_id: int) -> dict:
     job = await runtime.postprocess_store.get_job(job_id)
@@ -3407,6 +3898,30 @@ async def stage2b_provider_update(kind: str, update: VerifierProviderUpdate) -> 
 @app.get("/api/groq/usage")
 async def groq_usage(limit: int = 100) -> dict:
     return await runtime.groq_quota.usage_summary(limit=max(1, min(int(limit), 500)))
+
+
+@app.post("/api/stage2b/interlock/start")
+async def stage2b_interlock_start() -> dict:
+    if not runtime.config.stage2b_enabled:
+        raise HTTPException(status_code=409, detail="Stage 2B verification is disabled.")
+    await runtime.stage2b_worker.sync_routes_once()
+    result = await runtime.set_stage2b_interlock_started()
+    return {"accepted": True, **result}
+
+
+@app.post("/api/stage2b/interlock/stop")
+async def stage2b_interlock_stop() -> dict:
+    result = await runtime.set_stage2b_interlock_stopped()
+    return {"accepted": True, **result}
+
+
+@app.post("/api/stage2b/interlock/auto")
+async def stage2b_interlock_auto() -> dict:
+    if not runtime.config.stage2b_enabled:
+        raise HTTPException(status_code=409, detail="Stage 2B verification is disabled.")
+    await runtime.stage2b_worker.sync_routes_once()
+    result = await runtime.set_stage2b_interlock_auto()
+    return {"accepted": True, **result}
 
 
 @app.put("/api/stage2b/auto-run-all")
@@ -3564,6 +4079,21 @@ async def _retrieval_books() -> list[dict]:
         verification_rows = await runtime.stage2b_store.list_book_jobs_raw(int(job.get("id") or 0))
         stage2c_info = stage2c_freshness(result_dir, verification_rows, rule_version=STAGE2C_RULE_VERSION, artifact_sweep_required=bool(getattr(runtime.config, "stage2b_artifact_sweep_required_for_finalize", True)))
         stage3_info = stage3_freshness(result_dir, stage2c_info, stage3_rule_version=STAGE3_RULE_VERSION, retrieval_rule_version=RETRIEVAL_RULE_VERSION)
+        structural_review = await asyncio.to_thread(stage2a_human_review_summary, result_dir)
+        audit_review = await asyncio.to_thread(
+            verifier_audit_summary, result_dir,
+            text_require_human=bool(runtime.config.stage2c_require_human_review),
+        )
+        pending_human_review = int(structural_review.get("blocking_review_required") or 0) + int(audit_review.get("blocking_review_required") or 0)
+        retrieval_index_path = result_dir / "retrieval_index.jsonl"
+        if pending_human_review:
+            index_state = "review_pending"
+        elif str(stage3_info.get("status") or "") == "failed":
+            index_state = "rebuild_failed"
+        elif not bool(stage3_info.get("ready")):
+            index_state = "rebuild_pending"
+        else:
+            index_state = "current"
         verification_lookup: dict[int, dict] = {}
         for verification_row in verification_rows:
             source_meta = _audit_json(verification_row.get("source_json"))
@@ -3592,7 +4122,6 @@ async def _retrieval_books() -> list[dict]:
             source_filename=source_name,
             verification_lookup=verification_lookup,
         )
-        retrieval_index_path = result_dir / "retrieval_index.jsonl"
         output.append({
             "postprocess_job_id": int(job.get("id") or 0),
             "source_filename": source_name,
@@ -3602,6 +4131,16 @@ async def _retrieval_books() -> list[dict]:
             "stage2c_reason": stage2c_info.get("reason"),
             "stage3_current": bool(stage3_info.get("ready")),
             "stage3_reason": stage3_info.get("reason"),
+            "index_state": index_state,
+            "index_warning": (
+                f"Retrieval index is not current: {pending_human_review} human review decision(s) are still blocking finalization."
+                if index_state == "review_pending"
+                else (f"Retrieval index is not current: {stage3_info.get('reason') or stage2c_info.get('reason') or 'rebuild pending'}." if index_state != "current" else None)
+            ),
+            "pending_human_review": pending_human_review,
+            "stage2a_human_review_pending": int(structural_review.get("blocking_review_required") or 0),
+            "stage2c_human_review_pending": int(audit_review.get("blocking_review_required") or 0),
+            "last_completed_index_available": retrieval_index_path.is_file(),
             "identity_integrity": identity,
             "identity_metadata_mismatch": not bool(identity.get("ok")),
             "chunks_available": chunks_path.is_file(),
@@ -3808,7 +4347,8 @@ async def retrieval_equipment_get() -> dict:
 async def retrieval_equipment_upsert(update: EquipmentUpsertRequest) -> dict:
     books = await _retrieval_books()
     try:
-        row = upsert_equipment(
+        row = await asyncio.to_thread(
+            upsert_equipment,
             Path(runtime.config.processed_dir),
             books,
             equipment_id=update.equipment_id,
@@ -3825,7 +4365,7 @@ async def retrieval_equipment_upsert(update: EquipmentUpsertRequest) -> dict:
 
 @app.delete("/api/retrieval/equipment/{equipment_id}")
 async def retrieval_equipment_delete(equipment_id: str) -> dict:
-    if not delete_equipment(Path(runtime.config.processed_dir), equipment_id):
+    if not await asyncio.to_thread(delete_equipment, Path(runtime.config.processed_dir), equipment_id):
         raise HTTPException(status_code=404, detail="Equipment scope was not found.")
     books = await _retrieval_books()
     return {"deleted": True, "equipment_id": equipment_id, "catalog": _equipment_catalog_with_hybrid(books)}
@@ -3949,6 +4489,12 @@ async def _retrieval_results_for_question(
         }
         results = await asyncio.to_thread(search_indices, paths, query, top_k=top_k)
         scope["hybrid"] = None
+        scope["index_freshness"] = [{
+            "postprocess_job_id": int(row.get("postprocess_job_id") or 0),
+            "index_state": row.get("index_state"),
+            "pending_human_review": int(row.get("pending_human_review") or 0),
+            "warning": row.get("index_warning"),
+        } for row in selected]
         return results, len(paths), selected, scope
 
     if equipment_id:
@@ -3994,6 +4540,12 @@ async def _retrieval_results_for_question(
         results = await asyncio.to_thread(search_indices, paths, query, top_k=top_k)
         scope["retrieval_mode"] = "lexical"
         scope["hybrid"] = None
+    scope["index_freshness"] = [{
+        "postprocess_job_id": int(row.get("postprocess_job_id") or 0),
+        "index_state": row.get("index_state"),
+        "pending_human_review": int(row.get("pending_human_review") or 0),
+        "warning": row.get("index_warning"),
+    } for row in selected]
     return results, len(paths), selected, scope
 
 
@@ -4672,6 +5224,7 @@ async def postprocess_artifact(job_id: int, name: str):
     if safe_name != name or safe_name not in {
         "source_manifest.json", "integrity.json", "coverage.json", "profile.json", "diagnostics.json",
         "routes.json", "correction_ledger.json", "chunk_overlays.jsonl", "stage2c_backfill.json", "summary.json",
+        "table_structure_repairs.json", "table_row_collapse_scan.json", "docling_page_repairs.json",
         "stage3_chunking.json", "chunks.jsonl", "retrieval_index.jsonl", "table_evidence.jsonl", "retrieval_quality.json"
     }:
         raise HTTPException(status_code=404, detail="Post-process artifact not found.")
@@ -4811,6 +5364,58 @@ async def human_review_status(job_id: int) -> dict:
     return {**summary, "book": (conversion or {}).get("filename") or job.get("source_filename") or job.get("output_filename"), "entries": entries}
 
 
+@app.post("/api/postprocess/jobs/{job_id}/corrections/{entry_id}/repair")
+async def repair_human_correction_entry(job_id: int, entry_id: str) -> dict:
+    """Republish a missing text-review ledger entry from the durable verifier result.
+
+    This performs no model call.  It repairs only the Stage-2C publication side
+    of an already completed current verification job.
+    """
+    job = await runtime.postprocess_store.get_job(job_id)
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Post-process job not found.")
+    rows = await runtime.stage2b_store.list_book_jobs_raw(job_id)
+    verification_row = next(
+        (
+            row for row in rows
+            if runtime.stage2b_worker.stage2c_entry_id_for_job(row) == entry_id
+        ),
+        None,
+    )
+    if verification_row is None:
+        raise HTTPException(status_code=404, detail="Completed verifier result for this review entry was not found.")
+    try:
+        outcome = await runtime.stage2b_worker.ensure_stage2c_entry(int(verification_row.get("id") or 0))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        runtime.events.notify(
+            "stage2c_ledger_repair_error",
+            postprocess_job_id=job_id,
+            verification_job_id=int(verification_row.get("id") or 0),
+            entry_id=entry_id,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="The verifier result is safe, but its review record could not be published yet. Retry this review in a moment.",
+        ) from exc
+    if str(outcome.get("state") or "") != "ready" or not isinstance(outcome.get("entry"), dict):
+        raise HTTPException(status_code=409, detail="This verifier result does not require a repairable human-review entry.")
+    runtime.events.notify(
+        "stage2c_ledger_repaired",
+        postprocess_job_id=job_id,
+        verification_job_id=int(verification_row.get("id") or 0),
+        entry_id=entry_id,
+    )
+    return {
+        "ready": True,
+        "repaired": True,
+        "verification_job_id": int(verification_row.get("id") or 0),
+        "entry_id": entry_id,
+        "entry": outcome.get("entry"),
+    }
+
+
 @app.get("/api/postprocess/jobs/{job_id}/corrections/{entry_id}/docling-context")
 async def human_correction_docling_context(job_id: int, entry_id: str):
     """Return neighboring raw Docling text for manual OCR reconstruction."""
@@ -4887,6 +5492,240 @@ async def update_human_correction(job_id: int, entry_id: str, update: HumanCorre
         )
     runtime.events.notify("stage2c_human_correction")
     return {"saved": True, "entry_id": entry_id, "status": entry["status"]}
+
+
+async def _docling_review_source_pdf(job: dict) -> tuple[Path, dict]:
+    conversion = await runtime.postprocess_store.get_conversion_job(int(job.get("conversion_job_id") or job.get("id") or 0))
+    filename = str((conversion or {}).get("filename") or (conversion or {}).get("source_filename") or "")
+    pdf_path = Path(runtime.config.input_dir) / Path(filename).name
+    if pdf_path.suffix.lower() != ".pdf" or not pdf_path.is_file():
+        raise HTTPException(status_code=404, detail="Original PDF is not available for Docling page review.")
+    return pdf_path, (conversion or {})
+
+
+@app.get("/api/postprocess/jobs/{job_id}/docling-review")
+async def docling_page_review_context(job_id: int, page: int = 1) -> dict:
+    job = await runtime.postprocess_store.get_job(job_id)
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Post-process job not found.")
+    result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+    converted_zip = _converted_zip_for_postprocess_job(job, result_dir)
+    if converted_zip is None:
+        raise HTTPException(status_code=404, detail="Immutable converted Docling ZIP is not available.")
+    pdf_path, conversion = await _docling_review_source_pdf(job)
+    try:
+        document, json_member = await asyncio.to_thread(load_document_from_zip, converted_zip)
+    except (OSError, ValueError, zipfile.BadZipFile) as exc:
+        raise HTTPException(status_code=409, detail=f"Docling document cannot be opened: {exc}") from exc
+    try:
+        with fitz.open(pdf_path) as pdf:
+            page_count = len(pdf)
+            if page < 1 or page > page_count:
+                raise HTTPException(status_code=404, detail="PDF page not found.")
+            p = pdf[page - 1]
+            page_width, page_height = float(p.rect.width), float(p.rect.height)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Could not inspect the source PDF.") from exc
+
+    items = await asyncio.to_thread(
+        docling_review_page_items, document, int(page), page_width=page_width, page_height=page_height
+    )
+    repairs_payload = await asyncio.to_thread(load_docling_page_repairs, result_dir)
+    active = await asyncio.to_thread(active_docling_page_repairs, result_dir, document)
+    page_repairs = [row for row in active if int(row.get("page") or 0) == int(page)]
+    active_by_ref = {str(row.get("source_ref")): row for row in page_repairs if row.get("source_ref")}
+    for item in items:
+        repair = active_by_ref.get(str(item.get("ref") or ""))
+        if not repair:
+            continue
+        item["raw_docling_bbox"] = item.get("bbox")
+        item["bbox"] = repair.get("bbox_normalized") or item.get("bbox")
+        item["approved_repair"] = repair.get("repair_id")
+        item["approved_text"] = repair.get("proposed_text") or None
+        item["approved_table_matrix"] = repair.get("table_matrix") or None
+        item["approved_header_rows"] = repair.get("header_rows")
+    # Lightweight per-page counts let the reviewer jump to pages that actually
+    # contain Docling items without shipping the whole document to the browser.
+    page_counts: dict[int, dict[str, int]] = {}
+    for collection, key in (("texts", "text"), ("tables", "table"), ("pictures", "picture")):
+        for item in document.get(collection) or []:
+            if not isinstance(item, dict):
+                continue
+            page_no = None
+            for prov in item.get("prov") or []:
+                if not isinstance(prov, dict):
+                    continue
+                try:
+                    candidate = int(prov.get("page_no"))
+                except (TypeError, ValueError):
+                    continue
+                if candidate > 0:
+                    page_no = candidate
+                    break
+            if page_no is None:
+                continue
+            bucket = page_counts.setdefault(page_no, {"text": 0, "table": 0, "picture": 0})
+            bucket[key] += 1
+    return {
+        "schema": "docling-page-review-context/v1",
+        "job_id": int(job_id),
+        "book": str((conversion or {}).get("filename") or (conversion or {}).get("source_filename") or job.get("output_filename") or ""),
+        "result_dir": result_dir.name,
+        "docling_json_member": json_member,
+        "raw_docling_immutable": True,
+        "page": int(page),
+        "page_count": int(page_count),
+        "page_width_points": page_width,
+        "page_height_points": page_height,
+        "source_page_url": f"/api/postprocess/jobs/{job_id}/source-page/{page}",
+        "items": items,
+        "repairs": page_repairs,
+        "repair_count": len(active),
+        "repair_store": {
+            "rule_version": repairs_payload.get("rule_version"),
+            "updated_at_epoch": repairs_payload.get("updated_at_epoch"),
+        },
+        "page_counts": {str(k): v for k, v in sorted(page_counts.items())},
+    }
+
+
+@app.post("/api/postprocess/jobs/{job_id}/docling-review/crop")
+async def docling_page_review_crop(job_id: int, request: DoclingReviewCropRequest):
+    job = await runtime.postprocess_store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Post-process job not found.")
+    pdf_path, _conversion = await _docling_review_source_pdf(job)
+    try:
+        image, _meta = await asyncio.to_thread(
+            crop_pdf_region, pdf_path, int(request.page), request.bbox.model_dump(), scale=3.0
+        )
+    except IndexError as exc:
+        raise HTTPException(status_code=404, detail="PDF page not found.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return Response(content=image, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/postprocess/jobs/{job_id}/docling-review/reextract")
+async def docling_page_review_reextract(job_id: int, request: DoclingReviewExtractRequest) -> dict:
+    job = await runtime.postprocess_store.get_job(job_id)
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Post-process job not found.")
+    result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+    pdf_path, _conversion = await _docling_review_source_pdf(job)
+    try:
+        image, crop_meta = await asyncio.to_thread(
+            crop_pdf_region, pdf_path, int(request.page), request.bbox.model_dump(), scale=3.0
+        )
+    except IndexError as exc:
+        raise HTTPException(status_code=404, detail="PDF page not found.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    role = None if request.processor_role == "auto" else request.processor_role
+    try:
+        extracted = await runtime.stage2b_worker.manual_docling_region_extract(
+            postprocess_job_id=int(job_id),
+            result_dir_name=result_dir.name,
+            image=image,
+            mime_type="image/png",
+            region_type=request.region_type,
+            original_hint=request.original_text,
+            role_target=role,
+        )
+    except CloudQuotaPausedError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except (httpx.HTTPError, TimeoutError, ConnectionError) as exc:
+        raise HTTPException(status_code=503, detail=f"Selected model is unavailable: {exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    table_preview = None
+    table_parse_error = None
+    if request.region_type == "table" and extracted.get("text"):
+        try:
+            table_preview = parse_tsv_matrix(str(extracted.get("text") or ""))
+        except ValueError as exc:
+            table_parse_error = str(exc)
+    return {
+        "schema": "docling-page-review-extraction/v1",
+        "raw_docling_immutable": True,
+        "crop": crop_meta,
+        "extraction": extracted,
+        "table_preview": table_preview,
+        "table_parse_error": table_parse_error,
+    }
+
+
+@app.post("/api/postprocess/jobs/{job_id}/docling-review/repairs")
+async def docling_page_review_save(job_id: int, request: DoclingReviewSaveRequest) -> dict:
+    job = await runtime.postprocess_store.get_job(job_id)
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Post-process job not found.")
+    result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+    converted_zip = _converted_zip_for_postprocess_job(job, result_dir)
+    if converted_zip is None:
+        raise HTTPException(status_code=404, detail="Immutable converted Docling ZIP is not available.")
+    pdf_path, _conversion = await _docling_review_source_pdf(job)
+    try:
+        document, _member = await asyncio.to_thread(load_document_from_zip, converted_zip)
+        with fitz.open(pdf_path) as pdf:
+            index = int(request.page) - 1
+            if index < 0 or index >= len(pdf):
+                raise HTTPException(status_code=404, detail="PDF page not found.")
+            p = pdf[index]
+            page_width, page_height = float(p.rect.width), float(p.rect.height)
+        manifest = await asyncio.to_thread(_load_json_file, result_dir / "source_manifest.json")
+        source_sha = str(manifest.get("converted_zip_sha256") or "")
+        async with runtime.book_lifecycle_locks.get(int(job_id)):
+            repair = await asyncio.to_thread(
+                save_docling_page_repair,
+                result_dir,
+                document,
+                page=int(request.page),
+                page_width=page_width,
+                page_height=page_height,
+                bbox=request.bbox.model_dump(),
+                region_type=request.region_type,
+                source_ref=request.source_ref,
+                proposed_text=request.proposed_text,
+                table_tsv=request.table_tsv or None,
+                header_rows=request.header_rows,
+                note=request.note,
+                extraction=request.extraction,
+                source_zip_sha256=source_sha,
+            )
+            # A newly-approved whole-table reconstruction becomes the single
+            # authoritative matrix for that Docling table. Retire any older
+            # structural table repair to avoid two human overlays fighting.
+            if request.region_type == "table" and request.table_tsv.strip() and request.source_ref:
+                match = re.fullmatch(r"#/tables/(\d+)", str(request.source_ref))
+                if match:
+                    await asyncio.to_thread(
+                        deactivate_table_repair, result_dir, int(match.group(1)),
+                        reason="superseded_by_docling_page_review",
+                    )
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    runtime.events.notify("docling_page_repair_saved", postprocess_job_id=job_id, repair_id=repair.get("repair_id"))
+    return {"saved": True, "repair": repair, "stage3_stale": True}
+
+
+@app.post("/api/postprocess/jobs/{job_id}/docling-review/repairs/{repair_id}/deactivate")
+async def docling_page_review_deactivate(job_id: int, repair_id: str) -> dict:
+    job = await runtime.postprocess_store.get_job(job_id)
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Post-process job not found.")
+    result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+    async with runtime.book_lifecycle_locks.get(int(job_id)):
+        try:
+            repair = await asyncio.to_thread(deactivate_docling_page_repair, result_dir, repair_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Docling page repair not found.") from exc
+    runtime.events.notify("docling_page_repair_deactivated", postprocess_job_id=job_id, repair_id=repair_id)
+    return {"deactivated": True, "repair": repair, "stage3_stale": True}
 
 
 @app.get("/api/postprocess/jobs/{job_id}/source-page/{page}")
@@ -4999,6 +5838,7 @@ async def _prepare_full_artifact_sweep(postprocess_job_id: int | None = None) ->
     eligible_total = 0
     skipped_overlap_total = 0
     suppressed_legacy_total = 0
+    unclassified_total = 0
     books = []
     for job in selected:
         result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
@@ -5023,11 +5863,13 @@ async def _prepare_full_artifact_sweep(postprocess_job_id: int | None = None) ->
         eligible = int(prepared.get("eligible_sweep_jobs") or 0)
         skipped = int(prepared.get("skipped_normal_picture_routes") or 0)
         suppressed = int(prepared.get("suppressed_legacy_overlap_routes") or 0)
+        unclassified = int(prepared.get("unclassified_picture_count") or 0)
         created_total += created
         technical_total += technical
         eligible_total += eligible
         skipped_overlap_total += skipped
         suppressed_legacy_total += suppressed
+        unclassified_total += unclassified
         books.append({
             "postprocess_job_id": int(job.get("id") or 0),
             "book": job.get("source_filename") or job.get("output_filename"),
@@ -5035,6 +5877,8 @@ async def _prepare_full_artifact_sweep(postprocess_job_id: int | None = None) ->
             "eligible_sweep_jobs": eligible,
             "skipped_normal_picture_routes": skipped,
             "suppressed_legacy_overlap_routes": suppressed,
+            "unclassified_picture_count": unclassified,
+            "unclassified_pictures": prepared.get("unclassified_pictures") or [],
             "created": created,
             "status": "prepared_waiting_for_normal",
         })
@@ -5043,6 +5887,7 @@ async def _prepare_full_artifact_sweep(postprocess_job_id: int | None = None) ->
         "eligible_sweep_jobs": eligible_total,
         "skipped_normal_picture_routes": skipped_overlap_total,
         "suppressed_legacy_overlap_routes": suppressed_legacy_total,
+        "unclassified_picture_count": unclassified_total,
         "created": created_total,
         "assigned": {"shared_pool": eligible_total},
         "books": books,
@@ -5168,6 +6013,26 @@ async def text_audit_page():
 @app.get("/vision-audit")
 async def vision_audit_page():
     return FileResponse(STATIC_DIR / "vision-audit.html")
+
+
+@app.get("/docling-review")
+async def docling_review_page():
+    return FileResponse(STATIC_DIR / "docling-review.html")
+
+
+@app.get("/table-repair")
+async def table_repair_page():
+    return FileResponse(STATIC_DIR / "table-repair.html")
+
+
+@app.get("/reading-order-review")
+async def reading_order_review_page():
+    return FileResponse(STATIC_DIR / "reading-order-review.html")
+
+
+@app.get("/structural-review")
+async def structural_review_page():
+    return FileResponse(STATIC_DIR / "structural-review.html")
 
 
 @app.get("/retrieval")

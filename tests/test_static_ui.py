@@ -56,10 +56,13 @@ def test_verification_has_own_page_and_quality_is_not_stage2b_dashboard():
     assert "Run Pi5 and OnePlus routes" not in quality
     assert "<h1>Verify uncertain content</h1>" in verification
     assert "Verify book" in js
-    assert "Auto verify all" in verification
+    assert "Text · Vision · Artifact" in verification
+    assert 'id="interlock-start"' in verification
+    assert 'id="interlock-stop"' in verification
+    assert 'id="interlock-auto"' in verification
     assert "/api/stage2b/results/pi5" in js
     assert "/api/stage2b/results/oneplus" in js
-    assert "Stop verifier" in verification
+    assert "shared Text · Vision · Artifact interlock" in verification
     assert "Remaining text work" not in verification
     assert "Remaining vision work" not in verification
     assert "slice(0, 40)" not in js
@@ -77,16 +80,16 @@ def test_verification_device_status_controls_are_always_visible():
     assert "Live verifier status" in html
     assert 'id="pi5-health"' in html
     assert 'id="oneplus-health"' in html
-    assert 'id="pi5-start"' in html
-    assert 'id="oneplus-start"' in html
-    assert 'id="pi5-stop"' in html
-    assert 'id="oneplus-stop"' in html
-    assert 'id="pi5-auto"' in html
-    assert 'id="oneplus-auto"' in html
+    assert 'id="interlock-start"' in html
+    assert 'id="interlock-stop"' in html
+    assert 'id="interlock-auto"' in html
+    assert 'id="artifact-mode"' in html
+    assert 'id="artifact-stage"' in html
     assert "device-controls-disclosure" not in html
     assert "Alive" in js and "Offline" in js
-    assert "/api/stage2b/${target}/start" in js
-    assert "window.startVerifier = startVerifier" in js
+    assert "/api/stage2b/interlock/${mode}" in js
+    assert "window.setInterlockMode = setInterlockMode" in js
+    assert "Normal Text/Vision work" in html
     assert js.count("pollVerification();") == 1
 
 
@@ -204,8 +207,6 @@ def test_frontend_assets_and_badge_match_release_version():
     from app.version import APP_VERSION
     import re
     for page in STATIC.glob("*.html"):
-        if page.name.startswith(".~backup_"):
-            continue
         assets = re.findall(r'(?:src|href)="(/assets/[^"]+)"', page.read_text(encoding="utf-8"))
         assert assets
         assert all(asset.endswith("?v=" + APP_VERSION) for asset in assets)
@@ -660,7 +661,8 @@ def test_4011b_review_queue_is_global_filterable_and_audits_are_one_by_one():
     assert 'const PAGE_SIZE = 1;' in artifact_js
     assert "vision-audit-evidence-counts" in vision_js
     assert "Show extracted detail" in artifact_js
-    assert "previousPosition" in vision_js  # human vision decisions auto-advance
+    assert "decisionInFlight" in vision_js  # decision request locks navigation and sibling buttons
+    assert "previousPosition" not in vision_js  # late responses must not snap the reviewer backward
     assert 'value="human_review">Human review</option>' in review_html or "needs_review" in review_html
     assert 'value="human_review">Human review</option>' in read("text-audit.html")
     assert 'value="HUMAN_REVIEW">Human review</option>' in read("vision-audit.html")
@@ -704,3 +706,105 @@ def test_queue_exposes_safe_delete_for_terminal_documents():
     assert '/api/postprocess/jobs/${stage2Id}/delete' in js
     assert 'FileMissing after a manual rename' in js
     assert 'window.confirm(message)' in js
+
+
+def test_review_repairs_missing_ledger_entry_and_never_exposes_blank_editor():
+    review = read("review.js")
+    verification = read("verification.js")
+    text_audit = read("text-audit.js")
+
+    assert "/corrections/${encodeURIComponent(entryId)}/repair" in review
+    assert "repairMissingEntry" in review
+    assert "setReviewUnavailable" in review
+    assert '$("correction").disabled = true' in review
+    assert '$("save").disabled = true' in review
+    assert "Preparing the review record from the completed verifier result" in review
+
+    assert "review_entry_ready" in verification
+    assert "Preparing review…" in verification
+    assert "Repair / review" in verification
+
+    assert "Review record pending publication; verifier result preserved" in text_audit
+    assert "Repair / inspect context" in text_audit
+
+
+def test_structural_review_pages_are_evidence_first_and_use_full_width_workspace():
+    book_js = read("book.js")
+    reading_html = read("reading-order-review.html")
+    reading_js = read("reading-order-review.js")
+    table_html = read("table-repair.html")
+    table_js = read("table-repair.js")
+    structural_html = read("structural-review.html")
+    structural_js = read("structural-review.js")
+    workflow_css = read("workflow.css")
+
+    assert "READING_ORDER_ANOMALY" in book_js
+    assert "/reading-order-review?job=${jobId}&route=" in book_js
+    assert "/structural-review?job=${jobId}&route=" in book_js
+    assert "Review finding" in book_js
+    assert 'data-structural-decision="accepted"' not in book_js
+    assert 'data-structural-decision="dismissed"' not in book_js
+
+    for html in (reading_html, table_html, structural_html):
+        assert 'app-shell review-workspace-shell' in html
+        assert 'main-content review-workspace-main' in html
+        assert 'class="stage-card"' not in html
+    assert ".ui29 .app-shell.review-workspace-shell" in workflow_css
+    assert ".review-workspace-card" in workflow_css
+
+    assert "Mark this page reviewed" in reading_html
+    assert "Accept current Docling order" in reading_html
+    assert "Dismiss as false positive" in reading_html
+    assert "leave this route unresolved" in reading_html
+    assert "/reading-order-review/${encodeURIComponent(routeId)}" in reading_js
+    assert "reviewed_pages" in reading_js
+    assert "source_page_url" in reading_js
+
+    assert "Mark source page reviewed" in table_html
+    assert "source_reviewed: true" in table_js
+    assert "reviewed_items:['table-source']" in table_js
+
+    assert "Mark this evidence reviewed" in structural_html
+    assert "Leave unresolved" in structural_html
+    assert "reviewed_items" in structural_js
+    assert "/structural-review/${encodeURIComponent(routeId)}" in structural_js
+
+
+def test_docling_page_review_ui_exposes_bbox_repair_and_table_header_controls():
+    root = Path(__file__).resolve().parents[1] / "app" / "static"
+    html = (root / "docling-review.html").read_text(encoding="utf-8")
+    js = (root / "docling-review.js").read_text(encoding="utf-8")
+    assert "Draw missing region" in html
+    assert "Coverage view" in html
+    assert 'id="header-rows"' in html
+    assert "Re-extract selected bbox" in html
+    assert "/docling-review/reextract" in js
+    assert "/docling-review/repairs" in js
+    assert "header_rows" in js
+    assert "raw Docling ZIP will remain unchanged" in js
+
+
+def test_review_pages_link_directly_to_matching_docling_bbox():
+    root = Path(__file__).resolve().parents[1] / "app" / "static"
+    text_js = (root / "text-audit.js").read_text(encoding="utf-8")
+    review_html = (root / "review.html").read_text(encoding="utf-8")
+    review_js = (root / "review.js").read_text(encoding="utf-8")
+    artifact_js = (root / "artifact-audit.js").read_text(encoding="utf-8")
+    vision_js = (root / "vision-audit.js").read_text(encoding="utf-8")
+    docling_js = (root / "docling-review.js").read_text(encoding="utf-8")
+
+    assert "Open Docling PDF bbox" in text_js
+    assert "#/texts/${textIndex}" in text_js
+    assert "#/tables/${tableIndex}" in text_js
+    assert 'id="open-docling-bbox"' in review_html
+    assert "setDoclingReviewLink" in review_js
+    assert "#/texts/${sourceIndex}" in review_js
+    assert "#/tables/${tableIndex}" in review_js
+    assert "Open Docling PDF bbox" in artifact_js
+    assert "#/pictures/${job.picture_index}" in artifact_js
+    assert "Open Docling PDF bbox" in vision_js
+    assert "#/pictures/${index}" in vision_js
+    assert "q.get('ref')" in docling_js
+    assert "Opened ${wantedRef} from the review page." in docling_js
+    assert "focusSelectedBox" in docling_js
+    assert "Back to review" in docling_js

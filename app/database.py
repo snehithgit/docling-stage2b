@@ -389,36 +389,36 @@ class JobStore:
                 counts[row["status"]] = row["total"]
         return counts
 
-    async def mark_processing(self, job_id: int) -> None:
-        await self._run(
+    async def mark_processing(self, job_id: int) -> bool:
+        return bool(await self._run(
             self._execute_sync,
             """UPDATE jobs
                SET status = 'processing', completed_at = NULL,
                    error_type = NULL, error_message = NULL
-               WHERE id = ?""",
+               WHERE id = ? AND status = 'pending'""",
             (job_id,),
-        )
+        ))
 
-    async def set_task_id(self, job_id: int, task_id: str) -> None:
-        await self._run(
+    async def set_task_id(self, job_id: int, task_id: str) -> bool:
+        return bool(await self._run(
             self._execute_sync,
-            "UPDATE jobs SET docling_task_id = ? WHERE id = ?",
+            "UPDATE jobs SET docling_task_id = ? WHERE id = ? AND status = 'processing'",
             (task_id, job_id),
-        )
+        ))
 
-    async def clear_task_id(self, job_id: int) -> None:
-        await self._run(
+    async def clear_task_id(self, job_id: int) -> bool:
+        return bool(await self._run(
             self._execute_sync,
-            "UPDATE jobs SET docling_task_id = NULL WHERE id = ?",
+            "UPDATE jobs SET docling_task_id = NULL WHERE id = ? AND status = 'processing'",
             (job_id,),
-        )
+        ))
 
-    async def set_output_filename(self, job_id: int, output_filename: str) -> None:
-        await self._run(
+    async def set_output_filename(self, job_id: int, output_filename: str) -> bool:
+        return bool(await self._run(
             self._execute_sync,
-            "UPDATE jobs SET output_filename = ? WHERE id = ?",
+            "UPDATE jobs SET output_filename = ? WHERE id = ? AND status IN ('pending','processing')",
             (output_filename, job_id),
-        )
+        ))
 
     async def has_earlier_job(self, filename: str, job_id: int) -> bool:
         return await self._run(self._has_earlier_job_sync, filename, job_id)
@@ -430,25 +430,25 @@ class JobStore:
                 (filename, job_id),
             ).fetchone() is not None
 
-    async def mark_completed(self, job_id: int, seconds: float, output_filename: str) -> None:
-        await self._run(
+    async def mark_completed(self, job_id: int, seconds: float, output_filename: str) -> bool:
+        return bool(await self._run(
             self._execute_sync,
             """UPDATE jobs
                SET status = 'completed', completed_at = ?, processing_seconds = ?,
                    output_filename = ?, error_type = NULL, error_message = NULL
-               WHERE id = ?""",
+               WHERE id = ? AND status = 'processing'""",
             (utcnow(), seconds, output_filename, job_id),
-        )
+        ))
 
-    async def mark_failed(self, job_id: int, error_type: str, message: str, seconds: float | None = None) -> None:
-        await self._run(
+    async def mark_failed(self, job_id: int, error_type: str, message: str, seconds: float | None = None) -> bool:
+        return bool(await self._run(
             self._execute_sync,
             """UPDATE jobs
                SET status = 'failed', completed_at = ?, processing_seconds = ?,
                    error_type = ?, error_message = ?
-               WHERE id = ?""",
+               WHERE id = ? AND status IN ('pending','processing')""",
             (utcnow(), seconds, error_type, message[:2000], job_id),
-        )
+        ))
 
     async def retry(self, job_id: int) -> bool:
         return await self._run(self._retry_sync, job_id)
@@ -498,6 +498,7 @@ class JobStore:
         async with self._lock:
             return await asyncio.to_thread(func, *args)
 
-    def _execute_sync(self, statement: str, parameters: tuple[Any, ...]) -> None:
+    def _execute_sync(self, statement: str, parameters: tuple[Any, ...]) -> int:
         with self._connection() as connection:
-            connection.execute(statement, parameters)
+            cursor = connection.execute(statement, parameters)
+            return int(cursor.rowcount)

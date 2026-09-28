@@ -338,3 +338,84 @@ def test_book_with_no_normal_routes_releases_prepared_sweep_without_extra_click(
             assert rows[0]["authorized"] == 1
             assert rows[0]["run_mode"] == "artifact_ready"
     asyncio.run(run())
+
+
+def test_legacy_null_run_mode_artifact_is_released_when_book_is_ready(tmp_path):
+    async def run():
+        store = Stage2BStore(str(tmp_path / "jobs.db"))
+        await store.initialize()
+        await store.create_artifact_sweep_jobs(
+            77, 77, "g", "book__job77", "book.zip",
+            [{"route_id": "AV77", "target": "oneplus", "source": {"type": "picture", "index": 7, "artifact_sweep": True}}],
+        )
+        def make_legacy_null():
+            with store._connection() as conn:
+                conn.execute("UPDATE verification_jobs SET run_mode=NULL, authorized=0 WHERE route_id='AV77'")
+        await store._run(make_legacy_null)
+        assert await store.release_ready_artifact_sweeps(77) == 1
+        row = (await store.list_book_jobs_raw(77))[0]
+        assert row["authorized"] == 1
+        assert row["run_mode"] == "artifact_ready"
+    asyncio.run(run())
+
+
+def test_clearing_manual_authorizations_does_not_disarm_ready_artifact(tmp_path):
+    async def run():
+        store = Stage2BStore(str(tmp_path / "jobs.db"))
+        await store.initialize()
+        await store.sync_routes(
+            78, 78, "g",
+            [{"route_id": "V78", "target": "oneplus", "code": "LOW_CONFIDENCE_VISUAL", "source": {"type": "picture", "index": 1}}],
+            "book__job78", "book.zip",
+        )
+        await store.create_artifact_sweep_jobs(
+            78, 78, "g", "book__job78", "book.zip",
+            [{"route_id": "AV78", "target": "oneplus", "source": {"type": "picture", "index": 2, "artifact_sweep": True}}],
+        )
+        await store.start_manual_batch("oneplus")
+        normal = await store.next_runnable("oneplus", False)
+        assert normal and normal["route_id"] == "V78"
+        assert await store.mark_processing(normal["id"], "manual")
+        await store.mark_completed(normal["id"], 0.1, "m", "e", "OK", {}, {}, "v.json")
+        assert await store.release_ready_artifact_sweeps(78) == 1
+        await store.clear_manual_authorizations("oneplus")
+        rows = {row["route_id"]: row for row in await store.list_book_jobs_raw(78)}
+        assert rows["AV78"]["authorized"] == 1
+        assert rows["AV78"]["run_mode"] == "artifact_ready"
+    asyncio.run(run())
+
+
+def test_scheduler_provider_reservation_interlocks_text_vision_and_artifact(tmp_path):
+    async def run():
+        store = Stage2BStore(str(tmp_path / "jobs.db"))
+        await store.initialize()
+        cfg = AppConfig(database_path=str(tmp_path / "jobs.db"), processed_dir=str(tmp_path / "processed"))
+        worker = Stage2BWorker(lambda: cfg, store, SimpleNamespace(), SimpleNamespace(notify=lambda *_a, **_k: None))
+        assert await worker._reserve_provider("pi5", "text:1") is True
+        assert await worker._reserve_provider("pi5", "artifact") is False
+        assert worker.dispatch_reservations == {"pi5": "text:1"}
+        await worker._release_provider("pi5", "text:1")
+        assert await worker._reserve_provider("pi5", "artifact") is True
+        await worker._release_provider("pi5", "artifact")
+        assert worker.dispatch_reservations == {}
+    asyncio.run(run())
+
+
+def test_artifact_yields_when_other_role_has_normal_work_for_same_physical_provider(tmp_path):
+    async def run():
+        store = Stage2BStore(str(tmp_path / "jobs.db"))
+        await store.initialize()
+        await store.sync_routes(
+            79, 79, "g",
+            [{"route_id": "V79", "target": "oneplus", "code": "LOW_CONFIDENCE_VISUAL", "source": {"type": "picture", "index": 1}}],
+            "book__job79", "book.zip",
+        )
+        await store.start_manual_batch("oneplus")
+        cfg = AppConfig(
+            database_path=str(tmp_path / "jobs.db"), processed_dir=str(tmp_path / "processed"),
+            text_verifier_provider="pi5", vision_verifier_provider="pi5",
+        )
+        worker = Stage2BWorker(lambda: cfg, store, SimpleNamespace(), SimpleNamespace(notify=lambda *_a, **_k: None))
+        assert await worker._normal_work_waiting_for_provider("pi5") is True
+        assert await worker._normal_work_waiting_for_provider("oneplus") is False
+    asyncio.run(run())

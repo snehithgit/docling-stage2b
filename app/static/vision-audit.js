@@ -5,6 +5,7 @@ let auditPage = 1;
 const auditParams = new URLSearchParams(location.search);
 const requestedJobId = auditParams.get("job");
 const requestedBookJob = auditParams.get("book");
+let decisionInFlight = false;
 
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
@@ -97,6 +98,7 @@ function renderJob(job) {
         <div class="vision-audit-section-label">Exact full image sent</div>
         <a href="${esc(job.full_image?.image_url || "#")}" target="_blank" rel="noopener"><img class="vision-audit-source-image" loading="lazy" src="${esc(job.full_image?.image_url || "")}" alt="Full image sent to vision verifier" /></a>
         <div class="vision-audit-image-meta"><span>Page ${esc(source.page ?? request.page ?? "—")}</span><span>Picture #${esc(source.index ?? request.picture_index ?? "—")}</span><span>${cropCount} crop${cropCount === 1 ? "" : "s"}</span></div>
+        ${doclingReviewUrl(job) ? `<div class="document-actions"><a class="mini-action primary-mini" href="${esc(doclingReviewUrl(job))}">Open Docling PDF bbox</a></div>` : ""}
       </div>
       <div class="vision-audit-explanation vision-audit-summary-first">
         ${failed ? `<section><div class="vision-audit-section-label">Verification failed</div><p class="queue-error">${esc(job.error_type || "Error")}: ${esc(job.error_message || "Vision verification failed")}</p></section>` : `<section><div class="vision-audit-section-label">Result</div><h3>${esc(humanVerdict(c.verdict || job.verdict))}</h3><p class="vision-audit-summary-text">${esc(effectiveSummary || "No short summary was produced.")}</p><div class="vision-audit-kv"><span>Category</span><strong>${esc(effectiveCategory)}</strong><span>Pipeline</span><strong>${esc(downstreamLabel)}</strong></div></section>${decisionButtons}`}
@@ -128,6 +130,21 @@ function visualSubjectKey(job) {
   const request = job.request || {};
   const index = source.index ?? source.picture_index ?? source.source_index ?? request.picture_index ?? job.route_id ?? job.id;
   return `${job.postprocess_job_id}:${index}`;
+}
+
+function doclingReviewUrl(job) {
+  const source = job.source || {};
+  const request = job.request || {};
+  const page = source.page ?? request.page;
+  const index = source.index ?? source.picture_index ?? source.source_index ?? request.picture_index;
+  if (page === null || page === undefined || page === "" || index === null || index === undefined || index === "") return "";
+  const params = new URLSearchParams({
+    job: String(job.postprocess_job_id),
+    page: String(page),
+    ref: `#/pictures/${index}`,
+    return: location.pathname + location.search,
+  });
+  return `/docling-review?${params}`;
 }
 
 function applyFilters(resetPage=true) {
@@ -214,8 +231,12 @@ async function loadAudit() {
 
 document.addEventListener("click", async event => {
   const button = event.target.closest(".audit-decision");
-  if (!button) return;
-  button.disabled = true;
+  if (!button || decisionInFlight) return;
+  decisionInFlight = true;
+  const decisionButtons = [...document.querySelectorAll(".audit-decision")];
+  decisionButtons.forEach(node => { node.disabled = true; });
+  if ($("va-prev")) $("va-prev").disabled = true;
+  if ($("va-next")) $("va-next").disabled = true;
   feedback(`Saving human decision: ${button.dataset.decision}…`);
   try {
     const response = await fetch(`/api/postprocess/jobs/${encodeURIComponent(button.dataset.job)}/vision-audit/${encodeURIComponent(button.dataset.entry)}/decision`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({decision:button.dataset.decision})});
@@ -225,15 +246,14 @@ document.addEventListener("click", async event => {
     feedback(recovery && ["queued","running"].includes(recovery.status)
       ? "Human decision saved. Evidence recovery is running on the visual verifier; the full image and configured crops will be merged without changing your decision."
       : "Human visual decision saved. Downstream Stage 3/retrieval will rebuild from the authoritative audit state.", "completed");
-    const previousPosition = auditPage;
-    const humanQueue = $("va-verdict").value === "HUMAN_REVIEW";
     await loadAudit();
-    if (!humanQueue && filteredJobs.length > previousPosition) {
-      auditPage = previousPosition + 1;
-      renderPage();
-    }
     window.scrollTo({top:0, behavior:"smooth"});
-  } catch (error) { feedback(`Could not save decision: ${error.message}`, "warning"); button.disabled = false; }
+  } catch (error) {
+    feedback(`Could not save decision: ${error.message}`, "warning");
+  } finally {
+    decisionInFlight = false;
+    renderPage();
+  }
 });
 
 $("refresh-audit").addEventListener("click", loadAudit);
@@ -241,11 +261,11 @@ $("va-book").addEventListener("change", () => applyFilters());
 $("va-verdict").addEventListener("change", () => applyFilters());
 $("va-search").addEventListener("input", () => applyFilters());
 $("va-clear").addEventListener("click", () => { history.replaceState({}, "", "/vision-audit"); location.reload(); });
-$("va-prev").addEventListener("click", () => { auditPage -= 1; renderPage(); window.scrollTo({top:0, behavior:"smooth"}); });
-$("va-next").addEventListener("click", () => { auditPage += 1; renderPage(); window.scrollTo({top:0, behavior:"smooth"}); });
+$("va-prev").addEventListener("click", () => { if (decisionInFlight) return; auditPage -= 1; renderPage(); window.scrollTo({top:0, behavior:"smooth"}); });
+$("va-next").addEventListener("click", () => { if (decisionInFlight) return; auditPage += 1; renderPage(); window.scrollTo({top:0, behavior:"smooth"}); });
 document.addEventListener("keydown", event => {
   const editing = ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName);
-  if (editing) return;
+  if (editing || decisionInFlight) return;
   if ((event.altKey && event.key === "ArrowLeft") || event.key === "[") { event.preventDefault(); if (auditPage > 1) { auditPage -= 1; renderPage(); } }
   if ((event.altKey && event.key === "ArrowRight") || event.key === "]") { event.preventDefault(); const pages = Math.max(1, Math.ceil(filteredJobs.length / PAGE_SIZE)); if (auditPage < pages) { auditPage += 1; renderPage(); } }
 });

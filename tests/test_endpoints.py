@@ -5,7 +5,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -226,10 +226,10 @@ class VerificationEndpointTests(unittest.TestCase):
         with TestClient(self.main.app) as client:
             page = client.get("/verification")
             self.assertEqual(page.status_code, 200)
-            self.assertIn("Auto verify all", page.text)
+            self.assertIn("Text Vision Artifact scheduler controls", page.text)
             self.assertIn("Text results", page.text)
             self.assertIn("Vision results", page.text)
-            self.assertIn("Stop verifier", page.text)
+            self.assertIn("id=\"interlock-stop\"", page.text)
             pi = client.get("/api/stage2b/queue/pi5").json()["jobs"]
             op = client.get("/api/stage2b/queue/oneplus").json()["jobs"]
             self.assertTrue(any(row["postprocess_job_id"] == 9001 for row in pi))
@@ -459,6 +459,121 @@ class VerificationEndpointTests(unittest.TestCase):
             self.assertTrue(response.json()["oneplus"])
             response = client.put("/api/stage2b/auto-run-all", json={"enabled": False})
             self.assertEqual(response.status_code, 200)
+
+    def test_missing_review_entry_repair_endpoint_republishes_saved_result(self):
+        row = {
+            "id": 137813,
+            "postprocess_job_id": 12,
+            "generation": "507403",
+            "route_id": "R00001",
+            "target": "pi5",
+            "status": "completed",
+            "is_current": 1,
+            "source_json": json.dumps({"type": "text", "index": 5378, "page": 72}),
+        }
+        entry = {
+            "entry_id": "507403:text:R00001",
+            "entry_type": "text_correction",
+            "original_text": "Condenser cooling water oullet (23){50A]JIS SK Flange",
+            "status": "pending",
+            "verification_verdict": "UNCERTAIN",
+        }
+        with patch.object(
+            self.main.runtime.postprocess_store, "get_job",
+            new=AsyncMock(return_value={"id": 12, "status": "completed", "result_dir": "book__job12"}),
+        ), patch.object(
+            self.main.runtime.stage2b_store, "list_book_jobs_raw",
+            new=AsyncMock(return_value=[row]),
+        ), patch.object(
+            self.main.runtime.stage2b_worker, "ensure_stage2c_entry",
+            new=AsyncMock(return_value={"state": "ready", "entry_id": entry["entry_id"], "entry": entry, "verification_job_id": 137813}),
+        ):
+            with TestClient(self.main.app) as client:
+                response = client.post("/api/postprocess/jobs/12/corrections/507403:text:R00001/repair")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertTrue(body["ready"])
+        self.assertTrue(body["repaired"])
+        self.assertEqual(body["verification_job_id"], 137813)
+        self.assertEqual(body["entry"]["original_text"], entry["original_text"])
+
+    def test_text_audit_keeps_missing_publication_visible_as_human_review(self):
+        row = {
+            "id": 137813,
+            "postprocess_job_id": 12,
+            "generation": "507403",
+            "route_id": "R00001",
+            "target": "pi5",
+            "code": "DOCUMENT_INTERNAL_OCR_RECALL",
+            "priority": "medium",
+            "reason": "Rare token near frequent document token",
+            "status": "completed",
+            "verdict": "UNCERTAIN",
+            "model": "model",
+            "processing_seconds": 15.8,
+            "completed_at": "2026-09-24T00:00:00Z",
+            "result_dir": "book__job12",
+            "output_filename": "AIR COND.PLANT FINAL PLAN.zip",
+            "source_json": json.dumps({"type": "text", "index": 5378, "page": 72}),
+            "request_json": json.dumps({
+                "page": 72,
+                "source_type": "text",
+                "text_index": 5378,
+                "suspect_text": "Condenser cooling water oullet (23){50A]JIS SK Flange",
+            }),
+            "result_json": json.dumps({
+                "parsed": {"verdict": "UNCERTAIN"},
+                "correction": {"status": "pending", "proposed_text": None},
+            }),
+            "stage2c_entry_state": "error",
+            "stage2c_entry_id": "507403:text:R00001",
+            "stage2c_entry_error": "OSError: injected",
+        }
+        with patch.object(
+            self.main.runtime.stage2b_store, "list_results_raw",
+            new=AsyncMock(return_value=[row]),
+        ), patch.object(
+            self.main, "_current_audit_result_dirs",
+            new=AsyncMock(return_value={12: "book__job12"}),
+        ), patch.object(self.main, "_load_json_file", return_value={}):
+            with TestClient(self.main.app) as client:
+                response = client.get("/api/stage2b/text-audit?verification_job_id=137813")
+        self.assertEqual(response.status_code, 200)
+        jobs = response.json()["jobs"]
+        self.assertEqual(len(jobs), 1)
+        self.assertTrue(jobs[0]["human_review_required"])
+        downstream = jobs[0]["downstream"]
+        self.assertFalse(downstream["publication_ready"])
+        self.assertEqual(downstream["publication_state"], "error")
+        self.assertEqual(downstream["entry_id"], "507403:text:R00001")
+
+    def test_shared_text_vision_artifact_interlock_controls(self):
+        with patch.object(self.main.runtime.stage2b_worker, "sync_routes_once", new=AsyncMock(return_value=0)):
+            with TestClient(self.main.app) as client:
+                stopped = client.post("/api/stage2b/interlock/stop")
+                self.assertEqual(stopped.status_code, 200)
+                self.assertEqual(stopped.json()["mode"], "stopped")
+                status = client.get("/api/stage2b/status").json()
+                self.assertEqual(status["interlock"]["mode"], "stopped")
+                self.assertIn("artifact", status["workloads"])
+
+                started = client.post("/api/stage2b/interlock/start")
+                self.assertEqual(started.status_code, 200)
+                self.assertEqual(started.json()["mode"], "started")
+                status = client.get("/api/stage2b/status").json()
+                self.assertEqual(status["interlock"]["mode"], "started")
+                self.assertFalse(status["modes"]["pi5"]["auto_run"])
+                self.assertFalse(status["modes"]["oneplus"]["auto_run"])
+
+                auto = client.post("/api/stage2b/interlock/auto")
+                self.assertEqual(auto.status_code, 200)
+                self.assertEqual(auto.json()["mode"], "auto")
+                status = client.get("/api/stage2b/status").json()
+                self.assertEqual(status["interlock"]["mode"], "auto")
+                self.assertTrue(status["modes"]["pi5"]["auto_run"])
+                self.assertTrue(status["modes"]["oneplus"]["auto_run"])
+
+
 
 class DoclingReviewContextHelperTests(unittest.TestCase):
     def test_raw_docling_context_keeps_same_page_reading_order(self):

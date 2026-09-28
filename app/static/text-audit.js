@@ -4,6 +4,7 @@ let filteredJobs = [];
 let auditPage = 1;
 let totalFiltered = 0;
 let searchTimer = null;
+let auditRequestId = 0;
 const requestedJobId = new URLSearchParams(location.search).get("job");
 
 const $ = id => document.getElementById(id);
@@ -32,6 +33,8 @@ function friendlyReason(value) {
   const raw = String(value || "");
   const known = {
     SOURCE_IMAGE_UNREADABLE_KEEP_ORIGINAL: "Source image unreadable — original preserved",
+    VERIFIER_TRANSCRIPTION_TRUNCATED_KEEP_ORIGINAL: "Verifier reply was cut off (token limit / repetition) before finishing",
+    VERIFIER_TRANSCRIPTION_TRUNCATED: "Verifier reply was cut off (token limit / repetition) before finishing",
     CRITICAL_SOURCE_TOKEN_NOT_PRESERVED_KEEP_ORIGINAL: "Important technical value not preserved",
     TROUBLESHOOTING_ACTION_DROPPED_KEEP_ORIGINAL: "Troubleshooting action dropped",
     TABLE_CELL_CONTEXT_CONTAMINATION_KEEP_ORIGINAL: "Table-cell correction included neighboring context",
@@ -62,6 +65,24 @@ function reviewDecisionUrl(job, page) {
   return `/review?${params}`;
 }
 
+function doclingReviewUrl(job, page) {
+  const request = job.request || {};
+  const source = job.source || {};
+  const sourceType = String(request.source_type || source.type || "text");
+  let ref = "";
+  if (sourceType === "table_cell") {
+    const tableIndex = request.table_index ?? source.table_index;
+    if (tableIndex !== null && tableIndex !== undefined && tableIndex !== "") ref = `#/tables/${tableIndex}`;
+  } else {
+    const textIndex = request.text_index ?? source.index ?? source.text_index ?? source.source_index;
+    if (textIndex !== null && textIndex !== undefined && textIndex !== "") ref = `#/texts/${textIndex}`;
+  }
+  const params = new URLSearchParams({job:String(job.postprocess_job_id), page:String(page ?? 1)});
+  if (ref) params.set("ref", ref);
+  params.set("return", location.pathname + location.search);
+  return `/docling-review?${params}`;
+}
+
 function renderJob(job) {
   const request = job.request || {};
   const reconstruction = job.reconstruction || {};
@@ -69,10 +90,11 @@ function renderJob(job) {
   const scope = job.scope_guard || {};
   const alignment = scope.alignment_safety || {};
   const downstream = job.downstream || {};
+  const publicationMissing = downstream.publication_ready === false;
   const target = request.suspect_text || "";
   const proposed = downstream.proposed_text || correction.proposed_text || reconstruction.corrected_text || job.parsed?.source_image_reconstruction || "";
   const rejected = scope.accepted === false;
-  const pipeline = downstream.status === "applied" ? "Stage 2C overlay applied" : downstream.status === "pending" ? "Held for review; original preserved" : downstream.status ? `Stage 2C: ${downstream.status}` : job.disposition === "verified_original" ? "No overlay needed; original kept" : job.disposition === "pending" ? "No overlay; original preserved" : "No Stage 2C entry recorded";
+  const pipeline = publicationMissing ? "Review record pending publication; verifier result preserved" : downstream.status === "applied" ? "Stage 2C overlay applied" : downstream.status === "pending" ? "Held for review; original preserved" : downstream.status ? `Stage 2C: ${downstream.status}` : job.disposition === "verified_original" ? "No overlay needed; original kept" : job.disposition === "pending" ? "No overlay; original preserved" : "No Stage 2C entry recorded";
   const page = request.page ?? job.source?.page ?? "—";
   const providerCode = String(job.provider || "pi5").toLowerCase();
   const provider = ({pi5:"Pi5", oneplus:"OnePlus", groq:"Groq"})[providerCode] || job.provider || "Verifier";
@@ -93,6 +115,7 @@ function renderJob(job) {
       <div class="vision-audit-image-column">
         <div class="vision-audit-section-label">Exact target crop sent</div>
         ${request.target_crop ? `<a href="${esc(job.crop_image_url)}" target="_blank" rel="noopener"><img class="vision-audit-source-image" loading="lazy" src="${esc(job.crop_image_url)}" alt="Target crop sent to text verifier" /></a><div class="vision-audit-image-meta"><span>${esc(request.target_crop.mode || "target crop")}</span><span>${esc(request.source_type || "text")}</span></div>` : `<div class="empty-state compact-empty">No saved crop geometry for this failed/legacy result.</div>`}
+        ${page !== "—" ? `<div class="document-actions"><a class="mini-action primary-mini" href="${esc(doclingReviewUrl(job, page))}">Open Docling PDF bbox</a></div>` : ""}
       </div>
 
       <div class="vision-audit-explanation">
@@ -101,7 +124,9 @@ function renderJob(job) {
         ${job.status === "failed" ? `<section><div class="vision-audit-section-label">Failure</div><p class="queue-error">${esc(job.error_type || "Error")}: ${esc(job.error_message || "Verification failed")}</p></section>` : `<section><div class="vision-audit-section-label">Verifier transcription</div><p class="audit-transcription">${esc(proposed || "No readable transcription")}</p></section>`}
         <section class="${rejected ? "vision-audit-override" : ""}"><div class="vision-audit-section-label">Safety decision</div><p><strong>${esc(rejected ? "Rejected — original preserved" : correction.status === "applied" ? "Accepted" : correction.reason || "No correction needed")}</strong></p>${metrics.length ? `<div class="vision-audit-kv">${metrics.map(([name,value]) => `<span>${esc(name)}</span><strong>${Number(value).toFixed(3)}</strong>`).join("")}</div>` : ""}${(scope.reasons || []).length ? `<div class="vision-audit-tags">${scope.reasons.map(x => `<span title="${esc(x)}">${esc(friendlyReason(x))}</span>`).join("")}</div>` : ""}</section>
         <section><div class="vision-audit-section-label">What the pipeline did</div><p><strong>${esc(pipeline)}</strong></p>${downstream.status_reason ? `<p class="format-note">${esc(downstream.status_reason)}</p>` : ""}</section>
-        ${job.human_review_required ? `<div class="vision-audit-primary-actions text-audit-inline-review"><strong>Human decision required</strong><p class="format-note">Accept the verifier text if it is correct, keep the immutable Docling original, or open the full editor when you need to change the wording.</p><div class="document-actions">${proposed.trim() ? `<button class="primary-button text-audit-decision" data-job="${job.id}" data-action="apply">Accept correction</button>` : ""}<button class="secondary-button text-audit-decision" data-job="${job.id}" data-action="reject">Keep original</button><a class="mini-action" href="${esc(reviewDecisionUrl(job, page))}">Edit / inspect context</a></div></div>` : downstream.human_verified ? `<div class="vision-audit-human-state"><strong>Human reviewed</strong><span>Authoritative</span></div>` : ""}
+        ${job.human_review_required ? (publicationMissing
+          ? `<div class="vision-audit-primary-actions text-audit-inline-review"><strong>Human decision required</strong><p class="format-note">The verifier result is preserved, but its review record has not been published yet. Repair the review record before making a decision.</p><div class="document-actions"><a class="mini-action" href="${esc(reviewDecisionUrl(job, page))}">Repair / inspect context</a></div></div>`
+          : `<div class="vision-audit-primary-actions text-audit-inline-review"><strong>Human decision required</strong><p class="format-note">Accept the verifier text if it is correct, keep the immutable Docling original, or open the full editor when you need to change the wording.</p><div class="document-actions">${proposed.trim() ? `<button class="primary-button text-audit-decision" data-job="${job.id}" data-action="apply">Accept correction</button>` : ""}<button class="secondary-button text-audit-decision" data-job="${job.id}" data-action="reject">Keep original</button><a class="mini-action" href="${esc(reviewDecisionUrl(job, page))}">Edit / inspect context</a></div></div>`) : downstream.human_verified ? `<div class="vision-audit-human-state"><strong>Human reviewed</strong><span>Authoritative</span></div>` : ""}
       </div>
     </div>
 
@@ -145,6 +170,7 @@ function renderSummary(data) {
 }
 
 async function loadAudit() {
+  const requestId = ++auditRequestId;
   const button = $("refresh-audit");
   button.disabled = true;
   feedback("Loading text verifier audit…");
@@ -160,6 +186,7 @@ async function loadAudit() {
     const response = await fetch(`/api/stage2b/text-audit?${params}`, {cache:"no-store"});
     if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
     const data = await response.json();
+    if (requestId !== auditRequestId) return;
     auditJobs = data.jobs || [];
     filteredJobs = auditJobs;
     totalFiltered = Number(data.total_filtered ?? auditJobs.length);
@@ -168,8 +195,8 @@ async function loadAudit() {
     renderPage();
     feedback("");
   } catch (error) {
-    feedback(`Could not load text audit: ${error.message}`, "warning");
-  } finally { button.disabled = false; }
+    if (requestId === auditRequestId) feedback(`Could not load text audit: ${error.message}`, "warning");
+  } finally { if (requestId === auditRequestId) button.disabled = false; }
 }
 
 
