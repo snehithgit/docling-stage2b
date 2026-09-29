@@ -74,7 +74,7 @@ function renderJob(job) {
   const downstream = job.downstream || {};
   const failed = job.status === "failed";
   const providerCode = String(job.provider || "oneplus").toLowerCase();
-  const provider = ({pi5:"Pi5", oneplus:"OnePlus", groq:"Groq"})[providerCode] || job.provider || "Verifier";
+  const provider = ({pi5:"Pi5", oneplus:"OnePlus", groq:"Groq", colab:"Colab"})[providerCode] || job.provider || "Verifier";
   const cropCount = (job.crops || []).length;
   const humanDecision = downstream.human_visual_decision || "";
   const recoveredEvidence = !!downstream.human_evidence_recovered_at_epoch;

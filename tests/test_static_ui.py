@@ -289,6 +289,12 @@ def test_verification_exposes_explicit_text_and_vision_provider_selectors_withou
     assert html.count('<option value="pi5">Pi5 Vision</option>') == 2
     assert html.count('<option value="oneplus">OnePlus Vision</option>') == 2
     assert html.count('<option value="groq">Groq Vision</option>') == 2
+    assert html.count('<option value="colab">Colab Qwen-VL</option>') == 2
+    assert 'id="colab-url"' in html
+    assert 'id="colab-api-key"' in html
+    assert 'id="colab-artifact-enabled"' in html
+    assert "/api/stage2b/colab" in js
+    assert "/api/stage2b/colab/test" in js
     assert html.lower().count("no automatic fallback") >= 2
     assert '/api/stage2b/providers/${kind}' in js
     assert 'JSON.stringify({provider})' in js

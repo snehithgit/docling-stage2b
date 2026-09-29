@@ -3,7 +3,7 @@ const selectedBookId = Number(new URLSearchParams(location.search).get("job") ||
 let lastStatus = {};
 function verifierProviderName(provider, fallback) {
   const value = String(provider || fallback || "").toLowerCase();
-  return ({pi5:"Pi5", oneplus:"OnePlus", groq:"Groq"})[value] || String(provider || fallback || "Verifier");
+  return ({pi5:"Pi5", oneplus:"OnePlus", groq:"Groq", colab:"Colab"})[value] || String(provider || fallback || "Verifier");
 }
 function textVerifierName(status = lastStatus) { return `Text verifier · ${verifierProviderName(status?.text_provider?.provider, "pi5")}`; }
 function visionVerifierName(status = lastStatus) { return `Vision verifier · ${verifierProviderName(status?.vision_provider?.provider, "oneplus")}`; }
@@ -74,6 +74,41 @@ async function changeProvider(kind, select) {
   } finally { select.disabled = false; }
 }
 window.changeProvider = changeProvider;
+
+async function saveColabProvider(button) {
+  const original = button?.textContent || "Save";
+  if (button) { button.disabled = true; button.textContent = "Saving…"; }
+  try {
+    const payload = {
+      enabled: document.getElementById("colab-enabled")?.checked === true,
+      url: document.getElementById("colab-url")?.value || "",
+      model: document.getElementById("colab-model")?.value || "koboldcpp",
+      api_key: document.getElementById("colab-api-key")?.value || null,
+      artifact_enabled: document.getElementById("colab-artifact-enabled")?.checked === true,
+      clear_api_key: false,
+    };
+    const data = await api("/api/stage2b/colab", {method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload)});
+    const keyInput = document.getElementById("colab-api-key"); if (keyInput) keyInput.value = "";
+    feedback(`Colab worker saved · ${data.api_key_configured ? "API key configured" : "API key missing"}.`, "success");
+    await load();
+  } catch (error) { feedback(error.message); }
+  finally { if (button) { button.disabled = false; button.textContent = original; } }
+}
+window.saveColabProvider = saveColabProvider;
+
+async function testColabProvider(button) {
+  const original = button?.textContent || "Test connection";
+  if (button) { button.disabled = true; button.textContent = "Testing…"; }
+  try {
+    // Save any freshly pasted URL/key first so the test uses exactly what is on screen.
+    await saveColabProvider(document.getElementById("colab-save"));
+    const data = await api("/api/stage2b/colab/test", {method:"POST"});
+    feedback(`Colab connected · ${data.model || "KoboldCpp"} · ${data.detail || "ready"}.`, "success");
+    await load();
+  } catch (error) { feedback(error.message); }
+  finally { if (button) { button.disabled = false; button.textContent = original; } }
+}
+window.testColabProvider = testColabProvider;
 
 async function setInterlockMode(mode, button) {
   const labels = {start:"Starting…", stop:"Stopping…", auto:"Enabling Auto…"};
@@ -214,6 +249,25 @@ function renderModes(status) {
   const textSelect = document.getElementById("text-provider-select"); if (textSelect && document.activeElement !== textSelect) textSelect.value = status?.text_provider?.provider || "pi5";
   const visionSelect = document.getElementById("vision-provider-select"); if (visionSelect && document.activeElement !== visionSelect) visionSelect.value = status?.vision_provider?.provider || "oneplus";
   const phoneLink = document.getElementById("oneplus-server-link"); if (phoneLink) phoneLink.hidden = !(status?.text_provider?.provider === "oneplus" || status?.vision_provider?.provider === "oneplus");
+  const colab = status?.colab || {};
+  const colabUrl = document.getElementById("colab-url"); if (colabUrl && document.activeElement !== colabUrl) colabUrl.value = colab.url || "";
+  const colabModel = document.getElementById("colab-model"); if (colabModel && document.activeElement !== colabModel) colabModel.value = colab.model || "koboldcpp";
+  const colabEnabled = document.getElementById("colab-enabled"); if (colabEnabled && document.activeElement !== colabEnabled) colabEnabled.checked = colab.enabled === true;
+  const colabArtifact = document.getElementById("colab-artifact-enabled"); if (colabArtifact && document.activeElement !== colabArtifact) colabArtifact.checked = colab.artifact_enabled === true;
+  const colabMode = document.getElementById("colab-mode");
+  if (colabMode) {
+    const active = Boolean(status?.interlock?.provider_reservations?.colab);
+    colabMode.textContent = !colab.enabled ? "Disabled" : active ? "Running" : colab.connection_configured ? "Ready" : "Needs setup";
+    colabMode.className = `mode-badge ${active ? "running" : colab.enabled && colab.connection_configured ? "auto" : "paused"}`;
+  }
+  const colabHealth = document.getElementById("colab-health");
+  if (colabHealth) {
+    const keyText = colab.api_key_configured ? "API key saved" : "API key missing";
+    const circuit = colab.endpoint_circuit || {};
+    const detail = circuit.open ? `Endpoint waiting · ${circuit.last_error || "connection failed"}` : (colab.connection_configured ? "Configured · use Test connection for a live probe" : "Paste the current tunnel URL and API key");
+    colabHealth.innerHTML = `<span class="status ${colab.connection_configured && !circuit.open ? "completed" : "pending"}">${colab.enabled ? "Configured" : "Disabled"}</span><span class="device-model">${esc(colab.model || "koboldcpp")}</span><small>${esc(keyText)} · ${esc(detail)}</small>`;
+  }
+  const artifactColabLabel = document.getElementById("artifact-colab-label"); if (artifactColabLabel) artifactColabLabel.textContent = colab.enabled && colab.artifact_enabled ? " + Colab" : "";
   const note = document.getElementById("verifier-status-note");
   if (note) note.textContent = `Text: ${textName}${status?.text_provider?.primary_model ? ` · ${status.text_provider.primary_model}` : ""} | Vision: ${visionName}${status?.vision_provider?.primary_model ? ` · ${status.vision_provider.primary_model}` : ""} · explicit selection, no automatic provider fallback`;
   const quota = quotaFromStatus(status);
@@ -246,9 +300,10 @@ function renderModes(status) {
     const stopButton = document.getElementById(`${target}-stop`);
     if (startButton) {
       const providerInfo = target === "pi5" ? status?.text_provider : status?.vision_provider;
-      const keyMissing = selectedCloud && providerInfo?.api_key_configured === false;
-      startButton.disabled = auto || active || quotaPaused || keyMissing;
-      startButton.title = keyMissing ? "GROQ_API_KEY is not configured." : quotaPaused ? "Groq quota safety pause is active; queued cloud routes are preserved." : auto ? "Auto Run is enabled. Turn it off for manual Start." : active ? "Verifier is already processing a route." : "Start a manual batch for pending routes.";
+      const keyMissing = (selectedCloud || providerInfo?.mode === "remote") && providerInfo?.api_key_configured === false;
+      const connectionMissing = providerInfo?.mode === "remote" && providerInfo?.connection_configured === false;
+      startButton.disabled = auto || active || quotaPaused || keyMissing || connectionMissing;
+      startButton.title = keyMissing ? "The selected provider API key is not configured." : connectionMissing ? "Configure the Colab tunnel URL and enable the worker first." : quotaPaused ? "Groq quota safety pause is active; queued cloud routes are preserved." : auto ? "Auto Run is enabled. Turn it off for manual Start." : active ? "Verifier is already processing a route." : "Start a manual batch for pending routes.";
     }
     if (stopButton) { stopButton.disabled = paused && !active; stopButton.title = active ? "Pause new work; the current request will finish safely." : "Pause this verifier."; }
     const stage = document.getElementById(`${target}-stage`);
@@ -296,7 +351,7 @@ function renderModes(status) {
   const artifactStage = document.getElementById("artifact-stage");
   if (artifactStage) {
     const waiting = Number(artifact.waiting_dependency || 0), ready = Number(artifact.ready || 0);
-    artifactStage.textContent = artifactProviders.length ? `Running on ${artifactProviders.join(" + ")}` : interlockMode === "stopped" ? "Stopped — pending work preserved" : ready ? `${ready} ready · waiting for an idle local device` : waiting ? `${waiting} waiting for normal Text/Vision routes` : "No eligible artifact work";
+    artifactStage.textContent = artifactProviders.length ? `Running on ${artifactProviders.join(" + ")}` : interlockMode === "stopped" ? "Stopped — pending work preserved" : ready ? `${ready} ready · waiting for an idle verifier worker` : waiting ? `${waiting} waiting for normal Text/Vision routes` : "No eligible artifact work";
   }
   const failedTotal = Number(status.workloads?.text?.failed || 0) + Number(status.workloads?.vision?.failed || 0);
   const failedStrip = document.getElementById("retry-failed-strip");

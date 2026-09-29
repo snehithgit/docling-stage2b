@@ -425,7 +425,7 @@ class VerificationEndpointTests(unittest.TestCase):
 
     def test_provider_selection_is_explicit_persisted_and_has_no_fallback(self):
         with TestClient(self.main.app) as client:
-            for provider in ("pi5", "oneplus", "groq"):
+            for provider in ("pi5", "oneplus", "groq", "colab"):
                 text = client.put("/api/stage2b/providers/text", json={"provider": provider})
                 self.assertEqual(text.status_code, 200)
                 self.assertEqual(text.json()["provider"], provider)
@@ -434,8 +434,8 @@ class VerificationEndpointTests(unittest.TestCase):
                 self.assertEqual(vision.status_code, 200)
                 self.assertEqual(vision.json()["provider"], provider)
             status = client.get("/api/stage2b/status").json()
-            self.assertEqual(status["text_provider"]["provider"], "groq")
-            self.assertEqual(status["vision_provider"]["provider"], "groq")
+            self.assertEqual(status["text_provider"]["provider"], "colab")
+            self.assertEqual(status["vision_provider"]["provider"], "colab")
             self.assertFalse(status["text_provider"]["automatic_fallback"])
             self.assertFalse(status["vision_provider"]["automatic_fallback"])
             # Restore release defaults so later endpoint tests are isolated.

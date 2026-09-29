@@ -25,6 +25,7 @@ import httpx
 from .archive import select_docling_document
 from .book_lifecycle import quarantine_book_artifacts, quarantine_conversion_job, restore_quarantined_artifacts
 from .config import AppConfig, config_path, load_config, save_config
+from .colab_provider import normalize_colab_url, read_colab_api_key, write_colab_api_key, clear_colab_api_key
 from .database import JobStore
 from .docling_client import DoclingApiError, DoclingClient
 from .events import EventBroker
@@ -71,6 +72,7 @@ from .groq_quota import CloudQuotaPausedError
 from .stage2b import Stage2BWorker
 from .stage2c import STAGE2C_RULE_VERSION, apply_human_correction_to_entry, human_review_summary, upsert_ledger_entry, verifier_audit_summary, apply_human_visual_decision, waive_human_visual_evidence_recovery, undo_human_visual_decision, set_audit_gate_bypass
 from .visual_evidence import ensure_visual_evidence_fresh, normalize_visual_entry, search_visual_indices
+from .verifier_clients import OpenAICompatibleVerifier
 from .stage3 import STAGE3_RULE_VERSION, Stage3ChunkBuilder
 from .book_lifecycle_lock import BookLifecycleLocks
 from .telegram_bot import TelegramBotService
@@ -365,7 +367,24 @@ class Stage2BAutoRunUpdate(BaseModel):
 
 
 class VerifierProviderUpdate(BaseModel):
-    provider: str = Field(pattern="^(pi5|oneplus|groq)$")
+    provider: str = Field(pattern="^(pi5|oneplus|groq|colab)$")
+
+
+class ColabVerifierUpdate(BaseModel):
+    enabled: bool = False
+    url: str = Field(default="", max_length=2000)
+    model: str = Field(default="koboldcpp", min_length=1, max_length=200)
+    api_key: str | None = Field(default=None, max_length=500)
+    clear_api_key: bool = False
+    artifact_enabled: bool = False
+
+    @field_validator("url")
+    @classmethod
+    def validate_colab_url(cls, value: str) -> str:
+        url = normalize_colab_url(value)
+        if url and not url.startswith(("http://", "https://")):
+            raise ValueError("Enter a valid http(s) Colab/KoboldCpp URL")
+        return url
 
 
 class EquipmentManualAssignment(BaseModel):
@@ -920,8 +939,8 @@ class Runtime:
     async def set_verifier_provider(self, kind: str, provider: str) -> AppConfig:
         if kind not in {"text", "vision"}:
             raise ValueError("Verifier kind must be text or vision")
-        if provider not in {"pi5", "oneplus", "groq"}:
-            raise ValueError("Verifier provider must be pi5, oneplus, or groq")
+        if provider not in {"pi5", "oneplus", "groq", "colab"}:
+            raise ValueError("Verifier provider must be pi5, oneplus, groq, or colab")
         target = "pi5" if kind == "text" else "oneplus"
         if self.stage2b_worker.worker_state.get(target, {}).get("active_job_id"):
             raise ValueError("Stop the active verifier request before changing provider")
@@ -932,6 +951,29 @@ class Runtime:
         self.config = revised
         self.stage2b_worker._model_cache.pop(target, None)
         self.events.notify("stage2b_provider_updated")
+        return revised
+
+    async def set_colab_verifier(self, update: ColabVerifierUpdate) -> AppConfig:
+        if self.stage2b_worker.dispatch_reservations.get("colab"):
+            raise ValueError("Wait for the active Colab request to finish before changing its connection")
+        if self.stage2b_worker.worker_state.get("colab", {}).get("active_job_id"):
+            raise ValueError("Wait for the active Colab artifact request to finish before changing its connection")
+        revised = AppConfig(**{
+            **self.config.__dict__,
+            "colab_enabled": bool(update.enabled),
+            "colab_url": normalize_colab_url(update.url),
+            "colab_model": str(update.model or "koboldcpp").strip(),
+            "colab_artifact_enabled": bool(update.artifact_enabled),
+        })
+        revised.validate()
+        if update.clear_api_key:
+            clear_colab_api_key(revised)
+        elif update.api_key is not None and str(update.api_key).strip():
+            write_colab_api_key(revised, str(update.api_key).strip())
+        save_config(self.config_file, revised)
+        self.config = revised
+        self.stage2b_worker.reset_provider_connection("colab")
+        self.events.notify("colab_verifier_updated")
         return revised
 
     async def set_stage2b_auto_run_all(self, enabled: bool) -> AppConfig:
@@ -3032,11 +3074,17 @@ def _verifier_provider_label(provider: str, kind: str) -> str:
         return "Pi5 Vision · text reconstruction" if kind == "text" else "Pi5 Vision"
     if provider == "oneplus":
         return "OnePlus Vision · text reconstruction" if kind == "text" else "OnePlus Vision"
+    if provider == "colab":
+        return "Colab Qwen-VL · text reconstruction" if kind == "text" else "Colab Qwen-VL"
     return "Groq Vision · text reconstruction" if kind == "text" else "Groq Vision"
 
 
 def _verifier_provider_model(config: AppConfig, provider: str) -> str | None:
-    return config.vision_cloud_model if provider == "groq" else None
+    if provider == "groq":
+        return config.vision_cloud_model
+    if provider == "colab":
+        return config.colab_model
+    return None
 
 
 @app.get("/api/stage2b/status")
@@ -3044,23 +3092,27 @@ async def stage2b_status() -> dict:
     cloud_selected = runtime.config.text_verifier_provider == "groq" or runtime.config.vision_verifier_provider == "groq"
     quota = await runtime.groq_quota.snapshot() if cloud_selected else None
     key_ready = bool(__import__("os").environ.get(runtime.config.text_cloud_api_key_env, "").strip())
+    colab_key_ready = bool(read_colab_api_key(runtime.config))
+    colab_ready = bool(runtime.config.colab_enabled and runtime.config.colab_url and colab_key_ready)
     return {
         "enabled": runtime.config.stage2b_enabled,
         "text_provider": {
             "provider": runtime.config.text_verifier_provider,
-            "mode": "cloud" if runtime.config.text_verifier_provider == "groq" else "offline",
+            "mode": ("cloud" if runtime.config.text_verifier_provider == "groq" else ("remote" if runtime.config.text_verifier_provider == "colab" else "offline")),
             "label": _verifier_provider_label(runtime.config.text_verifier_provider, "text"),
             "primary_model": _verifier_provider_model(runtime.config, runtime.config.text_verifier_provider),
-            "api_key_configured": key_ready if runtime.config.text_verifier_provider == "groq" else None,
+            "api_key_configured": (key_ready if runtime.config.text_verifier_provider == "groq" else (colab_key_ready if runtime.config.text_verifier_provider == "colab" else None)),
+            "connection_configured": colab_ready if runtime.config.text_verifier_provider == "colab" else None,
             "quota": quota if runtime.config.text_verifier_provider == "groq" else None,
             "automatic_fallback": False,
         },
         "vision_provider": {
             "provider": runtime.config.vision_verifier_provider,
-            "mode": "cloud" if runtime.config.vision_verifier_provider == "groq" else "offline",
+            "mode": ("cloud" if runtime.config.vision_verifier_provider == "groq" else ("remote" if runtime.config.vision_verifier_provider == "colab" else "offline")),
             "label": _verifier_provider_label(runtime.config.vision_verifier_provider, "vision"),
             "primary_model": _verifier_provider_model(runtime.config, runtime.config.vision_verifier_provider),
-            "api_key_configured": key_ready if runtime.config.vision_verifier_provider == "groq" else None,
+            "api_key_configured": (key_ready if runtime.config.vision_verifier_provider == "groq" else (colab_key_ready if runtime.config.vision_verifier_provider == "colab" else None)),
+            "connection_configured": colab_ready if runtime.config.vision_verifier_provider == "colab" else None,
             "quota": quota if runtime.config.vision_verifier_provider == "groq" else None,
             "automatic_fallback": False,
         },
@@ -3076,7 +3128,16 @@ async def stage2b_status() -> dict:
         "artifact_sweep": {
             "enabled": bool(getattr(runtime.config, "stage2b_artifact_sweep_enabled", True)),
             "required_for_finalize": bool(getattr(runtime.config, "stage2b_artifact_sweep_required_for_finalize", True)),
-            "sequence": "normal_text_vision_first_then_idle_local_worker",
+            "sequence": "normal_text_vision_first_then_idle_workers",
+        },
+        "colab": {
+            "enabled": bool(runtime.config.colab_enabled),
+            "url": runtime.config.colab_url,
+            "model": runtime.config.colab_model,
+            "api_key_configured": colab_key_ready,
+            "connection_configured": colab_ready,
+            "artifact_enabled": bool(runtime.config.colab_artifact_enabled),
+            "endpoint_circuit": dict(runtime.stage2b_worker.worker_state.get("colab", {}).get("endpoint_circuit") or {}),
         },
         "counts": await runtime.stage2b_store.counts(),
         "workloads": await runtime.stage2b_store.workload_counts(),
@@ -3965,8 +4026,80 @@ async def stage2b_provider_update(kind: str, update: VerifierProviderUpdate) -> 
     label = _verifier_provider_label(provider, kind)
     return {
         "accepted": True, "kind": kind, "provider": provider,
-        "mode": "cloud" if provider == "groq" else "offline",
+        "mode": ("cloud" if provider == "groq" else ("remote" if provider == "colab" else "offline")),
         "label": label, "automatic_fallback": False,
+    }
+
+
+@app.get("/api/stage2b/colab")
+async def stage2b_colab_status() -> dict:
+    key_ready = bool(read_colab_api_key(runtime.config))
+    return {
+        "enabled": bool(runtime.config.colab_enabled),
+        "url": runtime.config.colab_url,
+        "model": runtime.config.colab_model,
+        "api_key_configured": key_ready,
+        "artifact_enabled": bool(runtime.config.colab_artifact_enabled),
+        "active": bool(runtime.stage2b_worker.dispatch_reservations.get("colab")),
+        "worker": dict(runtime.stage2b_worker.worker_state.get("colab") or {}),
+    }
+
+
+@app.put("/api/stage2b/colab")
+async def stage2b_colab_update(update: ColabVerifierUpdate) -> dict:
+    try:
+        revised = await runtime.set_colab_verifier(update)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {
+        "accepted": True,
+        "enabled": bool(revised.colab_enabled),
+        "url": revised.colab_url,
+        "model": revised.colab_model,
+        "api_key_configured": bool(read_colab_api_key(revised)),
+        "artifact_enabled": bool(revised.colab_artifact_enabled),
+    }
+
+
+@app.post("/api/stage2b/colab/test")
+async def stage2b_colab_test() -> dict:
+    config = runtime.config
+    if not config.colab_enabled:
+        raise HTTPException(status_code=409, detail="Colab worker is disabled.")
+    if not str(config.colab_url or "").strip():
+        raise HTTPException(status_code=409, detail="Colab tunnel URL is not configured.")
+    api_key = read_colab_api_key(config)
+    if not api_key:
+        raise HTTPException(status_code=409, detail="Colab API key is not configured.")
+    client = OpenAICompatibleVerifier(
+        config.colab_url, timeout_seconds=min(60, int(config.colab_timeout_seconds)), api_key=api_key
+    )
+    health = await client.health()
+    if not health.reachable:
+        raise HTTPException(status_code=503, detail=health.detail or "Colab KoboldCpp endpoint is unavailable.")
+    # /v1/models may be readable on some compatible servers even when generation
+    # is password-protected. Verify the secret against an actual generation
+    # endpoint before telling the operator the public tunnel is secured/usable.
+    try:
+        await client.chat_text(
+            "Reply with exactly OK.",
+            "Authentication probe.",
+            model=str(config.colab_model),
+            max_tokens=2,
+        )
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code if exc.response is not None else 0
+        if status in {401, 403}:
+            raise HTTPException(status_code=401, detail="Colab API key was rejected by KoboldCpp.") from exc
+        raise HTTPException(status_code=503, detail=f"Colab generation probe failed: HTTP {status}.") from exc
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=f"Colab generation probe failed: {exc}") from exc
+    runtime.stage2b_worker.reset_provider_connection("colab")
+    return {
+        "reachable": True,
+        "authenticated_generation": True,
+        "model": health.model or config.colab_model,
+        "detail": "Authenticated KoboldCpp generation endpoint ready",
     }
 
 
@@ -4018,15 +4151,21 @@ async def stage2b_start(target: str) -> dict:
     auto = runtime.config.stage2b_pi5_auto_run if target == "pi5" else runtime.config.stage2b_oneplus_auto_run
     if auto:
         raise HTTPException(status_code=409, detail="Auto Run is enabled for this device. Turn it off to start a manual batch.")
-    uses_groq = (target == "pi5" and runtime.config.text_verifier_provider == "groq") or (
-        target == "oneplus" and runtime.config.vision_verifier_provider == "groq"
-    )
+    selected_provider = runtime.config.text_verifier_provider if target == "pi5" else runtime.config.vision_verifier_provider
+    uses_groq = selected_provider == "groq"
     if uses_groq:
         quota = await runtime.groq_quota.snapshot()
         if quota.get("paused"):
             raise HTTPException(status_code=429, detail=quota.get("message") or "Groq quota safety pause is active.")
         if not __import__("os").environ.get(runtime.config.text_cloud_api_key_env, "").strip():
             raise HTTPException(status_code=409, detail=f"{runtime.config.text_cloud_api_key_env} is not configured.")
+    if selected_provider == "colab":
+        if not runtime.config.colab_enabled:
+            raise HTTPException(status_code=409, detail="Colab verifier is disabled.")
+        if not str(runtime.config.colab_url or "").strip():
+            raise HTTPException(status_code=409, detail="Colab tunnel URL is not configured.")
+        if not read_colab_api_key(runtime.config):
+            raise HTTPException(status_code=409, detail="Colab API key is not configured.")
     await runtime.stage2b_worker.sync_routes_once()
     await runtime.set_stage2b_paused(target, False)
     count = await runtime.stage2b_worker.start_manual(target)

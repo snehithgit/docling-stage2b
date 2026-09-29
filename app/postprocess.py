@@ -19,6 +19,7 @@ from typing import Any
 from .archive import select_docling_document
 from .stage2c import STAGE2C_RULE_VERSION, rebuild_chunk_overlays
 from .config import AppConfig
+from .colab_provider import read_colab_api_key
 from .events import EventBroker
 from .groq_quota import GroqQuotaGuard
 from .postprocess_store import PostprocessStore
@@ -2892,6 +2893,16 @@ class PostprocessWorker:
                 return await OpenAICompatibleVerifier(config.pi5_url).health()
             if provider == "oneplus":
                 return await OpenAICompatibleVerifier(config.oneplus_url).health()
+            if provider == "colab":
+                key = read_colab_api_key(config)
+                endpoint = str(getattr(config, "colab_url", "") or "").strip()
+                if not bool(getattr(config, "colab_enabled", False)):
+                    return EndpointHealth(False, model=str(getattr(config, "colab_model", "koboldcpp")), detail="Colab worker disabled")
+                if not endpoint:
+                    return EndpointHealth(False, model=str(getattr(config, "colab_model", "koboldcpp")), detail="Colab tunnel URL not configured")
+                if not key:
+                    return EndpointHealth(False, model=str(getattr(config, "colab_model", "koboldcpp")), detail="Colab API key not configured")
+                return await OpenAICompatibleVerifier(endpoint, timeout_seconds=int(getattr(config, "colab_timeout_seconds", 600)), api_key=key).health()
             return EndpointHealth(False, detail=f"Unknown provider: {provider}")
 
         while not self._stopping.is_set():

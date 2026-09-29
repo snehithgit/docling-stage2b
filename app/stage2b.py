@@ -28,6 +28,7 @@ from .verifier_checkpoint import CheckpointVerifier
 from .oneplus_workload import OnePlusCooldownActive, OnePlusWorkloadGovernor
 from .events import EventBroker
 from .groq_quota import CloudQuotaPausedError, GroqQuotaGuard
+from .colab_provider import read_colab_api_key
 from .postprocess_store import PostprocessStore
 from .pipeline_state import verification_rows_for_stage2c, verification_signature
 from .stage2b_store import HUMAN_VISUAL_RECOVERY_CODE, Stage2BStore
@@ -2576,12 +2577,19 @@ class Stage2BWorker:
                 "stream_finish_reason": None,
                 "stream_done_received": False,
             },
+            "colab": {
+                "active_job_id": None,
+                "active_stage": None,
+                "last_completed_job_id": None,
+                "artifact_jobs_completed": 0,
+                "artifact_cooldown_until_epoch": None,
+            },
         }
         # Stage 2A already validated CRC/reference integrity. Cache only the
         # parsed Docling JSON here so a book with many routes is not reparsed
         # and CRC-scanned for every local-model call.
         self._doc_cache: dict[str, tuple[tuple[int, int], dict[str, Any]]] = {}
-        self._device_locks = {"pi5": asyncio.Lock(), "oneplus": asyncio.Lock(), "groq": asyncio.Lock()}
+        self._device_locks = {"pi5": asyncio.Lock(), "oneplus": asyncio.Lock(), "groq": asyncio.Lock(), "colab": asyncio.Lock()}
         # Scheduler-level provider reservations keep Text, Vision and the
         # shared Artifact pool from claiming the same physical provider at once.
         # The existing device locks remain the final inference single-flight gate;
@@ -2604,13 +2612,14 @@ class Stage2BWorker:
         # physical worker pulls the next row; there is no fixed ratio. A worker
         # that hits a transport/server failure cools down briefly while the
         # other worker continues draining the queue.
-        self._artifact_worker_cooldown_until: dict[str, float] = {"pi5": 0.0, "oneplus": 0.0}
+        self._artifact_worker_cooldown_until: dict[str, float] = {"pi5": 0.0, "oneplus": 0.0, "colab": 0.0}
         self._endpoint_circuit: dict[str, dict[str, Any]] = {
             "pi5": {"open": False, "opened_at_epoch": None, "next_probe_at_epoch": 0.0, "failure_count": 0, "outage_path": None, "last_error": None},
             "oneplus": {"open": False, "opened_at_epoch": None, "next_probe_at_epoch": 0.0, "failure_count": 0, "outage_path": None, "last_error": None},
+            "colab": {"open": False, "opened_at_epoch": None, "next_probe_at_epoch": 0.0, "failure_count": 0, "outage_path": None, "last_error": None},
         }
-        self._endpoint_probe_locks = {"pi5": asyncio.Lock(), "oneplus": asyncio.Lock()}
-        for _worker in ("pi5", "oneplus"):
+        self._endpoint_probe_locks = {"pi5": asyncio.Lock(), "oneplus": asyncio.Lock(), "colab": asyncio.Lock()}
+        for _worker in ("pi5", "oneplus", "colab"):
             self.worker_state[_worker]["artifact_jobs_completed"] = 0
             self.worker_state[_worker]["artifact_cooldown_until_epoch"] = None
             self.worker_state[_worker]["endpoint_circuit"] = dict(self._endpoint_circuit[_worker])
@@ -2650,7 +2659,7 @@ class Stage2BWorker:
         another provider.
         """
         if provider not in self._device_locks:
-            raise ValueError("Provider must be pi5, oneplus, or groq")
+            raise ValueError("Provider must be pi5, oneplus, groq, or colab")
         return self._device_locks[provider]
 
     @property
@@ -2700,6 +2709,7 @@ class Stage2BWorker:
             asyncio.create_task(self._discovery_loop(), name="stage2b-route-discovery"),
             asyncio.create_task(self._device_loop("pi5"), name="stage2b-pi5-worker"),
             asyncio.create_task(self._device_loop("oneplus"), name="stage2b-oneplus-worker"),
+            asyncio.create_task(self._colab_artifact_loop(), name="stage2b-colab-artifact-worker"),
         ]
 
     async def stop(self) -> None:
@@ -2874,7 +2884,7 @@ class Stage2BWorker:
                 effective_provider = str(getattr(client, "provider", self._selected_provider("oneplus")) or self._selected_provider("oneplus"))
                 endpoint = str(getattr(client, "endpoint", self._endpoint_for_provider(effective_provider)))
                 model = await self._model_for(f"manual-vision:{effective_provider}", endpoint, client)
-                vision_label = {"pi5": "Pi5 Vision", "oneplus": "OnePlus Vision", "groq": "Groq Vision"}.get(effective_provider, effective_provider)
+                vision_label = {"pi5": "Pi5 Vision", "oneplus": "OnePlus Vision", "groq": "Groq Vision", "colab": "Colab Qwen-VL"}.get(effective_provider, effective_provider)
                 state["status"] = "running"
                 state["summary"] = f"{vision_label} is reconstructing the target from the source page"
                 before_anchors = request.get("before_anchors") if isinstance(request.get("before_anchors"), list) else []
@@ -3913,6 +3923,16 @@ class Stage2BWorker:
         self._notify_event(f"stage2b_{provider}_endpoint_circuit_open", **context)
         return int(delay)
 
+    def reset_provider_connection(self, provider: str) -> None:
+        """Clear cached model/outage state after an endpoint or credential change."""
+        if provider in self._endpoint_circuit:
+            self._endpoint_circuit[provider] = {
+                "open": False, "opened_at_epoch": None, "next_probe_at_epoch": 0.0,
+                "failure_count": 0, "outage_path": None, "last_error": None,
+            }
+            self._sync_endpoint_circuit_state(provider)
+        self._model_cache = {key: value for key, value in self._model_cache.items() if provider not in key}
+
     async def _close_endpoint_circuit(self, provider: str) -> None:
         state = self._endpoint_circuit.get(provider)
         if not state or not state.get("open"):
@@ -3948,13 +3968,42 @@ class Stage2BWorker:
             if time.time() < float(state.get("next_probe_at_epoch") or 0.0):
                 return False
             endpoint = self._endpoint_for_provider(provider)
-            client = OpenAICompatibleVerifier(endpoint, timeout_seconds=max(30, min(60, int(self._config_getter().stage2b_request_timeout_seconds))))
+            config = self._config_getter()
+            api_key = read_colab_api_key(config) if provider == "colab" else ""
+            timeout_seconds = (
+                max(30, min(60, int(getattr(config, "colab_timeout_seconds", 600))))
+                if provider == "colab" else
+                max(30, min(60, int(config.stage2b_request_timeout_seconds)))
+            )
+            client = OpenAICompatibleVerifier(endpoint, timeout_seconds=timeout_seconds, api_key=api_key)
             health = await client.health()
+            if health.reachable and provider == "colab":
+                # A compatible server may expose /v1/models publicly even while
+                # generation is password-protected. Re-open the Colab circuit
+                # only after the saved key succeeds against the protected
+                # generation endpoint. This runs only while recovering an open
+                # circuit, not during each normal scheduler poll.
+                try:
+                    await client.chat_text(
+                        "Reply with exactly OK.", "Authentication probe.",
+                        model=str(getattr(config, "colab_model", "koboldcpp")), max_tokens=2,
+                    )
+                except Exception as exc:
+                    await self._open_endpoint_circuit(provider, f"authenticated generation probe failed: {exc}")
+                    return False
             if health.reachable:
                 await self._close_endpoint_circuit(provider)
                 return True
             await self._open_endpoint_circuit(provider, health.detail or "health probe failed")
             return False
+
+    def _colab_config_ready(self) -> bool:
+        config = self._config_getter()
+        return bool(
+            getattr(config, "colab_enabled", False)
+            and str(getattr(config, "colab_url", "") or "").strip()
+            and read_colab_api_key(config)
+        )
 
     async def _device_loop(self, target: str) -> None:
         while not self._stopping.is_set():
@@ -3974,6 +4023,11 @@ class Stage2BWorker:
                     self.worker_state[target]["quota"] = quota
                     normal_role_available = not bool(quota.get("paused"))
                 normal_provider = self._selected_provider(target)
+                if normal_provider == "colab" and not self._colab_config_ready():
+                    normal_role_available = False
+                    self.worker_state[target]["provider_wait"] = "Colab URL/API key is not configured or Colab is disabled"
+                else:
+                    self.worker_state[target]["provider_wait"] = None
                 if normal_role_available and normal_provider == "oneplus":
                     normal_role_available = await self._oneplus_workload.can_start()
                 if normal_role_available and normal_provider in self._endpoint_circuit:
@@ -4034,6 +4088,62 @@ class Stage2BWorker:
             except Exception:
                 logger.exception("Stage 2B %s worker loop failed", target)
                 self._events.notify(f"stage2b_{target}_worker_error")
+                await asyncio.sleep(self._config_getter().stage2b_poll_interval_seconds)
+
+    async def _colab_artifact_loop(self) -> None:
+        """Optional third Artifact worker backed by the Colab KoboldCpp tunnel.
+
+        It participates only in FULL_TECHNICAL_VISUAL work, uses the same
+        provider reservation/device lock as Text/Vision, yields to runnable
+        normal work assigned to Colab, and obeys the shared Start/Stop/Auto
+        interlock. Local Pi5/OnePlus artifact workers continue unchanged.
+        """
+        while not self._stopping.is_set():
+            try:
+                config = self._config_getter()
+                globally_stopped = self._paused("pi5") and self._paused("oneplus")
+                if (
+                    globally_stopped
+                    or not bool(getattr(config, "colab_artifact_enabled", False))
+                    or not self._colab_config_ready()
+                ):
+                    await asyncio.sleep(config.stage2b_poll_interval_seconds)
+                    continue
+                if not self._artifact_worker_available("colab"):
+                    await asyncio.sleep(config.stage2b_poll_interval_seconds)
+                    continue
+                if await self._normal_work_waiting_for_provider("colab"):
+                    await asyncio.sleep(config.stage2b_poll_interval_seconds)
+                    continue
+                if not await self._endpoint_provider_ready("colab"):
+                    await asyncio.sleep(config.stage2b_poll_interval_seconds)
+                    continue
+                owner = "colab:artifact"
+                if not await self._reserve_provider("colab", owner):
+                    await asyncio.sleep(config.stage2b_poll_interval_seconds)
+                    continue
+                self.worker_state["colab"]["dispatch_provider"] = "colab"
+                try:
+                    released = await self._store.release_ready_artifact_sweeps()
+                    if released:
+                        self._events.notify("stage2b_artifact_sweep_released")
+                    artifact_job = await self._store.claim_next_artifact("colab")
+                    if artifact_job is not None:
+                        artifact_job["_artifact_worker"] = "colab"
+                        await self._run_job(
+                            "oneplus", artifact_job, preclaimed=True,
+                            run_mode_override="artifact_shared", state_key="colab",
+                        )
+                        continue
+                finally:
+                    self.worker_state["colab"]["dispatch_provider"] = None
+                    await self._release_provider("colab", owner)
+                await asyncio.sleep(config.stage2b_poll_interval_seconds)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Stage 2B Colab artifact worker loop failed")
+                self._events.notify("stage2b_colab_worker_error")
                 await asyncio.sleep(self._config_getter().stage2b_poll_interval_seconds)
 
     def _notify_event(self, reason: str, **context: object) -> None:
@@ -4177,10 +4287,16 @@ class Stage2BWorker:
         *,
         preclaimed: bool = False,
         run_mode_override: str | None = None,
+        state_key: str | None = None,
     ) -> None:
         config = self._config_getter()
+        state_key = str(state_key or target)
+        if state_key not in self.worker_state:
+            raise ValueError(f"Unknown worker state: {state_key}")
         is_artifact_sweep = self._is_artifact_sweep_job(job)
         is_human_recovery = self._is_human_visual_recovery_job(job)
+        artifact_worker = str(job.get("_artifact_worker") or target).lower() if is_artifact_sweep else ""
+        dispatch_provider = artifact_worker or self._selected_provider(target)
         run_mode = run_mode_override or ("auto" if self._auto_run(target) else "manual")
         started = time.monotonic()
         claimed_here = bool(preclaimed)
@@ -4200,12 +4316,13 @@ class Stage2BWorker:
                 claimed_here = True
             job["run_mode"] = run_mode
             job["_active_stage"] = "starting"
-            self.worker_state[target]["active_job_id"] = int(job["id"])
-            self.worker_state[target]["active_stage"] = "starting"
-            self._events.notify(f"stage2b_{target}_started")
+            self.worker_state[state_key]["active_job_id"] = int(job["id"])
+            self.worker_state[state_key]["active_stage"] = "starting"
+            self._events.notify(f"stage2b_{state_key}_started")
             route_timeout_value = (
-                config.stage2b_pi5_job_timeout_seconds
-                if target == "pi5" else config.stage2b_oneplus_job_timeout_seconds
+                int(config.colab_timeout_seconds) + 60
+                if dispatch_provider == "colab" else
+                (config.stage2b_pi5_job_timeout_seconds if target == "pi5" else config.stage2b_oneplus_job_timeout_seconds)
             )
             # Pi5 timeout is enforced per inference request after acquiring the
             # shared device gate. OnePlus normally uses a 40-minute absolute
@@ -4216,7 +4333,7 @@ class Stage2BWorker:
             async with asyncio.timeout(route_timeout):
                 if is_human_recovery:
                     job["_active_stage"] = "human_evidence_recovery"
-                    self.worker_state[target]["active_stage"] = "evidence recovery"
+                    self.worker_state[state_key]["active_stage"] = "evidence recovery"
                     request, result, verdict, model, endpoint = await self._execute_human_visual_evidence_recovery_job(job)
                 else:
                     try:
@@ -4226,16 +4343,18 @@ class Stage2BWorker:
                     is_picture_route = str(route_source.get("type") or "") == "picture"
                     if target == "pi5" and not is_picture_route:
                         job["_active_stage"] = "pi5_text"
-                        self.worker_state[target]["active_stage"] = "text check"
+                        self.worker_state[state_key]["active_stage"] = "text check"
                         request, result, verdict, model, endpoint = await self._run_pi5(job)
-                    elif target == "pi5":
-                        request, result, verdict, model, endpoint = await self._run_oneplus(job, role_target="pi5")
-                    else:
+                    elif state_key == "oneplus":
+                        # Preserve the historical single-argument call shape for
+                        # the normal Vision lane (tests/extensions may wrap it).
                         request, result, verdict, model, endpoint = await self._run_oneplus(job)
+                    else:
+                        request, result, verdict, model, endpoint = await self._run_oneplus(job, role_target=state_key)
             seconds = time.monotonic() - started
             if is_artifact_sweep:
-                request["artifact_worker"] = target
-                result["artifact_worker"] = target
+                request["artifact_worker"] = artifact_worker
+                result["artifact_worker"] = artifact_worker
             artifact = await asyncio.to_thread(
                 self._write_result_artifact, job, request, result, verdict, seconds, model, endpoint
             )
@@ -4264,9 +4383,9 @@ class Stage2BWorker:
             if completed_provider in self._endpoint_circuit:
                 await self._close_endpoint_circuit(completed_provider)
             if is_artifact_sweep:
-                self._clear_artifact_worker_cooldown(target)
-                self.worker_state[target]["artifact_jobs_completed"] = int(
-                    self.worker_state[target].get("artifact_jobs_completed") or 0
+                self._clear_artifact_worker_cooldown(artifact_worker)
+                self.worker_state[state_key]["artifact_jobs_completed"] = int(
+                    self.worker_state[state_key].get("artifact_jobs_completed") or 0
                 ) + 1
             if not is_human_recovery:
                 try:
@@ -4284,8 +4403,8 @@ class Stage2BWorker:
                 self._checkpoint_path(job).unlink(missing_ok=True)
             except OSError:
                 logger.exception("Could not remove completed inference checkpoint")
-            self.worker_state[target]["last_completed_job_id"] = int(job["id"])
-            self._events.notify(f"stage2b_{target}_completed")
+            self.worker_state[state_key]["last_completed_job_id"] = int(job["id"])
+            self._events.notify(f"stage2b_{state_key}_completed")
             # The verification result is already durably completed above.
             # Housekeeping is isolated so its failures cannot fall through to
             # the verifier error handler and downgrade that result to failed.
@@ -4314,7 +4433,7 @@ class Stage2BWorker:
             await self._store.mark_deferred(
                 int(job["id"]), "CloudQuotaPaused", str(exc), delay_seconds=delay
             )
-            self.worker_state[target]["quota"] = snap
+            self.worker_state[state_key]["quota"] = snap
             logger.warning(
                 "Stage 2B Groq request paused before quota limit on job %s route %s: %s",
                 job.get("id"), job.get("route_id"), exc,
@@ -4325,11 +4444,21 @@ class Stage2BWorker:
             )
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code if exc.response is not None else 0
+            provider = str(dispatch_provider or target).lower()
             retryable = status >= 500 or status in {408, 429}
             seconds = time.monotonic() - started
-            if retryable:
+            if provider == "colab" and status in {401, 403, 404}:
+                delay = await self._open_endpoint_circuit(
+                    "colab", f"HTTP {status}: Colab tunnel/authentication is not usable",
+                    event_context=await self._notification_job_context(job, error=exc),
+                )
+                await self._store.mark_deferred(
+                    int(job["id"]), "ColabEndpointUnavailable", str(exc), delay_seconds=delay
+                )
+                self._events.notify("stage2b_colab_endpoint_deferred")
+            elif retryable:
                 if is_artifact_sweep:
-                    self._cooldown_artifact_worker(target)
+                    self._cooldown_artifact_worker(artifact_worker)
                 await self._retry_or_fail(target, job, exc, seconds)
             else:
                 artifact = await self._failure_artifact_or_none(
@@ -4343,7 +4472,7 @@ class Stage2BWorker:
                     target, job.get("id"), job.get("route_id"), job.get("_active_stage"), status, exc,
                 )
                 self._events.notify(
-                    f"stage2b_{target}_failed",
+                    f"stage2b_{state_key}_failed",
                     **(await self._notification_job_context(job, error=exc)),
                 )
         except (httpx.TransportError, TimeoutError, ConnectionError) as exc:
@@ -4373,14 +4502,14 @@ class Stage2BWorker:
                 self._events.notify(f"stage2b_{provider}_endpoint_deferred")
             else:
                 if is_artifact_sweep:
-                    self._cooldown_artifact_worker(target)
+                    self._cooldown_artifact_worker(artifact_worker)
                 await self._retry_or_fail(target, job, exc, seconds)
         except Exception as exc:
             seconds = time.monotonic() - started
             if not claimed_here:
                 logger.exception("Stage 2B setup failed before job %s was claimed; leaving it pending", job.get("id"))
                 self._notify_event(
-                    f"stage2b_{target}_setup_failed",
+                    f"stage2b_{state_key}_setup_failed",
                     **(await self._notification_job_context(job, error=exc)),
                 )
                 return
@@ -4396,14 +4525,14 @@ class Stage2BWorker:
                 type(exc).__name__, exc,
             )
             self._notify_event(
-                f"stage2b_{target}_failed",
+                f"stage2b_{state_key}_failed",
                 **(await self._notification_job_context(job, error=exc)),
             )
         finally:
-            self.worker_state[target]["active_job_id"] = None
-            self.worker_state[target]["active_stage"] = None
-            if target == "oneplus":
-                self.worker_state[target]["active_started_epoch"] = None
+            self.worker_state[state_key]["active_job_id"] = None
+            self.worker_state[state_key]["active_stage"] = None
+            if state_key == "oneplus":
+                self.worker_state[state_key]["active_started_epoch"] = None
 
     @staticmethod
     def stage2c_entry_id_for_job(job: dict[str, Any]) -> str:
@@ -4631,6 +4760,9 @@ class Stage2BWorker:
         return doc
 
     async def _model_for(self, target: str, endpoint: str, client: Any) -> str | None:
+        override = str(getattr(client, "model_override", "") or "").strip()
+        if override:
+            return override
         cached = self._model_cache.get(target)
         if cached and cached[0] == endpoint:
             return cached[1]
@@ -4659,6 +4791,8 @@ class Stage2BWorker:
             return str(config.oneplus_url).rstrip("/")
         if provider == "groq":
             return str(config.text_cloud_base_url).rstrip("/")
+        if provider == "colab":
+            return str(getattr(config, "colab_url", "") or "").rstrip("/")
         raise ValueError(f"Unknown verifier provider: {provider}")
 
     def _usage_context_for(self, job: dict[str, Any], purpose: str) -> dict[str, Any]:
@@ -4708,6 +4842,13 @@ class Stage2BWorker:
             )
             timeout = int(config.vision_cloud_timeout_seconds) + 15
             identity = f"groq-vision-compat:{config.vision_cloud_model}:{job.get('generation', '')}:strict-json-v2"
+        elif provider == "colab":
+            api_key = read_colab_api_key(config)
+            raw_client = OpenAICompatibleVerifier(
+                endpoint, timeout_seconds=int(config.colab_timeout_seconds), api_key=api_key
+            )
+            timeout = int(config.colab_timeout_seconds) + 30
+            identity = f"colab-koboldcpp:{target}:{config.colab_model}:{endpoint}:{job.get('generation', '')}:v1"
         else:
             raw_client = OpenAICompatibleVerifier(endpoint, timeout_seconds=config.stage2b_request_timeout_seconds)
             timeout = None if provider == "oneplus" else config.stage2b_pi5_job_timeout_seconds
@@ -4722,6 +4863,8 @@ class Stage2BWorker:
         )
         wrapped.endpoint = endpoint
         wrapped.provider = provider
+        if provider == "colab":
+            wrapped.model_override = str(config.colab_model)
         return wrapped
 
     def _vision_client_for_role(self, role_target: str, job: dict[str, Any]) -> CheckpointVerifier:
@@ -4742,7 +4885,7 @@ class Stage2BWorker:
         # atomically claimed the artifact row becomes the physical provider for
         # this request. Legacy source["processor"] hints remain ignored.
         artifact_worker = str(job.get("_artifact_worker") or "").lower()
-        if bool(source.get("artifact_sweep")) and artifact_worker in {"pi5", "oneplus"}:
+        if bool(source.get("artifact_sweep")) and artifact_worker in {"pi5", "oneplus", "colab"}:
             provider = artifact_worker
         else:
             provider = self._selected_provider(role_target)
@@ -4762,6 +4905,13 @@ class Stage2BWorker:
             )
             timeout = int(config.vision_cloud_timeout_seconds) + 15
             identity = f"groq-vision:{role_target}:{config.vision_cloud_model}:{job.get('generation', '')}:source-reconstruct-v2"
+        elif provider == "colab":
+            api_key = read_colab_api_key(config)
+            raw_client = OpenAICompatibleVerifier(
+                endpoint, timeout_seconds=int(config.colab_timeout_seconds), api_key=api_key
+            )
+            timeout = int(config.colab_timeout_seconds) + 30
+            identity = f"colab-koboldcpp-vision:{role_target}:{config.colab_model}:{endpoint}:{job.get('generation', '')}:source-reconstruct-v1"
         else:
             raw_client = OpenAICompatibleVerifier(endpoint, timeout_seconds=config.stage2b_request_timeout_seconds)
             # Local llama.cpp vision can spend a long time in prompt/image eval;
@@ -4778,6 +4928,8 @@ class Stage2BWorker:
         )
         wrapped.endpoint = endpoint
         wrapped.provider = provider
+        if provider == "colab":
+            wrapped.model_override = str(config.colab_model)
         return wrapped
 
     async def manual_docling_region_extract(

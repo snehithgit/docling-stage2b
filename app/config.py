@@ -116,7 +116,7 @@ class AppConfig:
     # remains ``pi5`` for compatibility, but the selected processor can be
     # Pi5, OnePlus or Groq. All three paths use vision against a source-image
     # crop; there is no automatic fallback or semantic vote stage.
-    text_verifier_provider: str = "pi5"  # pi5 | oneplus | groq
+    text_verifier_provider: str = "pi5"  # pi5 | oneplus | groq | colab
     text_cloud_base_url: str = "https://api.groq.com/openai/v1"
     text_cloud_model: str = "openai/gpt-oss-20b"
     text_cloud_fallback_model: str = "openai/gpt-oss-120b"  # retained for old config compatibility; not auto-used
@@ -129,9 +129,21 @@ class AppConfig:
     text_cloud_local_fallback_enabled: bool = False
     # Vision routes keep the historical internal key ``oneplus`` for database
     # compatibility. The selected provider is explicit and never auto-falls back.
-    vision_verifier_provider: str = "oneplus"  # pi5 | oneplus | groq
+    vision_verifier_provider: str = "oneplus"  # pi5 | oneplus | groq | colab
     vision_cloud_model: str = "qwen/qwen3.8-27b"
     vision_cloud_timeout_seconds: int = 120
+
+    # Optional Google Colab KoboldCpp/Qwen-VL worker. The tunnel URL is public,
+    # but generation requests require the API key kept in a dedicated secret
+    # file (or the environment variable below). The key is never returned by
+    # public settings/status APIs.
+    colab_enabled: bool = False
+    colab_url: str = ""
+    colab_model: str = "koboldcpp"
+    colab_api_key_env: str = "COLAB_KCPP_API_KEY"
+    colab_api_key_path: str = "/data/db/colab_koboldcpp.key"
+    colab_timeout_seconds: int = 600
+    colab_artifact_enabled: bool = False
 
     # Text reconstruction uses the original PDF/image and physically crops the
     # Docling target block before inference. Sending a whole page is disabled
@@ -370,10 +382,10 @@ class AppConfig:
             raise ValueError("reading_order_min_items must be at least three")
         if not 0.0 <= self.reading_order_min_coverage <= 1.0:
             raise ValueError("reading_order_min_coverage must be between 0 and 1")
-        if self.text_verifier_provider not in {"groq", "pi5", "oneplus"}:
-            raise ValueError("text_verifier_provider must be 'pi5', 'oneplus', or 'groq'")
-        if self.vision_verifier_provider not in {"groq", "pi5", "oneplus"}:
-            raise ValueError("vision_verifier_provider must be 'pi5', 'oneplus', or 'groq'")
+        if self.text_verifier_provider not in {"groq", "pi5", "oneplus", "colab"}:
+            raise ValueError("text_verifier_provider must be pi5, oneplus, groq, or colab")
+        if self.vision_verifier_provider not in {"groq", "pi5", "oneplus", "colab"}:
+            raise ValueError("vision_verifier_provider must be pi5, oneplus, groq, or colab")
         if self.stage2b_text_target_crop_scale < 1.0 or self.stage2b_text_target_crop_scale > 6.0:
             raise ValueError("stage2b_text_target_crop_scale must be between 1 and 6")
         if self.stage2b_text_target_crop_x_margin_points < 0 or self.stage2b_text_target_crop_x_margin_points > 300:
@@ -386,6 +398,16 @@ class AppConfig:
             raise ValueError("Cloud vision verifier model cannot be empty")
         if self.vision_cloud_timeout_seconds < 15:
             raise ValueError("Cloud vision verifier timeout must be at least 15 seconds")
+        if self.colab_url and not self.colab_url.startswith(("http://", "https://")):
+            raise ValueError("Colab KoboldCpp URL must begin with http:// or https://")
+        if not self.colab_model.strip():
+            raise ValueError("Colab KoboldCpp model name cannot be empty")
+        if not self.colab_api_key_env.strip():
+            raise ValueError("Colab API key environment variable name cannot be empty")
+        if not self.colab_api_key_path.strip():
+            raise ValueError("Colab API key path cannot be empty")
+        if self.colab_timeout_seconds < 30:
+            raise ValueError("Colab verifier timeout must be at least 30 seconds")
         if self.groq_usage_log_max_entries < 100:
             raise ValueError("Groq usage log must retain at least 100 entries")
         if not self.text_cloud_base_url.startswith(("http://", "https://")):
@@ -560,7 +582,7 @@ class AppConfig:
             "telegram_notifications": self.telegram_notifications,
             "telegram_controls": self.telegram_controls,
             "text_verifier_provider": self.text_verifier_provider,
-            "text_verifier_label": {"pi5": "Pi5 Vision · text reconstruction", "oneplus": "OnePlus Vision · text reconstruction", "groq": "Groq Vision · text reconstruction"}.get(self.text_verifier_provider, self.text_verifier_provider),
+            "text_verifier_label": {"pi5": "Pi5 Vision · text reconstruction", "oneplus": "OnePlus Vision · text reconstruction", "groq": "Groq Vision · text reconstruction", "colab": "Colab Qwen-VL · text reconstruction"}.get(self.text_verifier_provider, self.text_verifier_provider),
             "text_cloud_model": self.text_cloud_model,
             "text_cloud_fallback_model": self.text_cloud_fallback_model,
             "text_cloud_key_configured": bool(os.environ.get(self.text_cloud_api_key_env, "").strip()),
@@ -570,8 +592,12 @@ class AppConfig:
             "text_cloud_quota_warn_fraction": self.text_cloud_quota_warn_fraction,
             "text_cloud_quota_stop_fraction": self.text_cloud_quota_stop_fraction,
             "vision_verifier_provider": self.vision_verifier_provider,
-            "vision_verifier_label": {"pi5": "Pi5 Vision", "oneplus": "OnePlus Vision", "groq": "Groq Vision"}.get(self.vision_verifier_provider, self.vision_verifier_provider),
+            "vision_verifier_label": {"pi5": "Pi5 Vision", "oneplus": "OnePlus Vision", "groq": "Groq Vision", "colab": "Colab Qwen-VL"}.get(self.vision_verifier_provider, self.vision_verifier_provider),
             "vision_cloud_model": self.vision_cloud_model,
+            "colab_enabled": self.colab_enabled,
+            "colab_url": self.colab_url,
+            "colab_model": self.colab_model,
+            "colab_artifact_enabled": self.colab_artifact_enabled,
             "stage2c_require_human_review": self.stage2c_require_human_review,
             "stage2c_auto_finalize_after_stage2b": self.stage2c_auto_finalize_after_stage2b,
             "stage2b_enabled": self.stage2b_enabled,

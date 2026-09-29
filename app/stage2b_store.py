@@ -604,10 +604,10 @@ class Stage2BStore:
 
         The stored ``target`` is intentionally ignored. Older releases wrote
         sweep rows to Pi5/OnePlus lanes; treating FULL_TECHNICAL_VISUAL as one
-        shared pool lets either healthy local worker steal pending work without
+        shared pool lets any enabled healthy verifier worker steal pending work without
         rewriting or duplicating historical rows.
         """
-        if worker not in {"pi5", "oneplus"}:
+        if worker not in {"pi5", "oneplus", "colab"}:
             raise ValueError("Unsupported artifact worker")
         return await self._run(self._claim_next_artifact_sync, worker)
 

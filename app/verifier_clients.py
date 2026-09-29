@@ -388,23 +388,57 @@ class OpenAICompatibleVerifier:
     the OpenAI-compatible ``[DONE]`` sentinel.
     """
 
-    def __init__(self, base_url: str, timeout_seconds: int = 180) -> None:
-        self.base_url = base_url.rstrip("/")
-        self.timeout = httpx.Timeout(connect=10.0, read=float(timeout_seconds), write=30.0, pool=10.0)
+    def __init__(self, base_url: str, timeout_seconds: int = 180, api_key: str = "") -> None:
+        normalized = str(base_url or "").strip().rstrip("/")
+        # Accept either a server root (llama.cpp style) or an OpenAI base URL
+        # ending in /v1 (what the Colab notebook prints).
+        if normalized.endswith("/v1"):
+            self.base_url = normalized[:-3].rstrip("/")
+            self.openai_base_url = normalized
+        else:
+            self.base_url = normalized
+            self.openai_base_url = normalized + "/v1"
+        self.api_key = str(api_key or "").strip()
+        self.timeout = httpx.Timeout(connect=10.0, read=float(timeout_seconds), write=60.0, pool=10.0)
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
 
     async def health(self) -> EndpointHealth:
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(timeout=self.timeout, headers=self._headers()) as client:
+                # With an API key configured, validate an authenticated OpenAI
+                # endpoint directly. A public /health response must not make a
+                # bad/expired key appear usable.
+                if self.api_key:
+                    model_response = await client.get(f"{self.openai_base_url}/models")
+                    if not model_response.is_success:
+                        return EndpointHealth(False, detail=f"models HTTP {model_response.status_code}")
+                    body = model_response.json() if model_response.content else {}
+                    data = body.get("data") or [] if isinstance(body, dict) else []
+                    model = data[0].get("id") if data and isinstance(data[0], dict) else None
+                    return EndpointHealth(True, model=model, detail="OpenAI-compatible endpoint reachable")
+                # Local llama.cpp exposes /health. Fall back to /v1/models for
+                # compatible servers that do not expose that route.
                 response = await client.get(f"{self.base_url}/health")
-                if not response.is_success:
-                    return EndpointHealth(False, detail=f"health HTTP {response.status_code}")
-                model = await self._discover_model(client)
-                return EndpointHealth(True, model=model, detail="ok")
+                if response.is_success:
+                    model = await self._discover_model(client)
+                    return EndpointHealth(True, model=model, detail="ok")
+                model_response = await client.get(f"{self.openai_base_url}/models")
+                if not model_response.is_success:
+                    return EndpointHealth(False, detail=f"health/models HTTP {model_response.status_code}")
+                body = model_response.json() if model_response.content else {}
+                data = body.get("data") or [] if isinstance(body, dict) else []
+                model = data[0].get("id") if data and isinstance(data[0], dict) else None
+                return EndpointHealth(True, model=model, detail="OpenAI-compatible endpoint ready")
         except (httpx.HTTPError, ValueError, KeyError) as exc:
             return EndpointHealth(False, detail=str(exc))
 
     async def _discover_model(self, client: httpx.AsyncClient) -> str | None:
-        response = await client.get(f"{self.base_url}/v1/models")
+        response = await client.get(f"{self.openai_base_url}/models")
         if not response.is_success:
             return None
         body = response.json()
@@ -435,8 +469,8 @@ class OpenAICompatibleVerifier:
         }
         if model:
             payload["model"] = model
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(f"{self.base_url}/v1/chat/completions", json=payload)
+        async with httpx.AsyncClient(timeout=self.timeout, headers=self._headers()) as client:
+            response = await client.post(f"{self.openai_base_url}/chat/completions", json=payload)
             response.raise_for_status()
             return response.json()
 
@@ -458,8 +492,8 @@ class OpenAICompatibleVerifier:
         }
         if model:
             payload["model"] = model
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(f"{self.base_url}/v1/chat/completions", json=payload)
+        async with httpx.AsyncClient(timeout=self.timeout, headers=self._headers()) as client:
+            response = await client.post(f"{self.openai_base_url}/chat/completions", json=payload)
             response.raise_for_status()
             return response.json()
 
@@ -507,8 +541,8 @@ class OpenAICompatibleVerifier:
         """
         del schema_mode  # local llama.cpp is prompt-constrained rather than JSON-schema constrained
         payload = self._vision_payload(image_bytes, prompt, mime_type, model, max_tokens, stream=False)
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(f"{self.base_url}/v1/chat/completions", json=payload)
+        async with httpx.AsyncClient(timeout=self.timeout, headers=self._headers()) as client:
+            response = await client.post(f"{self.openai_base_url}/chat/completions", json=payload)
             response.raise_for_status()
             return response.json()
 
@@ -566,8 +600,8 @@ class OpenAICompatibleVerifier:
         # Disable httpx's body read timeout; the explicit per-stream timers
         # below are more meaningful for a slow phone than one fixed ReadTimeout.
         stream_timeout = httpx.Timeout(connect=10.0, read=None, write=60.0, pool=10.0)
-        async with httpx.AsyncClient(timeout=stream_timeout) as client:
-            request = client.build_request("POST", f"{self.base_url}/v1/chat/completions", json=payload)
+        async with httpx.AsyncClient(timeout=stream_timeout, headers=self._headers()) as client:
+            request = client.build_request("POST", f"{self.openai_base_url}/chat/completions", json=payload)
             try:
                 async with asyncio.timeout(first_token_timeout_seconds):
                     response = await client.send(request, stream=True)

@@ -97,7 +97,7 @@ function renderJob(job) {
   const pipeline = publicationMissing ? "Review record pending publication; verifier result preserved" : downstream.status === "applied" ? "Stage 2C overlay applied" : downstream.status === "pending" ? "Held for review; original preserved" : downstream.status ? `Stage 2C: ${downstream.status}` : job.disposition === "verified_original" ? "No overlay needed; original kept" : job.disposition === "pending" ? "No overlay; original preserved" : "No Stage 2C entry recorded";
   const page = request.page ?? job.source?.page ?? "—";
   const providerCode = String(job.provider || "pi5").toLowerCase();
-  const provider = ({pi5:"Pi5", oneplus:"OnePlus", groq:"Groq"})[providerCode] || job.provider || "Verifier";
+  const provider = ({pi5:"Pi5", oneplus:"OnePlus", groq:"Groq", colab:"Colab"})[providerCode] || job.provider || "Verifier";
   const metrics = [
     ["Similarity", scope.sequence_similarity],
     ["Target recall", scope.target_token_recall],

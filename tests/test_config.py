@@ -182,8 +182,8 @@ def test_verifier_defaults_keep_local_processors_and_automatic_stage2c():
 
 
 def test_text_and_vision_accept_all_three_explicit_processors():
-    for text in ("pi5", "oneplus", "groq"):
-        for vision in ("pi5", "oneplus", "groq"):
+    for text in ("pi5", "oneplus", "groq", "colab"):
+        for vision in ("pi5", "oneplus", "groq", "colab"):
             AppConfig(text_verifier_provider=text, vision_verifier_provider=vision).validate()
 
 

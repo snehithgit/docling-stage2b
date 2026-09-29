@@ -118,6 +118,17 @@ stage2b_text_target_crop_y_margin_points: 14
 stage2b_text_target_crop_max_vertical_fraction: 0.12
 stage2b_text_allow_full_page_fallback: false
 vision_cloud_timeout_seconds: 120
+
+# Optional Google Colab KoboldCpp/Qwen-VL worker. Paste the current
+# trycloudflare URL from the secured Colab notebook. The API key is stored
+# separately at colab_api_key_path (or supplied via COLAB_KCPP_API_KEY).
+colab_enabled: false
+colab_url: ""
+colab_model: "koboldcpp"
+colab_api_key_env: "COLAB_KCPP_API_KEY"
+colab_api_key_path: "/data/db/colab_koboldcpp.key"
+colab_timeout_seconds: 600
+colab_artifact_enabled: false
 groq_usage_log_max_entries: 2000
 # Paid-equivalent estimate only; free-tier usage remains ₹0 while within allowance.
 text_cloud_input_cost_per_million_usd: 0.075

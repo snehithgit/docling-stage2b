@@ -1,3 +1,13 @@
+## 2026.09.29.40.11AB — optional secured Colab Qwen3-VL verifier
+
+- Adds Google Colab/KoboldCpp as an **optional, explicit** provider for Text verification, Vision verification, Human Visual Evidence Recovery, and the shared Artifact idle pool. Local Pi5/OnePlus behavior remains the default and there is no automatic cloud fallback.
+- Adds a secured Qwen3-VL-8B Colab notebook. Each runtime generates a strong API key, passes it to KoboldCpp via `KCPP_PASSWORD`, and exposes the OpenAI-compatible endpoint through the Cloudflare tunnel.
+- The Verification page accepts the current tunnel URL + API key, stores the key outside `config.yaml` in a mode-0600 secret file, never returns the key through status/settings APIs, and provides an authenticated generation test.
+- Text/Vision/Artifact share the existing physical-provider interlock: one Colab inference at a time, normal Text/Vision priority, optional Artifact work stealing when Colab is idle, and Start/Stop/Auto semantics unchanged.
+- Colab outages/auth failures defer work and open the endpoint circuit instead of losing jobs. Circuit recovery verifies the protected generation endpoint before dispatch resumes.
+- Evidence recovery automatically uses Colab when Colab is the explicitly selected Vision provider; recovery remains a durable Vision queue job.
+- Full setup/behavior details: `docs/colab-koboldcpp-provider.md`.
+
 ## 2026.09.29.40.11AA — stale visual-origin recovery compatibility
 
 - Fixes `Recover evidence` returning `Vision verification job not found` when a human-approved visual still references an older Stage 2B verifier row that has since become historical (`is_current=0`).
