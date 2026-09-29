@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Any
 
 
+HUMAN_VISUAL_RECOVERY_CODE = "HUMAN_VISUAL_EVIDENCE_RECOVERY"
+
+
 def utcnow() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -261,6 +264,101 @@ class Stage2BStore:
                     ),
                 )
         return created
+
+    async def enqueue_human_visual_recovery(self, verification_job_id: int, entry_id: str) -> dict[str, Any]:
+        """Create or re-arm one durable human visual evidence-recovery row.
+
+        Recovery is a logical Vision job and therefore uses the normal Stage 2B
+        scheduler/interlock instead of an in-memory background task.  The row is
+        additive to the originating verification route and is deliberately not a
+        Stage-2C source row; its output is merged into the already-authoritative
+        human visual ledger entry by the recovery executor.
+        """
+        return await self._run(self._enqueue_human_visual_recovery_sync, verification_job_id, entry_id)
+
+    def _enqueue_human_visual_recovery_sync(self, verification_job_id: int, entry_id: str) -> dict[str, Any]:
+        entry_id = str(entry_id or "").strip()
+        if not entry_id:
+            raise ValueError("Evidence recovery entry id is required")
+        with self._connection() as conn:
+            origin = conn.execute(
+                "SELECT * FROM verification_jobs WHERE id=? AND is_current=1",
+                (int(verification_job_id),),
+            ).fetchone()
+            if origin is None:
+                raise ValueError("Vision verification job not found")
+            try:
+                source = json.loads(origin["source_json"] or "{}")
+            except (json.JSONDecodeError, TypeError):
+                source = {}
+            if str(source.get("type") or "") != "picture":
+                raise ValueError("Evidence recovery is only available for picture verification jobs")
+
+            generation = str(origin["generation"] or "")
+            route_id = f"HUMAN_RECOVERY:{entry_id}"
+            route_key = f"{generation}:oneplus:{route_id}"
+            recovery_source = dict(source)
+            recovery_source.update({
+                "human_evidence_recovery": True,
+                "origin_verification_job_id": int(origin["id"]),
+                "entry_id": entry_id,
+            })
+            source_json = json.dumps(recovery_source, ensure_ascii=False, sort_keys=True)
+            now = utcnow()
+            conn.execute(
+                """INSERT OR IGNORE INTO verification_jobs (
+                    postprocess_job_id, conversion_job_id, route_id, route_key,
+                    generation, target, code, priority, priority_score, source_json, action,
+                    reason, result_dir, output_filename, status, authorized, run_mode,
+                    created_at, is_current, retry_count, next_attempt_at
+                ) VALUES (?, ?, ?, ?, ?, 'oneplus', ?, 'high', 100000, ?,
+                          'recover_human_visual_evidence', 'human_approved_visual_evidence_recovery',
+                          ?, ?, 'pending', 1, 'human_recovery', ?, 1, 0, NULL)""",
+                (
+                    int(origin["postprocess_job_id"]),
+                    int(origin["conversion_job_id"]),
+                    route_id,
+                    route_key,
+                    generation,
+                    HUMAN_VISUAL_RECOVERY_CODE,
+                    source_json,
+                    str(origin["result_dir"] or ""),
+                    str(origin["output_filename"] or ""),
+                    now,
+                ),
+            )
+            row = conn.execute(
+                """SELECT * FROM verification_jobs
+                   WHERE postprocess_job_id=? AND generation=? AND route_id=? AND target='oneplus'""",
+                (int(origin["postprocess_job_id"]), generation, route_id),
+            ).fetchone()
+            if row is None:
+                raise ValueError("Could not create evidence recovery job")
+            # An explicit Recover click re-arms a previous failed/completed attempt.
+            # Pending/processing rows are left single-flight and only refreshed.
+            if str(row["status"] or "") in {"completed", "failed"}:
+                conn.execute(
+                    """UPDATE verification_jobs
+                       SET status='pending', authorized=1, run_mode='human_recovery',
+                           started_at=NULL, completed_at=NULL, processing_seconds=NULL,
+                           retry_count=0, next_attempt_at=NULL, model=NULL, endpoint=NULL,
+                           verdict=NULL, request_json=NULL, result_json=NULL, artifact_path=NULL,
+                           error_type=NULL, error_message=NULL, claimed_by=NULL,
+                           stage2c_entry_state=NULL, stage2c_entry_id=NULL, stage2c_entry_error=NULL,
+                           source_json=?, result_dir=?, output_filename=?, is_current=1
+                       WHERE id=?""",
+                    (source_json, str(origin["result_dir"] or ""), str(origin["output_filename"] or ""), int(row["id"])),
+                )
+            elif str(row["status"] or "") == "pending":
+                conn.execute(
+                    """UPDATE verification_jobs
+                       SET authorized=1, run_mode='human_recovery', next_attempt_at=NULL,
+                           source_json=?, result_dir=?, output_filename=?, is_current=1
+                       WHERE id=?""",
+                    (source_json, str(origin["result_dir"] or ""), str(origin["output_filename"] or ""), int(row["id"])),
+                )
+            row = conn.execute("SELECT * FROM verification_jobs WHERE id=?", (int(row["id"]),)).fetchone()
+            return self._public_row(row)
 
     async def clear_manual_authorizations(self, target: str) -> int:
         return await self._run(self._clear_manual_authorizations_sync, target)
@@ -846,6 +944,7 @@ class Stage2BStore:
         scopes = {
             "text": "target='pi5' AND COALESCE(code,'')<>'FULL_TECHNICAL_VISUAL'",
             "vision": "target='oneplus' AND COALESCE(code,'')<>'FULL_TECHNICAL_VISUAL'",
+            "recovery": f"code='{HUMAN_VISUAL_RECOVERY_CODE}'",
             "artifact": "code='FULL_TECHNICAL_VISUAL'",
         }
         with self._connection() as conn:

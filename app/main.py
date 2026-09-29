@@ -74,7 +74,7 @@ from .visual_evidence import ensure_visual_evidence_fresh, normalize_visual_entr
 from .stage3 import STAGE3_RULE_VERSION, Stage3ChunkBuilder
 from .book_lifecycle_lock import BookLifecycleLocks
 from .telegram_bot import TelegramBotService
-from .stage2b_store import Stage2BStore
+from .stage2b_store import HUMAN_VISUAL_RECOVERY_CODE, Stage2BStore
 from .worker import ConversionWorker
 from .version import APP_VERSION
 from .table_repair import (
@@ -3070,7 +3070,7 @@ async def stage2b_status() -> dict:
         },
         "interlock": {
             "mode": runtime.stage2b_interlock_mode(),
-            "priority": ["text_vision", "artifact_when_idle"],
+            "priority": ["text_vision", "human_evidence_recovery", "artifact_when_idle"],
             "provider_reservations": runtime.stage2b_worker.dispatch_reservations,
         },
         "artifact_sweep": {
@@ -3354,7 +3354,11 @@ async def stage2b_vision_audit(postprocess_job_id: int | None = None, limit: int
         await runtime.stage2b_store.list_results_raw("pi5", limit=row_limit)
         + await runtime.stage2b_store.list_results_raw("oneplus", limit=row_limit)
     )
-    rows = [row for row in rows if str(_audit_json(row.get("source_json")).get("type") or "") == "picture"]
+    rows = [
+        row for row in rows
+        if str(row.get("code") or "") != HUMAN_VISUAL_RECOVERY_CODE
+        and str(_audit_json(row.get("source_json")).get("type") or "") == "picture"
+    ]
     rows.sort(key=lambda row: int(row.get("id") or 0), reverse=True)
     rows = rows[:row_limit]
     if postprocess_job_id is not None:

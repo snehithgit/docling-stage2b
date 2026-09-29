@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
+HUMAN_VISUAL_RECOVERY_CODE = "HUMAN_VISUAL_EVIDENCE_RECOVERY"
+
+
 def _sha256_parts(parts: Iterable[bytes]) -> str:
     h = hashlib.sha256()
     for part in parts:
@@ -24,12 +27,16 @@ def verification_rows_for_stage2c(rows: list[dict[str, Any]], *, artifact_sweep_
     signature as soon as it completes, which deliberately marks Stage 2C stale so
     the newly available evidence can be incorporated on rebuild.
     """
-    if artifact_sweep_required:
-        return list(rows)
     selected: list[dict[str, Any]] = []
     for row in rows:
-        is_sweep = str(row.get("code") or "") == "FULL_TECHNICAL_VISUAL"
-        if not is_sweep or str(row.get("status") or "") == "completed":
+        code = str(row.get("code") or "")
+        # Human evidence recovery is an additive queue action that merges into an
+        # already-authoritative vision ledger entry. It must never become a new
+        # Stage-2C source row or change the Stage-2C verification signature.
+        if code == HUMAN_VISUAL_RECOVERY_CODE:
+            continue
+        is_sweep = code == "FULL_TECHNICAL_VISUAL"
+        if artifact_sweep_required or not is_sweep or str(row.get("status") or "") == "completed":
             selected.append(row)
     return selected
 

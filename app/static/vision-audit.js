@@ -252,7 +252,7 @@ document.addEventListener("click", async event => {
     const data = await response.json();
     if (action === "recover") {
       const recovery = data.evidence_recovery || {};
-      feedback(["queued","running"].includes(recovery.status) ? "Evidence recovery queued. Your human classification remains unchanged." : "Evidence recovery request saved.", "completed");
+      feedback(["queued","pending","processing","running"].includes(recovery.status) ? "Evidence recovery queued. Your human classification remains unchanged." : "Evidence recovery request saved.", "completed");
     } else if (action === "waive-recovery") {
       feedback("Recovery requirement cleared. Existing evidence will be used as the human-approved visual evidence.", "completed");
     } else {
@@ -283,7 +283,7 @@ document.addEventListener("click", async event => {
     if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
     const data = await response.json();
     const recovery = data.evidence_recovery || null;
-    feedback(recovery && ["queued","running"].includes(recovery.status)
+    feedback(recovery && ["queued","pending","processing","running"].includes(recovery.status)
       ? "Human decision saved. Evidence recovery is running on the visual verifier; the full image and configured crops will be merged without changing your decision."
       : "Human visual decision saved. Downstream Stage 3/retrieval will rebuild from the authoritative audit state.", "completed");
     await loadAudit();

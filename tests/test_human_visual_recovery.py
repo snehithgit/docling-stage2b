@@ -1,4 +1,3 @@
-import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -6,34 +5,42 @@ from types import SimpleNamespace
 import pytest
 
 from app.stage2b import Stage2BWorker
-
-
-class _Store:
-    def __init__(self, job):
-        self.job = job
-
-    async def get_job(self, job_id):
-        return dict(self.job) if int(job_id) == int(self.job["id"]) else None
+from app.stage2b_store import HUMAN_VISUAL_RECOVERY_CODE, Stage2BStore
 
 
 class _Events:
     def __init__(self):
         self.names = []
 
-    def notify(self, name):
+    def notify(self, name, **_kwargs):
         self.names.append(name)
 
 
 @pytest.mark.asyncio
-async def test_human_visual_recovery_merges_full_and_all_crops_without_changing_decision(tmp_path, monkeypatch):
+async def test_human_visual_recovery_is_durable_vision_job_and_merges_all_crops(tmp_path, monkeypatch):
     result_dir = tmp_path / "book__job1"
     (result_dir / "verification").mkdir(parents=True)
+
+    store = Stage2BStore(str(tmp_path / "jobs.db"))
+    await store.initialize()
+    await store.sync_routes(
+        1, 10, "g",
+        [{
+            "route_id": "R1", "target": "oneplus", "code": "VISION_REVIEW",
+            "priority": "medium", "review_priority_score": 10,
+            "source": {"type": "picture", "index": 4, "page": 8, "artifact": "img.png"},
+            "action": "inspect_image", "reason": "missing_or_low_picture_classification_confidence",
+        }],
+        result_dir.name, "book.zip",
+    )
+    origin = (await store.list_book_jobs_raw(1))[0]
+    origin_id = int(origin["id"])
     entry_id = "g:vision:R1"
     (result_dir / "correction_ledger.json").write_text(json.dumps({"entries": [{
         "entry_id": entry_id,
         "entry_type": "vision_enrichment",
         "route_id": "R1",
-        "verification_job_id": 77,
+        "verification_job_id": origin_id,
         "status": "applied",
         "status_reason": "HUMAN_VISUAL_ACCEPTED",
         "verification_verdict": "UNCERTAIN",
@@ -46,18 +53,10 @@ async def test_human_visual_recovery_merges_full_and_all_crops_without_changing_
         "generated_summary": "",
     }]}), encoding="utf-8")
 
-    job = {
-        "id": 77,
-        "generation": "g",
-        "route_id": "R1",
-        "reason": "missing_or_low_picture_classification_confidence",
-        "result_dir": result_dir.name,
-        "output_filename": "book.zip",
-        "source_json": json.dumps({"type": "picture", "index": 4, "page": 8, "artifact": "img.png"}),
-    }
     cfg = SimpleNamespace(
-        output_dir=str(tmp_path), processed_dir=str(tmp_path),
-        vision_verifier_provider="oneplus", oneplus_url="http://phone:8080", pi5_url="http://pi:8080",
+        output_dir=str(tmp_path), processed_dir=str(tmp_path), database_path=str(tmp_path / "jobs.db"),
+        vision_verifier_provider="oneplus", text_verifier_provider="pi5",
+        oneplus_url="http://phone:8080", pi5_url="http://pi:8080",
         stage2b_request_timeout_seconds=240,
         stage2b_oneplus_max_tokens=512,
         stage2b_oneplus_first_token_timeout_seconds=1200,
@@ -70,7 +69,17 @@ async def test_human_visual_recovery_merges_full_and_all_crops_without_changing_
         stage2b_endpoint_breaker_base_seconds=30, stage2b_endpoint_breaker_max_seconds=300,
     )
     events = _Events()
-    worker = Stage2BWorker(lambda: cfg, _Store(job), SimpleNamespace(), events)
+    worker = Stage2BWorker(lambda: cfg, store, SimpleNamespace(), events)
+
+    state = await worker.start_human_visual_evidence_recovery(origin_id, entry_id)
+    assert state["status"] == "pending"
+    assert state["durable_queue"] is True
+    recovery_job = await store.next_runnable("oneplus", auto_run=False)
+    assert recovery_job is not None
+    assert recovery_job["code"] == HUMAN_VISUAL_RECOVERY_CODE
+    recovery_source = json.loads(recovery_job["source_json"])
+    assert recovery_source["origin_verification_job_id"] == origin_id
+    assert recovery_source["entry_id"] == entry_id
 
     async def fake_doc(_):
         return {}
@@ -92,6 +101,7 @@ async def test_human_visual_recovery_merges_full_and_all_crops_without_changing_
         return "vision-model"
 
     monkeypatch.setattr(worker, "_model_for", fake_model)
+    monkeypatch.setattr(worker, "_endpoint_provider_ready", lambda *_: _true())
 
     calls = []
 
@@ -108,15 +118,22 @@ async def test_human_visual_recovery_merges_full_and_all_crops_without_changing_
 
     monkeypatch.setattr("app.stage2b._inspect_vision_region", fake_inspect)
 
-    state = await worker.start_human_visual_evidence_recovery(77, entry_id)
-    assert state["status"] == "queued"
-    await worker._human_visual_recovery_tasks[77]
-
+    request, result, verdict, model, endpoint = await worker._execute_human_visual_evidence_recovery_job(recovery_job)
+    assert request["task"] == "human_visual_evidence_recovery"
+    assert result["human_evidence_recovery_required"] is False
+    assert verdict == "TECHNICAL_USEFUL"
+    assert model == "vision-model"
+    assert endpoint == "http://phone:8080"
     assert calls == [b"full", b"c1", b"c2", b"c3", b"c4"]
+
     saved = json.loads((result_dir / "correction_ledger.json").read_text(encoding="utf-8"))["entries"][0]
     assert saved["human_visual_decision"] == "useful"
     assert saved["status"] == "applied"
     assert saved["human_evidence_recovery_required"] is False
     assert {"MAIN", "PSU 1", "24V DC 5 A", "BATTERY", "EMERGENCY POWER"}.issubset(set(saved["visible_text"]))
-    assert worker.human_visual_recovery_state[77]["status"] == "completed"
+    assert "human_visual_evidence_recovery_queued" in events.names
     assert "human_visual_evidence_recovery_completed" in events.names
+
+
+async def _true():
+    return True

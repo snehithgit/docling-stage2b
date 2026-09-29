@@ -6,7 +6,7 @@ import pytest
 
 from app.config import AppConfig
 from app.events import EventBroker
-from app.pipeline_state import stage2c_freshness, stage2c_output_signature, stage3_freshness, verification_signature
+from app.pipeline_state import stage2c_freshness, stage2c_output_signature, stage3_freshness, verification_rows_for_stage2c, verification_signature
 from app.stage2b import Stage2BWorker
 from app.stage2c import STAGE2C_RULE_VERSION
 from app.stage3 import Stage3ChunkBuilder
@@ -39,6 +39,14 @@ def _write_current_stage2c(result_dir: Path, rows):
         "verification_signature": verification_signature(rows),
     }), encoding="utf-8")
 
+
+
+
+def test_human_visual_recovery_rows_do_not_change_stage2c_signature_inputs():
+    normal = _verification_row(row_id=1)
+    recovery = {**_verification_row(row_id=2), "code": "HUMAN_VISUAL_EVIDENCE_RECOVERY", "route_id": "HUMAN_RECOVERY:g:vision:R1"}
+    selected = verification_rows_for_stage2c([normal, recovery], artifact_sweep_required=True)
+    assert selected == [normal]
 
 def test_stage2c_freshness_turns_stale_when_verification_changes(tmp_path: Path):
     result_dir = tmp_path / "book"

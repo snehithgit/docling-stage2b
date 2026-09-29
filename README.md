@@ -1,3 +1,12 @@
+## 2026.09.29.40.11Z — durable evidence-recovery Vision queue
+
+- `Recover evidence` now creates a real persisted `HUMAN_VISUAL_EVIDENCE_RECOVERY` Vision queue row instead of an invisible in-memory background task.
+- Recovery jobs are high-priority Vision work, survive restart, appear in Stage 2B queue/status counts, obey the shared Start/Stop/Auto interlock, and run before idle-pool Artifact work.
+- OnePlus/Pi5 provider selection, device serialization, cooldown, endpoint outage deferral and retry handling are inherited from the normal Stage 2B scheduler.
+- Recovery rows merge evidence into the existing authoritative human visual ledger entry and are excluded from Stage 2C source/signature inputs, preventing duplicate vision ledger entries or false Stage 2C staleness.
+- Vision Audit hides the internal recovery result row and continues to show the originating visual as the review subject.
+- The Verification page exposes queued/running/failed Evidence Recovery state under the Vision verifier card.
+
 ## 2026.09.29.40.11Y — evidence recovery navigation + reversible human visual review
 
 - Errors/diagnostics now deep-link directly to the affected Evidence Recovery queue/item.

@@ -268,6 +268,19 @@ function renderModes(status) {
       } else stage.textContent = `Active job #${worker.active_job_id} · ${worker.active_stage || "processing"}`;
     }
   }
+  const recovery = status.workloads?.recovery || {};
+  const recoveryStatus = document.getElementById("vision-recovery-status");
+  if (recoveryStatus) {
+    const pending = Number(recovery.pending || 0), processing = Number(recovery.processing || 0), failed = Number(recovery.failed || 0);
+    recoveryStatus.textContent = processing
+      ? `Evidence recovery: ${processing} running · ${pending} queued`
+      : pending
+        ? `Evidence recovery: ${pending} queued${interlockMode === "stopped" ? " · scheduler stopped" : ""}`
+        : failed
+          ? `Evidence recovery: ${failed} failed · use Retry failed or Recover evidence again`
+          : "Evidence recovery: no queued work.";
+  }
+
   const artifact = status.workloads?.artifact || {};
   const artifactDone = document.getElementById("artifact-done"); if (artifactDone) artifactDone.textContent = Number(artifact.completed || 0);
   const artifactPending = document.getElementById("artifact-pending"); if (artifactPending) artifactPending.textContent = Number(artifact.pending || 0);

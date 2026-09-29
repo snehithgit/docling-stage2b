@@ -30,7 +30,7 @@ from .events import EventBroker
 from .groq_quota import CloudQuotaPausedError, GroqQuotaGuard
 from .postprocess_store import PostprocessStore
 from .pipeline_state import verification_rows_for_stage2c, verification_signature
-from .stage2b_store import Stage2BStore
+from .stage2b_store import HUMAN_VISUAL_RECOVERY_CODE, Stage2BStore
 from .verifier_clients import GroqStructuredVerifier, GroqVisionVerifier, OpenAICompatibleVerifier
 from .stage2c import (
     ALL_DIAGRAM_CATEGORIES, DECORATIVE_IMAGE_CATEGORIES, TECHNICAL_DIAGRAM_CATEGORIES,
@@ -96,7 +96,7 @@ def _verification_row_contract(rows: list[dict[str, Any]]) -> list[dict[str, Any
         # FULL_TECHNICAL_VISUAL is an additive artifact sweep derived from the
         # immutable Docling source, not a route in routes.json. Do not compare it
         # with the normal machine-verification contract.
-        if str(row.get("code") or "") == "FULL_TECHNICAL_VISUAL" or bool(source.get("artifact_sweep")):
+        if str(row.get("code") or "") in {"FULL_TECHNICAL_VISUAL", HUMAN_VISUAL_RECOVERY_CODE} or bool(source.get("artifact_sweep")):
             continue
         contract.append({
             "route_id": str(row.get("route_id") or ""),
@@ -2634,10 +2634,9 @@ class Stage2BWorker:
         # generates missing human-review suggestions without rerunning Stage 2B.
         self._correction_suggestion_tasks: dict[int, asyncio.Task[Any]] = {}
         self.correction_suggestion_state: dict[int, dict[str, Any]] = {}
-        # Human Useful/Technical is authoritative classification. If the original
-        # verifier JSON was truncated/empty, recover evidence in the background
-        # without changing the human decision or replacing the original audit.
-        self._human_visual_recovery_tasks: dict[int, asyncio.Task[Any]] = {}
+        # Human Useful/Technical is authoritative classification. Evidence
+        # recovery is persisted as a normal Vision queue row so it survives
+        # restart and obeys the shared Text/Vision/Artifact interlock.
         self.human_visual_recovery_state: dict[int, dict[str, Any]] = {}
 
     async def oneplus_workload_status(self) -> dict[str, Any]:
@@ -2724,11 +2723,6 @@ class Stage2BWorker:
         if self._correction_suggestion_tasks:
             await asyncio.gather(*self._correction_suggestion_tasks.values(), return_exceptions=True)
         self._correction_suggestion_tasks.clear()
-        for task in self._human_visual_recovery_tasks.values():
-            task.cancel()
-        if self._human_visual_recovery_tasks:
-            await asyncio.gather(*self._human_visual_recovery_tasks.values(), return_exceptions=True)
-        self._human_visual_recovery_tasks.clear()
 
     def _auto_run(self, target: str) -> bool:
         config = self._config_getter()
@@ -4034,19 +4028,6 @@ class Stage2BWorker:
                             self.worker_state[target]["dispatch_provider"] = None
                             await self._release_provider(target, artifact_owner)
 
-                # Evidence-recovery jobs are background tasks rather than queue
-                # rows. Resume them only after the same physical-phone cooldown
-                # has expired; the provider lock still guarantees single-flight.
-                if target == "oneplus" and await self._oneplus_workload.can_start():
-                    if any(
-                        state.get("status") == "waiting_for_device"
-                        for state in self.human_visual_recovery_state.values()
-                    ):
-                        asyncio.create_task(
-                            self._resume_waiting_human_visual_recoveries(),
-                            name="resume-human-visual-after-oneplus-cooldown",
-                        )
-
                 await asyncio.sleep(self._config_getter().stage2b_poll_interval_seconds)
             except asyncio.CancelledError:
                 raise
@@ -4199,6 +4180,7 @@ class Stage2BWorker:
     ) -> None:
         config = self._config_getter()
         is_artifact_sweep = self._is_artifact_sweep_job(job)
+        is_human_recovery = self._is_human_visual_recovery_job(job)
         run_mode = run_mode_override or ("auto" if self._auto_run(target) else "manual")
         started = time.monotonic()
         claimed_here = bool(preclaimed)
@@ -4208,7 +4190,7 @@ class Stage2BWorker:
         # The same boundary also protects ordinary jobs immediately after
         # mark_processing().
         try:
-            if not is_artifact_sweep:
+            if not is_artifact_sweep and not is_human_recovery:
                 await self._store.arm_artifact_sweep_for_book(int(job["postprocess_job_id"]))
             if not preclaimed:
                 claimed = await self._store.mark_processing(int(job["id"]), run_mode)
@@ -4232,19 +4214,24 @@ class Stage2BWorker:
             # legacy/custom disable value.
             route_timeout = None if int(route_timeout_value) == 0 else route_timeout_value
             async with asyncio.timeout(route_timeout):
-                try:
-                    route_source = json.loads(job.get("source_json") or "{}")
-                except json.JSONDecodeError:
-                    route_source = {}
-                is_picture_route = str(route_source.get("type") or "") == "picture"
-                if target == "pi5" and not is_picture_route:
-                    job["_active_stage"] = "pi5_text"
-                    self.worker_state[target]["active_stage"] = "text check"
-                    request, result, verdict, model, endpoint = await self._run_pi5(job)
-                elif target == "pi5":
-                    request, result, verdict, model, endpoint = await self._run_oneplus(job, role_target="pi5")
+                if is_human_recovery:
+                    job["_active_stage"] = "human_evidence_recovery"
+                    self.worker_state[target]["active_stage"] = "evidence recovery"
+                    request, result, verdict, model, endpoint = await self._execute_human_visual_evidence_recovery_job(job)
                 else:
-                    request, result, verdict, model, endpoint = await self._run_oneplus(job)
+                    try:
+                        route_source = json.loads(job.get("source_json") or "{}")
+                    except json.JSONDecodeError:
+                        route_source = {}
+                    is_picture_route = str(route_source.get("type") or "") == "picture"
+                    if target == "pi5" and not is_picture_route:
+                        job["_active_stage"] = "pi5_text"
+                        self.worker_state[target]["active_stage"] = "text check"
+                        request, result, verdict, model, endpoint = await self._run_pi5(job)
+                    elif target == "pi5":
+                        request, result, verdict, model, endpoint = await self._run_oneplus(job, role_target="pi5")
+                    else:
+                        request, result, verdict, model, endpoint = await self._run_oneplus(job)
             seconds = time.monotonic() - started
             if is_artifact_sweep:
                 request["artifact_worker"] = target
@@ -4252,12 +4239,21 @@ class Stage2BWorker:
             artifact = await asyncio.to_thread(
                 self._write_result_artifact, job, request, result, verdict, seconds, model, endpoint
             )
-            # Publish readiness is a distinct lifecycle from verifier success.
-            # Record it before exposing this row as completed so UI consumers
-            # never assume a review ledger entry already exists.
-            await self._set_stage2c_publication_state(
-                job, "publishing", entry_id=self.stage2c_entry_id_for_job(job)
-            )
+            # Recovery rows merge directly into an existing authoritative human
+            # ledger entry. Normal verifier rows still publish a new Stage-2C
+            # entry through the standard lifecycle.
+            if is_human_recovery:
+                try:
+                    recovery_source = json.loads(job.get("source_json") or "{}")
+                except json.JSONDecodeError:
+                    recovery_source = {}
+                await self._set_stage2c_publication_state(
+                    job, "published", entry_id=str(recovery_source.get("entry_id") or "") or None
+                )
+            else:
+                await self._set_stage2c_publication_state(
+                    job, "publishing", entry_id=self.stage2c_entry_id_for_job(job)
+                )
             await self._store.mark_completed(
                 int(job["id"]), seconds, model, endpoint, verdict, request, result, artifact
             )
@@ -4272,17 +4268,18 @@ class Stage2BWorker:
                 self.worker_state[target]["artifact_jobs_completed"] = int(
                     self.worker_state[target].get("artifact_jobs_completed") or 0
                 ) + 1
-            try:
-                await self._publish_stage2c_entry(target, job, request, result, verdict, model)
-            except Exception as exc:
-                # Verification is authoritative Stage 2B output. A ledger write
-                # problem must never convert a completed verifier job into failure.
-                # Publication failure remains visible/repairable independently.
-                logger.exception("Stage 2C ledger update failed for %s job %s", target, job.get("id"))
-                self._notify_event(
-                    "stage2c_ledger_error",
-                    **(await self._notification_job_context(job, error=exc)),
-                )
+            if not is_human_recovery:
+                try:
+                    await self._publish_stage2c_entry(target, job, request, result, verdict, model)
+                except Exception as exc:
+                    # Verification is authoritative Stage 2B output. A ledger write
+                    # problem must never convert a completed verifier job into failure.
+                    # Publication failure remains visible/repairable independently.
+                    logger.exception("Stage 2C ledger update failed for %s job %s", target, job.get("id"))
+                    self._notify_event(
+                        "stage2c_ledger_error",
+                        **(await self._notification_job_context(job, error=exc)),
+                    )
             try:
                 self._checkpoint_path(job).unlink(missing_ok=True)
             except OSError:
@@ -5254,171 +5251,179 @@ class Stage2BWorker:
         return request, result, merged["verdict"], model, endpoint
 
 
-    async def _resume_waiting_human_visual_recoveries(self) -> None:
-        waiting = [
-            (int(job_id), str(state.get("entry_id") or ""))
-            for job_id, state in self.human_visual_recovery_state.items()
-            if state.get("status") == "waiting_for_device" and state.get("entry_id")
-        ]
-        for job_id, entry_id in waiting:
-            try:
-                await self.start_human_visual_evidence_recovery(job_id, entry_id)
-            except Exception:
-                logger.exception("Could not resume human visual evidence recovery for job %s", job_id)
-
     async def start_human_visual_evidence_recovery(self, verification_job_id: int, entry_id: str) -> dict[str, Any]:
-        job_id = int(verification_job_id)
-        running = self._human_visual_recovery_tasks.get(job_id)
-        if running and not running.done():
-            return dict(self.human_visual_recovery_state.get(job_id) or {"status": "running", "job_id": job_id})
-        job = await self._store.get_job(job_id)
-        if not job:
-            raise ValueError("Vision verification job not found")
-        try:
-            source = json.loads(job.get("source_json") or "{}")
-        except json.JSONDecodeError as exc:
-            raise ValueError("Vision verification source metadata is invalid") from exc
-        if str(source.get("type") or "") != "picture":
-            raise ValueError("Evidence recovery is only available for picture verification jobs")
+        """Persist one human evidence-recovery request in the Vision queue.
+
+        Unlike the older in-memory task, this row survives restart, is visible in
+        the normal Vision queue, and obeys Start/Stop/Auto plus the physical
+        provider interlock. Repeated clicks are single-flight while pending or
+        processing and re-arm a previous completed/failed recovery only when the
+        audit gate still requires evidence.
+        """
+        row = await self._store.enqueue_human_visual_recovery(int(verification_job_id), str(entry_id))
+        recovery_job_id = int(row.get("id") or 0)
         state = {
-            "status": "queued",
-            "job_id": job_id,
+            "status": str(row.get("status") or "pending"),
+            "job_id": recovery_job_id,
+            "origin_verification_job_id": int(verification_job_id),
             "entry_id": str(entry_id),
             "provider": self._selected_provider("oneplus"),
-            "started_at_epoch": None,
-            "completed_at_epoch": None,
-            "error": None,
+            "run_mode": row.get("run_mode") or "human_recovery",
+            "durable_queue": True,
+            "error": row.get("error_message"),
         }
-        self.human_visual_recovery_state[job_id] = state
-        task = asyncio.create_task(
-            self._run_human_visual_evidence_recovery(job, str(entry_id)),
-            name=f"human-visual-evidence-recovery-{job_id}",
-        )
-        self._human_visual_recovery_tasks[job_id] = task
+        self.human_visual_recovery_state[recovery_job_id] = dict(state)
         self._events.notify("human_visual_evidence_recovery_queued")
-        return dict(state)
+        return state
 
-    async def _run_human_visual_evidence_recovery(self, job: dict[str, Any], entry_id: str) -> None:
-        job_id = int(job["id"])
-        state = self.human_visual_recovery_state[job_id]
-        state["status"] = "running"
-        state["started_at_epoch"] = time.time()
+    @staticmethod
+    def _is_human_visual_recovery_job(job: dict[str, Any]) -> bool:
+        return str(job.get("code") or "") == HUMAN_VISUAL_RECOVERY_CODE
+
+    async def _execute_human_visual_evidence_recovery_job(
+        self, queue_job: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any], str, str | None, str]:
+        """Run one durable evidence-recovery queue row and merge its evidence.
+
+        The originating verifier row supplies the immutable source picture and
+        original route context. The queue row supplies retry/checkpoint identity
+        and is the only row whose pending/processing/completed lifecycle changes.
+        """
         config = self._config_getter()
-        provider = self._selected_provider("oneplus")
         try:
-            zip_path = Path(config.output_dir) / str(job["output_filename"])
-            doc = await self._document_for(zip_path)
-            source = json.loads(job.get("source_json") or "{}")
-            picture_index = int(source.get("index"))
-            image_bytes, mime, member = await asyncio.to_thread(
-                _read_picture, zip_path, doc, picture_index, source.get("artifact")
+            recovery_source = json.loads(queue_job.get("source_json") or "{}")
+        except json.JSONDecodeError as exc:
+            raise ValueError("Evidence recovery source metadata is invalid") from exc
+        origin_job_id = recovery_source.get("origin_verification_job_id")
+        entry_id = str(recovery_source.get("entry_id") or "")
+        if origin_job_id is None or not entry_id:
+            raise ValueError("Evidence recovery queue row is missing its origin or ledger entry")
+        origin = await self._store.get_job(int(origin_job_id))
+        if not origin:
+            raise ValueError("Originating vision verification job was not found")
+        try:
+            source = json.loads(origin.get("source_json") or "{}")
+        except json.JSONDecodeError as exc:
+            raise ValueError("Originating vision source metadata is invalid") from exc
+        if str(source.get("type") or "") != "picture":
+            raise ValueError("Evidence recovery is only available for picture verification jobs")
+
+        zip_path = Path(config.output_dir) / str(origin["output_filename"])
+        doc = await self._document_for(zip_path)
+        picture_index = int(source.get("index"))
+        image_bytes, mime, member = await asyncio.to_thread(
+            _read_picture, zip_path, doc, picture_index, source.get("artifact")
+        )
+        client = self._vision_client_for_role("oneplus", queue_job)
+        provider = str(getattr(client, "provider", self._selected_provider("oneplus")) or "oneplus")
+        endpoint = str(getattr(client, "endpoint", self._endpoint_for_provider(provider)))
+        if provider in self._endpoint_circuit and not await self._endpoint_provider_ready(provider):
+            raise ConnectionError(f"{provider} visual endpoint is unavailable")
+        model = await self._model_for(f"human-visual-recovery:{provider}", endpoint, client)
+
+        audit: dict[str, Any] = {
+            "schema": "marine-human-visual-evidence-recovery/v2",
+            "recovery_job_id": int(queue_job["id"]),
+            "verification_job_id": int(origin_job_id),
+            "entry_id": entry_id,
+            "provider": provider,
+            "model": model,
+            "artifact": member,
+            "started_at_epoch": time.time(),
+            "regions": [],
+        }
+        full_prompt = _vision_evidence_prompt(origin, "full image", human_accepted=True)
+        full_progress = self._prepare_oneplus_stream_region("human evidence full image", target="oneplus")
+        full, full_raw, full_attempts = await _inspect_vision_region(
+            client, image_bytes, full_prompt, mime, model, int(config.stage2b_oneplus_max_tokens),
+            first_token_timeout_seconds=config.stage2b_oneplus_first_token_timeout_seconds,
+            stream_idle_timeout_seconds=config.stage2b_oneplus_stream_idle_timeout_seconds,
+            on_progress=full_progress,
+        )
+        audit["regions"].append({
+            "region": "full image", "prompt": full_prompt, "parsed": full,
+            "raw_response": full_raw, "attempts": full_attempts,
+        })
+
+        crop_results: list[dict[str, Any]] = []
+        crop_audit: list[dict[str, Any]] = []
+        if bool(config.stage2b_vision_crops_enabled):
+            crops = await asyncio.to_thread(
+                _vision_crops, image_bytes, config.stage2b_vision_crop_overlap,
+                config.stage2b_vision_crop_upscale, config.stage2b_vision_max_crops,
             )
-            # Human accepted technical evidence follows the configured visual
-            # provider (normally OnePlus), never the text provider by accident.
-            client = self._vision_client_for_role("oneplus", job)
-            provider = str(getattr(client, "provider", provider) or provider)
-            state["provider"] = provider
-            endpoint = str(getattr(client, "endpoint", self._endpoint_for_provider(provider)))
-            if provider in self._endpoint_circuit and not await self._endpoint_provider_ready(provider):
-                raise ConnectionError(f"{provider} visual endpoint is unavailable")
-            model = await self._model_for(f"human-visual-recovery:{provider}", endpoint, client)
-            audit: dict[str, Any] = {
-                "schema": "marine-human-visual-evidence-recovery/v1",
-                "verification_job_id": job_id,
-                "entry_id": entry_id,
-                "provider": provider,
-                "model": model,
-                "artifact": member,
-                "started_at_epoch": state["started_at_epoch"],
-                "regions": [],
-            }
+            for label, crop_bytes, crop_mime in crops:
+                prompt = _vision_evidence_prompt(origin, label, human_accepted=True)
+                progress = self._prepare_oneplus_stream_region(f"human evidence {label}", target="oneplus")
+                parsed, raw, attempts = await _inspect_vision_region(
+                    client, crop_bytes, prompt, crop_mime, model, int(config.stage2b_oneplus_max_tokens),
+                    first_token_timeout_seconds=config.stage2b_oneplus_first_token_timeout_seconds,
+                    stream_idle_timeout_seconds=config.stage2b_oneplus_stream_idle_timeout_seconds,
+                    on_progress=progress,
+                )
+                item = {"region": label, "prompt": prompt, "parsed": parsed, "raw_response": raw, "attempts": attempts}
+                crop_audit.append(item)
+                audit["regions"].append(item)
+                if not parsed.get("parse_failed"):
+                    crop_results.append(parsed)
 
-            full_prompt = _vision_evidence_prompt(job, "full image", human_accepted=True)
-            full_progress = self._prepare_oneplus_stream_region("human evidence full image", target="oneplus")
-            full, full_raw, full_attempts = await _inspect_vision_region(
-                client, image_bytes, full_prompt, mime, model, int(config.stage2b_oneplus_max_tokens),
-                first_token_timeout_seconds=config.stage2b_oneplus_first_token_timeout_seconds,
-                stream_idle_timeout_seconds=config.stage2b_oneplus_stream_idle_timeout_seconds,
-                on_progress=full_progress,
+        merged = _merge_vision(full, crop_results)
+        merged["verdict"] = "TECHNICAL_USEFUL"
+        merged["human_classification_authority"] = True
+        merged["crop_coverage"] = "human_recovery_all_configured_regions" if crop_audit else "human_recovery_full_image_only"
+        merged["incomplete_crop_count"] = sum(1 for item in crop_audit if (item.get("parsed") or {}).get("parse_failed"))
+        merged["structural_image_evidence"] = await asyncio.to_thread(image_structure_evidence, image_bytes)
+        audit["merged"] = merged
+        audit["completed_at_epoch"] = time.time()
+
+        result_dir = Path(config.processed_dir) / Path(str(origin["result_dir"])).name
+        recovery_dir = result_dir / "verification"
+        recovery_dir.mkdir(parents=True, exist_ok=True)
+        audit_path = recovery_dir / f"human_visual_recovery_{int(origin_job_id)}_{int(time.time())}.json"
+        await asyncio.to_thread(_atomic_write_json_payload, audit_path, audit)
+        async with self._stage2c_ledger_lock:
+            updated = await asyncio.to_thread(
+                merge_human_visual_evidence, result_dir, entry_id, merged, str(audit_path.name)
             )
-            audit["regions"].append({
-                "region": "full image", "prompt": full_prompt, "parsed": full,
-                "raw_response": full_raw, "attempts": full_attempts,
-            })
 
-            crop_results: list[dict[str, Any]] = []
-            crop_audit: list[dict[str, Any]] = []
-            if bool(config.stage2b_vision_crops_enabled):
-                crops = await asyncio.to_thread(
-                    _vision_crops, image_bytes, config.stage2b_vision_crop_overlap,
-                    config.stage2b_vision_crop_upscale, config.stage2b_vision_max_crops,
-                )
-                # Human-accepted recovery is quality-first: inspect every
-                # configured region and merge all successfully recovered evidence.
-                for label, crop_bytes, crop_mime in crops:
-                    prompt = _vision_evidence_prompt(job, label, human_accepted=True)
-                    progress = self._prepare_oneplus_stream_region(f"human evidence {label}", target="oneplus")
-                    parsed, raw, attempts = await _inspect_vision_region(
-                        client, crop_bytes, prompt, crop_mime, model, int(config.stage2b_oneplus_max_tokens),
-                        first_token_timeout_seconds=config.stage2b_oneplus_first_token_timeout_seconds,
-                        stream_idle_timeout_seconds=config.stage2b_oneplus_stream_idle_timeout_seconds,
-                        on_progress=progress,
-                    )
-                    item = {"region": label, "prompt": prompt, "parsed": parsed, "raw_response": raw, "attempts": attempts}
-                    crop_audit.append(item)
-                    audit["regions"].append(item)
-                    if not parsed.get("parse_failed"):
-                        crop_results.append(parsed)
-
-            merged = _merge_vision(full, crop_results)
-            merged["verdict"] = "TECHNICAL_USEFUL"  # human classification authority
-            merged["human_classification_authority"] = True
-            merged["crop_coverage"] = "human_recovery_all_configured_regions" if crop_audit else "human_recovery_full_image_only"
-            merged["incomplete_crop_count"] = sum(1 for item in crop_audit if (item.get("parsed") or {}).get("parse_failed"))
-            merged["structural_image_evidence"] = await asyncio.to_thread(image_structure_evidence, image_bytes)
-            audit["merged"] = merged
-            audit["completed_at_epoch"] = time.time()
-
-            result_dir = Path(config.processed_dir) / Path(str(job["result_dir"])).name
-            recovery_dir = result_dir / "verification"
-            recovery_dir.mkdir(parents=True, exist_ok=True)
-            audit_path = recovery_dir / f"human_visual_recovery_{job_id}_{int(time.time())}.json"
-            await asyncio.to_thread(_atomic_write_json_payload, audit_path, audit)
-            async with self._stage2c_ledger_lock:
-                updated = await asyncio.to_thread(
-                    merge_human_visual_evidence, result_dir, entry_id, merged, str(audit_path.name)
-                )
-            state.update({
-                "status": "completed",
-                "completed_at_epoch": time.time(),
-                "evidence_items": len(updated.get("visible_text") or []) + len(updated.get("visible_objects") or []),
-                "audit_file": str(audit_path),
-            })
-            self._events.notify("human_visual_evidence_recovery_completed")
-        except asyncio.CancelledError:
-            state["status"] = "cancelled"
-            raise
-        except OnePlusCooldownActive as exc:
-            state.update({
-                "status": "waiting_for_device",
-                "completed_at_epoch": None,
-                "error": str(exc)[:1000],
-                "retry_after_seconds": int(exc.retry_after_seconds),
-            })
-            self._events.notify("human_visual_evidence_recovery_waiting")
-        except (httpx.TransportError, TimeoutError, ConnectionError) as exc:
-            state.update({
-                "status": "waiting_for_device",
-                "completed_at_epoch": None,
-                "error": f"{type(exc).__name__}: {exc}"[:1000],
-            })
-            if provider in self._endpoint_circuit and self._is_endpoint_connection_failure(exc):
-                await self._open_endpoint_circuit(provider, f"human visual evidence recovery: {type(exc).__name__}: {exc}")
-            self._events.notify("human_visual_evidence_recovery_waiting")
-        except Exception as exc:
-            state.update({"status": "failed", "completed_at_epoch": time.time(), "error": f"{type(exc).__name__}: {exc}"[:1000]})
-            logger.exception("Human visual evidence recovery failed for verification job %s", job_id)
-            self._events.notify("human_visual_evidence_recovery_failed")
+        request = {
+            "task": "human_visual_evidence_recovery",
+            "origin_verification_job_id": int(origin_job_id),
+            "entry_id": entry_id,
+            "artifact": member,
+            "page": source.get("page"),
+            "picture_index": picture_index,
+            "reason": origin.get("reason"),
+            "full_image_prompt": full_prompt,
+            "crop_settings": {
+                "enabled": bool(config.stage2b_vision_crops_enabled),
+                "overlap": config.stage2b_vision_crop_overlap,
+                "upscale": config.stage2b_vision_crop_upscale,
+                "max_crops": config.stage2b_vision_max_crops,
+            },
+            "vision_provider": provider,
+        }
+        result = {
+            "parsed": merged,
+            "full_image_raw_response": full_raw,
+            "full_image_attempts": full_attempts,
+            "crop_audit": crop_audit,
+            "vision_provider": provider,
+            "human_evidence_recovery_audit_file": str(audit_path.name),
+            "human_evidence_recovery_required": bool(updated.get("human_evidence_recovery_required")),
+        }
+        self.human_visual_recovery_state[int(queue_job["id"])] = {
+            "status": "completed",
+            "job_id": int(queue_job["id"]),
+            "origin_verification_job_id": int(origin_job_id),
+            "entry_id": entry_id,
+            "provider": provider,
+            "evidence_items": len(updated.get("visible_text") or []) + len(updated.get("visible_objects") or []),
+            "audit_file": str(audit_path),
+            "durable_queue": True,
+        }
+        self._events.notify("human_visual_evidence_recovery_completed")
+        return request, result, "TECHNICAL_USEFUL", model, endpoint
 
     async def text_audit_image(self, job_id: int) -> tuple[bytes, str, str]:
         """Reconstruct the exact persisted target crop used by a Text verifier job.
