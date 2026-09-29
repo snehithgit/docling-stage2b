@@ -77,7 +77,16 @@ async function refresh() {
   $("#pipeline-issues").innerHTML = issueRows.length ? issueRows.join('') : '<p class="empty-state">No current verifier or downstream stage failures.</p>';
 
   const auditRows = errors.audit || [];
-  $("#audit-issues").innerHTML = auditRows.length ? auditRows.map(row => `<article class="error-entry"><div><h3>${escapeHtml(row.book || 'Book')}</h3><p class="error-meta">${Number(row.review_required || 0)} decision(s) needed · ${escapeHtml(String(row.gate_status || 'waiting').replaceAll('_',' '))}</p><p class="error-message">Vision decisions: ${Number(row.vision_review_required || 0)} · Evidence recovery: ${Number(row.evidence_recovery_required || 0)}</p></div><a class="retry-button" href="/vision-audit?book=${encodeURIComponent(row.postprocess_job_id)}">Review</a></article>`).join('') : '<p class="empty-state">No human audit decisions are currently blocking the pipeline.</p>';
+  $("#audit-issues").innerHTML = auditRows.length ? auditRows.map(row => {
+    const recoveryCount = Number(row.evidence_recovery_required || 0);
+    const reviewCount = Number(row.vision_review_required || 0);
+    const firstRecovery = Array.isArray(row.evidence_recovery_entry_ids) ? row.evidence_recovery_entry_ids[0] : "";
+    const params = new URLSearchParams({book:String(row.postprocess_job_id || "")});
+    if (recoveryCount > 0) { params.set("view", "evidence_recovery"); if (firstRecovery) params.set("entry", firstRecovery); }
+    else if (reviewCount > 0) params.set("view", "human_review");
+    const label = recoveryCount > 0 ? "Recover evidence" : "Review";
+    return `<article class="error-entry"><div><h3>${escapeHtml(row.book || 'Book')}</h3><p class="error-meta">${Number(row.review_required || 0)} decision(s) needed · ${escapeHtml(String(row.gate_status || 'waiting').replaceAll('_',' '))}</p><p class="error-message">Vision decisions: ${reviewCount} · Evidence recovery: ${recoveryCount}</p></div><a class="retry-button" href="/vision-audit?${params.toString()}">${label}</a></article>`;
+  }).join('') : '<p class="empty-state">No human audit decisions are currently blocking the pipeline.</p>';
 }
 
 async function retry(button) {

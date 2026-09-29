@@ -69,7 +69,7 @@ from .retrieval import (
 from .rag_generation import build_portable_prompt, generate_grounded_answer, prepare_generation_sources, is_cross_book_query
 from .groq_quota import CloudQuotaPausedError
 from .stage2b import Stage2BWorker
-from .stage2c import STAGE2C_RULE_VERSION, apply_human_correction_to_entry, human_review_summary, upsert_ledger_entry, verifier_audit_summary, apply_human_visual_decision, set_audit_gate_bypass
+from .stage2c import STAGE2C_RULE_VERSION, apply_human_correction_to_entry, human_review_summary, upsert_ledger_entry, verifier_audit_summary, apply_human_visual_decision, waive_human_visual_evidence_recovery, undo_human_visual_decision, set_audit_gate_bypass
 from .visual_evidence import ensure_visual_evidence_fresh, normalize_visual_entry, search_visual_indices
 from .stage3 import STAGE3_RULE_VERSION, Stage3ChunkBuilder
 from .book_lifecycle_lock import BookLifecycleLocks
@@ -2404,6 +2404,8 @@ async def errors() -> dict:
                 "review_required": int(audit.get("review_required") or 0),
                 "vision_review_required": int(audit.get("vision_review_required") or 0),
                 "evidence_recovery_required": int(audit.get("vision_evidence_recovery_required") or 0),
+                "evidence_recovery_entry_ids": list(audit.get("vision_evidence_recovery_entry_ids") or []),
+                "vision_required_entry_ids": list(audit.get("vision_required_entry_ids") or []),
                 "gate_status": audit.get("gate_status"),
             })
 
@@ -3415,6 +3417,12 @@ async def stage2b_vision_audit(postprocess_job_id: int | None = None, limit: int
                     ),
                     "human_evidence_recovered_at_epoch": entry.get("human_evidence_recovered_at_epoch"),
                     "human_evidence_recovery_audit_file": entry.get("human_evidence_recovery_audit_file"),
+                    "human_evidence_recovery_waived": bool(entry.get("human_evidence_recovery_waived")),
+                    "has_visual_evidence": bool(
+                        (entry.get("visible_text") or [])
+                        or (entry.get("visible_objects") or [])
+                        or str(entry.get("generated_summary") or "").strip()
+                    ),
                 }
 
         crop_regions = [str(item.get("region")) for item in crop_audit if isinstance(item, dict) and item.get("region")]
@@ -3529,6 +3537,69 @@ async def vision_audit_human_decision(job_id: int, entry_id: str, request: Visua
         verifier_audit_summary, result_dir, text_require_human=bool(runtime.config.stage2c_require_human_review)
     )
     return {"ok": True, "entry": entry, "audit": audit, "evidence_recovery": recovery}
+
+
+@app.post("/api/postprocess/jobs/{job_id}/vision-audit/{entry_id}/recover")
+async def vision_audit_recover_evidence(job_id: int, entry_id: str) -> dict:
+    job = await runtime.postprocess_store.get_job(job_id)
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Post-process job not found.")
+    result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+    ledger = await asyncio.to_thread(_load_json_file, result_dir / "correction_ledger.json")
+    entry = next((e for e in (ledger.get("entries") or []) if str(e.get("entry_id") or "") == str(entry_id)), None)
+    if not isinstance(entry, dict):
+        raise HTTPException(status_code=404, detail="Vision audit entry was not found.")
+    if not bool(entry.get("human_evidence_recovery_required")):
+        raise HTTPException(status_code=409, detail="This visual does not currently require evidence recovery.")
+    if str(entry.get("human_visual_decision") or "") not in {"technical", "useful"}:
+        raise HTTPException(status_code=409, detail="Evidence recovery requires a human Useful/Technical decision.")
+    verification_job_id = entry.get("verification_job_id")
+    if verification_job_id is None:
+        raise HTTPException(status_code=409, detail="The originating vision verification job is unavailable.")
+    try:
+        recovery = await runtime.stage2b_worker.start_human_visual_evidence_recovery(
+            int(verification_job_id), str(entry.get("entry_id") or entry_id)
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    runtime.events.notify("human_visual_evidence_recovery_queued")
+    return {"ok": True, "evidence_recovery": recovery}
+
+
+@app.post("/api/postprocess/jobs/{job_id}/vision-audit/{entry_id}/waive-recovery")
+async def vision_audit_waive_recovery(job_id: int, entry_id: str) -> dict:
+    job = await runtime.postprocess_store.get_job(job_id)
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Post-process job not found.")
+    result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+    try:
+        async with runtime.stage2b_worker._stage2c_ledger_lock:
+            entry = await asyncio.to_thread(waive_human_visual_evidence_recovery, result_dir, entry_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    audit = await asyncio.to_thread(
+        verifier_audit_summary, result_dir, text_require_human=bool(runtime.config.stage2c_require_human_review)
+    )
+    runtime.events.notify("human_visual_evidence_recovery_waived")
+    return {"ok": True, "entry": entry, "audit": audit}
+
+
+@app.post("/api/postprocess/jobs/{job_id}/vision-audit/{entry_id}/undo")
+async def vision_audit_undo_decision(job_id: int, entry_id: str) -> dict:
+    job = await runtime.postprocess_store.get_job(job_id)
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Post-process job not found.")
+    result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+    try:
+        async with runtime.stage2b_worker._stage2c_ledger_lock:
+            entry = await asyncio.to_thread(undo_human_visual_decision, result_dir, entry_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    audit = await asyncio.to_thread(
+        verifier_audit_summary, result_dir, text_require_human=bool(runtime.config.stage2c_require_human_review)
+    )
+    runtime.events.notify("human_visual_decision_undone")
+    return {"ok": True, "entry": entry, "audit": audit}
 
 
 def _structural_evidence_refs(item: dict) -> list[str]:

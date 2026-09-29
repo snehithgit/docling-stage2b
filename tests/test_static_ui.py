@@ -336,6 +336,9 @@ def test_vision_verifier_audit_page_is_read_only_and_evidence_first():
     assert "Exact full-image prompt" in js
     assert "Raw crop response" in js
     assert "Recover evidence" in js
+    assert "Use existing evidence" in js
+    assert "Undo human decision" in js
+    assert "waive-recovery" in js
     assert "Evidence recovery" in html
     assert "human_evidence_recovery_required" in js
     assert "/rerun" not in js

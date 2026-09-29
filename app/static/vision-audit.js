@@ -5,6 +5,8 @@ let auditPage = 1;
 const auditParams = new URLSearchParams(location.search);
 const requestedJobId = auditParams.get("job");
 const requestedBookJob = auditParams.get("book");
+const requestedView = auditParams.get("view");
+const requestedEntry = auditParams.get("entry");
 let decisionInFlight = false;
 
 const $ = id => document.getElementById(id);
@@ -84,7 +86,9 @@ function renderJob(job) {
   const needsHuman = !failed && !humanDecision && ((c.verdict || job.verdict) === "UNCERTAIN" || downstream.status === "pending" || c.unresolved === true);
   const isSweep = job.code === "FULL_TECHNICAL_VISUAL" || /^AV\d{6}$/.test(String(job.route_id || ""));
   const entryId = esc(downstream.entry_id || `${job.generation}:vision:${job.route_id}`);
-  const humanBlock = humanDecision ? `<div class="vision-audit-human-state"><strong>Human decision: ${esc(humanDecision.replaceAll("_", " "))}</strong><span>Authoritative</span>${recoveryRequired && ["technical","useful"].includes(humanDecision) ? `<button class="mini-action audit-decision" data-job="${job.postprocess_job_id}" data-entry="${entryId}" data-decision="${esc(humanDecision)}">Recover evidence</button>` : ""}</div>` : "";
+  const hasVisualEvidence = !!downstream.has_visual_evidence;
+  const humanActions = humanDecision ? `<div class="document-actions">${recoveryRequired && ["technical","useful"].includes(humanDecision) ? `<button class="mini-action audit-recovery" data-job="${job.postprocess_job_id}" data-entry="${entryId}">Recover evidence</button>${hasVisualEvidence ? `<button class="mini-action audit-waive-recovery" data-job="${job.postprocess_job_id}" data-entry="${entryId}">Use existing evidence</button>` : ""}` : ""}<button class="mini-action audit-undo" data-job="${job.postprocess_job_id}" data-entry="${entryId}">Undo human decision</button></div>` : "";
+  const humanBlock = humanDecision ? `<div class="vision-audit-human-state"><strong>Human decision: ${esc(humanDecision.replaceAll("_", " "))}</strong><span>Authoritative</span>${downstream.human_evidence_recovery_waived ? `<span>Recovery waived by human review</span>` : ""}${humanActions}</div>` : "";
   const decisionButtons = needsHuman ? `<div class="vision-audit-primary-actions"><strong>Human decision required</strong><div class="document-actions">${isSweep ? `<button class="primary-button audit-decision" data-job="${job.postprocess_job_id}" data-entry="${entryId}" data-decision="technical">Technical</button><button class="secondary-button audit-decision" data-job="${job.postprocess_job_id}" data-entry="${entryId}" data-decision="decorative">Decorative</button>` : `<button class="primary-button audit-decision" data-job="${job.postprocess_job_id}" data-entry="${entryId}" data-decision="useful">Useful</button><button class="secondary-button audit-decision" data-job="${job.postprocess_job_id}" data-entry="${entryId}" data-decision="not_useful">Not useful</button>`}</div></div>` : humanBlock;
   const downstreamLabel = downstream.status === "applied" ? "Used as technical visual evidence" : downstream.status === "excluded" ? "Excluded from technical evidence" : downstream.status === "pending" ? "Held for human review" : "No downstream action recorded";
 
@@ -153,7 +157,8 @@ function applyFilters(resetPage=true) {
   const query = $("va-search").value.trim().toLowerCase();
   filteredJobs = auditJobs.filter(job => {
     if (requestedBookJob && String(job.postprocess_job_id) !== String(requestedBookJob)) return false;
-    if (requestedJobId && !book && !verdict && !query && String(job.id) !== String(requestedJobId)) return false;
+    if (requestedEntry && String(job.downstream?.entry_id || "") !== String(requestedEntry)) return false;
+    if (requestedJobId && !book && !verdict && !query && !requestedEntry && String(job.id) !== String(requestedJobId)) return false;
     if (book && job.book !== book) return false;
     if (verdict === "HUMAN_REVIEW" && !needsHumanReview(job)) return false;
     if (verdict === "HUMAN_REVIEWED" && !(job.downstream?.current_authoritative && job.downstream?.human_visual_decision)) return false;
@@ -220,6 +225,8 @@ async function loadAudit() {
       const scoped = auditJobs.find(job => String(job.postprocess_job_id) === String(requestedBookJob));
       if (scoped?.book) $("va-book").value = scoped.book;
     }
+    if (requestedView === "evidence_recovery") $("va-verdict").value = "EVIDENCE_RECOVERY";
+    if (requestedView === "human_review") $("va-verdict").value = "HUMAN_REVIEW";
     applyFilters(false);
     feedback("");
   } catch (error) {
@@ -228,6 +235,39 @@ async function loadAudit() {
     button.disabled = false;
   }
 }
+
+document.addEventListener("click", async event => {
+  const actionButton = event.target.closest(".audit-recovery, .audit-waive-recovery, .audit-undo");
+  if (!actionButton || decisionInFlight) return;
+  decisionInFlight = true;
+  document.querySelectorAll(".audit-decision, .audit-recovery, .audit-waive-recovery, .audit-undo").forEach(node => { node.disabled = true; });
+  try {
+    let action = "recover";
+    let message = "Starting evidence recovery…";
+    if (actionButton.classList.contains("audit-waive-recovery")) { action = "waive-recovery"; message = "Confirming existing evidence is sufficient…"; }
+    if (actionButton.classList.contains("audit-undo")) { action = "undo"; message = "Undoing human decision…"; }
+    feedback(message);
+    const response = await fetch(`/api/postprocess/jobs/${encodeURIComponent(actionButton.dataset.job)}/vision-audit/${encodeURIComponent(actionButton.dataset.entry)}/${action}`, {method:"POST"});
+    if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
+    const data = await response.json();
+    if (action === "recover") {
+      const recovery = data.evidence_recovery || {};
+      feedback(["queued","running"].includes(recovery.status) ? "Evidence recovery queued. Your human classification remains unchanged." : "Evidence recovery request saved.", "completed");
+    } else if (action === "waive-recovery") {
+      feedback("Recovery requirement cleared. Existing evidence will be used as the human-approved visual evidence.", "completed");
+    } else {
+      feedback("Human decision undone. This visual is back in the review queue.", "completed");
+    }
+    await loadAudit();
+    window.scrollTo({top:0, behavior:"smooth"});
+  } catch (error) {
+    feedback(`Could not complete action: ${error.message}`, "warning");
+  } finally {
+    decisionInFlight = false;
+    renderPage();
+  }
+});
+
 
 document.addEventListener("click", async event => {
   const button = event.target.closest(".audit-decision");

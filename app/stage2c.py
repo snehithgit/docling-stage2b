@@ -1423,9 +1423,14 @@ def verifier_audit_summary(result_dir: Path, *, text_require_human: bool = False
         e for e in visual_subjects
         if str(e.get("human_visual_decision") or "") in {"technical", "useful"}
         and (
-            bool(e.get("human_evidence_recovery_required"))
-            or bool(e.get("verification_parse_failed"))
-            or not _entry_has_visual_evidence(e)
+            not _entry_has_visual_evidence(e)
+            or (
+                not bool(e.get("human_evidence_recovery_waived"))
+                and (
+                    bool(e.get("human_evidence_recovery_required"))
+                    or bool(e.get("verification_parse_failed"))
+                )
+            )
         )
     ]
     gate = audit_gate_state(result_dir)
@@ -1537,6 +1542,67 @@ def merge_human_visual_evidence(
     rebuild_chunk_overlays(result_dir, entries)
     return entry
 
+def waive_human_visual_evidence_recovery(result_dir: Path, entry_id: str) -> dict[str, Any]:
+    """Human-confirm that the already-saved visual evidence is sufficient.
+
+    A waiver can never make an evidence-empty Useful/Technical visual eligible.
+    It only suppresses recovery that was requested because parsing/crop coverage
+    was incomplete even though usable evidence is already present.
+    """
+    path = result_dir / "correction_ledger.json"
+    try:
+        ledger = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    except (OSError, json.JSONDecodeError, TypeError) as exc:
+        raise ValueError("Correction ledger is unavailable") from exc
+    entries = list(ledger.get("entries") or [])
+    entry = next((e for e in entries if str(e.get("entry_id") or "") == str(entry_id)), None)
+    if not entry or entry.get("entry_type") != "vision_enrichment":
+        raise ValueError("Vision audit entry was not found")
+    decision = str(entry.get("human_visual_decision") or "").lower()
+    if not entry.get("human_verified") or decision not in {"technical", "useful"}:
+        raise ValueError("Recovery can only be waived for an authoritative Useful/Technical decision")
+    if not _entry_has_visual_evidence(entry):
+        raise ValueError("Recovery cannot be skipped because this visual has no usable evidence")
+    entry["human_evidence_recovery_required"] = False
+    entry["human_evidence_recovery_waived"] = True
+    entry["human_evidence_recovery_waived_at_epoch"] = time.time()
+    entry["human_evidence_recovery_unresolved"] = False
+    ledger["entries"] = entries
+    ledger["updated_at_epoch"] = time.time()
+    _atomic_json(path, ledger)
+    rebuild_chunk_overlays(result_dir, entries)
+    return entry
+
+
+def undo_human_visual_decision(result_dir: Path, entry_id: str) -> dict[str, Any]:
+    """Re-open one visual for human classification without rerunning inference."""
+    path = result_dir / "correction_ledger.json"
+    try:
+        ledger = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    except (OSError, json.JSONDecodeError, TypeError) as exc:
+        raise ValueError("Correction ledger is unavailable") from exc
+    entries = list(ledger.get("entries") or [])
+    entry = next((e for e in entries if str(e.get("entry_id") or "") == str(entry_id)), None)
+    if not entry or entry.get("entry_type") != "vision_enrichment":
+        raise ValueError("Vision audit entry was not found")
+    if not entry.get("human_verified") or str(entry.get("human_visual_decision") or "") not in {"technical", "decorative", "useful", "not_useful"}:
+        raise ValueError("This visual does not have a human decision to undo")
+    entry["human_verified"] = False
+    entry["human_visual_decision"] = None
+    entry["human_visual_undone_at_epoch"] = time.time()
+    entry["status"] = "pending"
+    entry["status_reason"] = "HUMAN_VISUAL_DECISION_UNDONE"
+    entry["unresolved"] = True
+    entry["human_evidence_recovery_required"] = False
+    entry.pop("human_evidence_recovery_waived", None)
+    entry.pop("human_evidence_recovery_waived_at_epoch", None)
+    ledger["entries"] = entries
+    ledger["updated_at_epoch"] = time.time()
+    _atomic_json(path, ledger)
+    rebuild_chunk_overlays(result_dir, entries)
+    return entry
+
+
 def apply_human_visual_decision(result_dir: Path, entry_id: str, decision: str) -> dict[str, Any]:
     decision = str(decision or "").strip().lower()
     allowed = {"technical", "decorative", "useful", "not_useful"}
@@ -1561,6 +1627,8 @@ def apply_human_visual_decision(result_dir: Path, entry_id: str, decision: str) 
     entry["human_visual_decided_at_epoch"] = time.time()
     entry["human_visual_previous_status"] = entry.get("status")
     entry["human_visual_previous_status_reason"] = entry.get("status_reason")
+    entry.pop("human_evidence_recovery_waived", None)
+    entry.pop("human_evidence_recovery_waived_at_epoch", None)
     if decision in {"technical", "useful"}:
         entry["status"] = "applied"
         entry["status_reason"] = "HUMAN_VISUAL_ACCEPTED"

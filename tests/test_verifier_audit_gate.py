@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from app.stage2c import apply_human_visual_decision, merge_human_visual_evidence, set_audit_gate_bypass, verifier_audit_summary
+from app.stage2c import apply_human_visual_decision, merge_human_visual_evidence, set_audit_gate_bypass, verifier_audit_summary, waive_human_visual_evidence_recovery, undo_human_visual_decision
 
 
 def _ledger(path: Path, entries):
@@ -140,3 +140,56 @@ def test_visual_review_summary_human_decision_wins_duplicate_pending_route(tmp_p
     assert summary["vision_human_reviewed"] == 1
     assert summary["vision_review_required"] == 0
     assert summary["blocking_review_required"] == 0
+
+
+def test_human_can_waive_recovery_when_existing_evidence_is_usable(tmp_path: Path):
+    d = tmp_path / "book"
+    _ledger(d, [{
+        "entry_id":"g:vision:R4", "entry_type":"vision_enrichment", "status":"applied",
+        "status_reason":"HUMAN_VISUAL_ACCEPTED", "verification_verdict":"UNCERTAIN",
+        "human_verified":True, "human_visual_decision":"useful", "unresolved":False,
+        "visible_text":["24V DC"], "visible_objects":[], "generated_summary":"Power supply diagram.",
+        "verification_parse_failed": True, "human_evidence_recovery_required": True,
+    }])
+    assert verifier_audit_summary(d)["vision_evidence_recovery_required"] == 1
+    updated = waive_human_visual_evidence_recovery(d, "g:vision:R4")
+    assert updated["human_evidence_recovery_required"] is False
+    assert updated["human_evidence_recovery_waived"] is True
+    assert updated["human_visual_decision"] == "useful"
+    summary = verifier_audit_summary(d)
+    assert summary["vision_evidence_recovery_required"] == 0
+    assert summary["blocking_review_required"] == 0
+
+
+def test_human_cannot_waive_recovery_for_evidence_empty_visual(tmp_path: Path):
+    d = tmp_path / "book"
+    _ledger(d, [{
+        "entry_id":"g:vision:R5", "entry_type":"vision_enrichment", "status":"applied",
+        "status_reason":"HUMAN_VISUAL_ACCEPTED", "verification_verdict":"UNCERTAIN",
+        "human_verified":True, "human_visual_decision":"useful", "unresolved":False,
+        "visible_text":[], "visible_objects":[], "generated_summary":"",
+        "human_evidence_recovery_required": True,
+    }])
+    import pytest
+    with pytest.raises(ValueError, match="no usable evidence"):
+        waive_human_visual_evidence_recovery(d, "g:vision:R5")
+    assert verifier_audit_summary(d)["vision_evidence_recovery_required"] == 1
+
+
+def test_undo_human_visual_decision_reopens_review_without_rerun(tmp_path: Path):
+    d = tmp_path / "book"
+    _ledger(d, [{
+        "entry_id":"g:vision:R6", "entry_type":"vision_enrichment", "status":"applied",
+        "status_reason":"HUMAN_VISUAL_ACCEPTED", "verification_verdict":"UNCERTAIN",
+        "human_verified":True, "human_visual_decision":"useful", "unresolved":False,
+        "visible_text":["PUMP"], "visible_objects":[], "generated_summary":"Pump diagram.",
+        "human_evidence_recovery_required": True,
+    }])
+    updated = undo_human_visual_decision(d, "g:vision:R6")
+    assert updated["human_verified"] is False
+    assert updated["human_visual_decision"] is None
+    assert updated["status"] == "pending"
+    assert updated["unresolved"] is True
+    summary = verifier_audit_summary(d)
+    assert summary["vision_review_required"] == 1
+    assert summary["vision_evidence_recovery_required"] == 0

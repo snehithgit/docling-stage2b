@@ -1,3 +1,12 @@
+## 2026.09.29.40.11Y — evidence recovery navigation + reversible human visual review
+
+- Errors/diagnostics now deep-link directly to the affected Evidence Recovery queue/item.
+- Evidence recovery has its own POST action instead of replaying the human classification decision.
+- Human reviewers can choose **Use existing evidence** when a Useful/Technical visual already has usable evidence despite a partial/parse warning.
+- Evidence-empty Useful/Technical visuals cannot waive recovery; they remain fail-closed.
+- **Undo human decision** reopens the visual for review without rerunning the model, allowing reclassification as Decorative/Not useful.
+- Human recovery waivers are durable and auditable; they do not erase the underlying verifier parse-failure metadata.
+
 ## 2026.09.29.40.11X — structural-review pipeline monotonicity
 
 - Stage 2B generation identity now excludes mutable Stage 2A human structural-review metadata.
