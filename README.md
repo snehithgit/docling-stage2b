@@ -1,3 +1,13 @@
+## 2026.09.29.40.11AA — stale visual-origin recovery compatibility
+
+- Fixes `Recover evidence` returning `Vision verification job not found` when a human-approved visual still references an older Stage 2B verifier row that has since become historical (`is_current=0`).
+- Recovery now resolves that historical row to the current verifier route for the same physical Docling picture before creating the durable `HUMAN_VISUAL_EVIDENCE_RECOVERY` Vision job.
+- Matching is conservative: same post-process book + picture source index, then prefers the same route, same artifact/normal lane, same logical target, and a completed row.
+- The recovery audit records both the originally requested verifier row id and the resolved current origin id, so the compatibility remap remains traceable.
+- If no current route for the same picture exists, recovery still fails closed with an explicit stale-route error rather than using unrelated visual evidence.
+- No Stage 1/2A/normal 2B rerun is required solely for this fix.
+- Regression validation: **619 passed, 1 skipped** before final package stamping; packaged-archive validation is recorded in the AA release report.
+
 ## 2026.09.29.40.11Z — durable evidence-recovery Vision queue
 
 - `Recover evidence` now creates a real persisted `HUMAN_VISUAL_EVIDENCE_RECOVERY` Vision queue row instead of an invisible in-memory background task.

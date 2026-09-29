@@ -5262,10 +5262,14 @@ class Stage2BWorker:
         """
         row = await self._store.enqueue_human_visual_recovery(int(verification_job_id), str(entry_id))
         recovery_job_id = int(row.get("id") or 0)
+        recovery_source = row.get("source") if isinstance(row.get("source"), dict) else {}
+        resolved_origin_id = int(recovery_source.get("origin_verification_job_id") or verification_job_id)
         state = {
             "status": str(row.get("status") or "pending"),
             "job_id": recovery_job_id,
-            "origin_verification_job_id": int(verification_job_id),
+            "origin_verification_job_id": resolved_origin_id,
+            "requested_origin_verification_job_id": int(verification_job_id),
+            "origin_remapped": resolved_origin_id != int(verification_job_id),
             "entry_id": str(entry_id),
             "provider": self._selected_provider("oneplus"),
             "run_mode": row.get("run_mode") or "human_recovery",

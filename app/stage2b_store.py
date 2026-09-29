@@ -281,18 +281,71 @@ class Stage2BStore:
         if not entry_id:
             raise ValueError("Evidence recovery entry id is required")
         with self._connection() as conn:
-            origin = conn.execute(
-                "SELECT * FROM verification_jobs WHERE id=? AND is_current=1",
+            # Human-reviewed ledger entries can legitimately outlive the exact
+            # Stage-2B row that originally published them.  In older releases a
+            # harmless generation rollover (for example after structural review)
+            # could mark that row non-current while preserving the authoritative
+            # human decision in correction_ledger.json.  Recovery must therefore
+            # resolve the stale row id back to the current route for the same
+            # physical picture rather than rejecting the review entry outright.
+            requested_origin = conn.execute(
+                "SELECT * FROM verification_jobs WHERE id=?",
                 (int(verification_job_id),),
             ).fetchone()
-            if origin is None:
+            if requested_origin is None:
                 raise ValueError("Vision verification job not found")
             try:
-                source = json.loads(origin["source_json"] or "{}")
+                requested_source = json.loads(requested_origin["source_json"] or "{}")
             except (json.JSONDecodeError, TypeError):
-                source = {}
-            if str(source.get("type") or "") != "picture":
+                requested_source = {}
+            if str(requested_source.get("type") or "") != "picture":
                 raise ValueError("Evidence recovery is only available for picture verification jobs")
+
+            origin = requested_origin
+            if int(requested_origin["is_current"] or 0) != 1:
+                try:
+                    requested_index = int(requested_source.get("index"))
+                except (TypeError, ValueError):
+                    requested_index = -1
+                requested_sweep = bool(requested_source.get("artifact_sweep"))
+                requested_route = str(requested_origin["route_id"] or "")
+                requested_target = str(requested_origin["target"] or "")
+                candidates = conn.execute(
+                    """SELECT * FROM verification_jobs
+                       WHERE postprocess_job_id=? AND is_current=1
+                         AND COALESCE(code,'')<>?
+                       ORDER BY id DESC""",
+                    (int(requested_origin["postprocess_job_id"]), HUMAN_VISUAL_RECOVERY_CODE),
+                ).fetchall()
+                ranked: list[tuple[int, int, sqlite3.Row, dict[str, Any]]] = []
+                for candidate in candidates:
+                    try:
+                        candidate_source = json.loads(candidate["source_json"] or "{}")
+                        candidate_index = int(candidate_source.get("index"))
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        continue
+                    if str(candidate_source.get("type") or "") != "picture" or candidate_index != requested_index:
+                        continue
+                    score = 0
+                    if str(candidate["route_id"] or "") == requested_route:
+                        score += 100
+                    if bool(candidate_source.get("artifact_sweep")) == requested_sweep:
+                        score += 40
+                    if str(candidate["target"] or "") == requested_target:
+                        score += 20
+                    if str(candidate["status"] or "") == "completed":
+                        score += 10
+                    ranked.append((score, int(candidate["id"]), candidate, candidate_source))
+                if not ranked:
+                    raise ValueError(
+                        "The original vision verification row is historical and no current verification route "
+                        "for the same picture could be found. Refresh/rebuild the book verification state before recovery."
+                    )
+                ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+                origin = ranked[0][2]
+                source = ranked[0][3]
+            else:
+                source = requested_source
 
             generation = str(origin["generation"] or "")
             route_id = f"HUMAN_RECOVERY:{entry_id}"
@@ -301,6 +354,7 @@ class Stage2BStore:
             recovery_source.update({
                 "human_evidence_recovery": True,
                 "origin_verification_job_id": int(origin["id"]),
+                "requested_origin_verification_job_id": int(verification_job_id),
                 "entry_id": entry_id,
             })
             source_json = json.dumps(recovery_source, ensure_ascii=False, sort_keys=True)

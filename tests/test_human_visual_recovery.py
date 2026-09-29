@@ -137,3 +137,36 @@ async def test_human_visual_recovery_is_durable_vision_job_and_merges_all_crops(
 
 async def _true():
     return True
+
+@pytest.mark.asyncio
+async def test_human_visual_recovery_remaps_historical_origin_to_current_picture_route(tmp_path):
+    store = Stage2BStore(str(tmp_path / "jobs.db"))
+    await store.initialize()
+    result_dir = "book__job1"
+
+    route = {
+        "route_id": "R1", "target": "oneplus", "code": "VISION_REVIEW",
+        "priority": "medium", "review_priority_score": 10,
+        "source": {"type": "picture", "index": 4, "page": 8, "artifact": "img.png"},
+        "action": "inspect_image", "reason": "missing_or_low_picture_classification_confidence",
+    }
+    await store.sync_routes(1, 10, "old-generation", [route], result_dir, "book.zip")
+    old = (await store.list_book_jobs_raw(1))[0]
+    old_id = int(old["id"])
+
+    # Simulate the historical generation rollover that older releases could
+    # trigger after human structural review.  The human ledger still points at
+    # old_id, while a new current row represents the same physical picture.
+    await store.sync_routes(1, 10, "current-generation", [route], result_dir, "book.zip")
+    rows = await store.list_book_jobs_raw(1)
+    current = next(row for row in rows if int(row.get("is_current") or 0) == 1)
+    current_id = int(current["id"])
+    assert current_id != old_id
+
+    recovery = await store.enqueue_human_visual_recovery(old_id, "old-generation:vision:R1")
+    source = recovery["source"]
+    assert source["origin_verification_job_id"] == current_id
+    assert source["requested_origin_verification_job_id"] == old_id
+    assert recovery["generation"] == "current-generation"
+    assert recovery["status"] == "pending"
+    assert recovery["is_current"] == 1
