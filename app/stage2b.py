@@ -50,6 +50,92 @@ def _atomic_write_json_payload(path: Path, payload: dict[str, Any]) -> None:
     tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     tmp.replace(path)
 
+
+def _verification_route_contract(routes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return only fields that define Stage-2B machine verification work.
+
+    ``routes.json`` also stores mutable Stage-2A human-review state. Accepting or
+    dismissing a structural finding must never create a fresh verification
+    generation. The contract therefore contains only the fields consumed by
+    Stage2BStore / verifier prompts for Pi5 and OnePlus routes.
+    """
+    contract: list[dict[str, Any]] = []
+    for route in routes or []:
+        if not isinstance(route, dict):
+            continue
+        target = str(route.get("target") or "")
+        if target not in {"pi5", "oneplus"}:
+            continue
+        contract.append({
+            "route_id": str(route.get("route_id") or ""),
+            "target": target,
+            "code": route.get("code"),
+            "priority": route.get("priority"),
+            "review_priority_score": int(route.get("review_priority_score") or 0),
+            "source": route.get("source") or {},
+            "action": route.get("action"),
+            "reason": route.get("reason"),
+        })
+    contract.sort(key=lambda item: (str(item.get("target") or ""), str(item.get("route_id") or "")))
+    return contract
+
+
+def _verification_row_contract(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Reconstruct the current normal Stage-2B contract from persisted rows."""
+    contract: list[dict[str, Any]] = []
+    for row in rows or []:
+        if not isinstance(row, dict) or not bool(row.get("is_current")):
+            continue
+        target = str(row.get("target") or "")
+        if target not in {"pi5", "oneplus"}:
+            continue
+        try:
+            source = json.loads(row.get("source_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            source = {}
+        # FULL_TECHNICAL_VISUAL is an additive artifact sweep derived from the
+        # immutable Docling source, not a route in routes.json. Do not compare it
+        # with the normal machine-verification contract.
+        if str(row.get("code") or "") == "FULL_TECHNICAL_VISUAL" or bool(source.get("artifact_sweep")):
+            continue
+        contract.append({
+            "route_id": str(row.get("route_id") or ""),
+            "target": target,
+            "code": row.get("code"),
+            "priority": row.get("priority"),
+            "review_priority_score": int(row.get("priority_score") or 0),
+            "source": source,
+            "action": row.get("action"),
+            "reason": row.get("reason"),
+        })
+    contract.sort(key=lambda item: (str(item.get("target") or ""), str(item.get("route_id") or "")))
+    return contract
+
+
+def _verification_contract_generation(manifest_sha: str, routes: list[dict[str, Any]]) -> str:
+    """Stable generation for immutable source + machine-verification contract."""
+    canonical = json.dumps(
+        _verification_route_contract(routes), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(str(manifest_sha or "").encode("utf-8") + b"\0" + canonical).hexdigest()
+
+
+def _compatible_current_generation(rows: list[dict[str, Any]], routes: list[dict[str, Any]]) -> str | None:
+    """Preserve a W-or-older generation when its live work contract is unchanged.
+
+    This is required for a non-destructive upgrade: changing the generation
+    algorithm itself must not make already-completed Stage 2B work historical.
+    The postprocess job is bound to one immutable converted source, so matching
+    current machine routes are sufficient to retain that generation.
+    """
+    current = [row for row in (rows or []) if isinstance(row, dict) and bool(row.get("is_current"))]
+    generations = {str(row.get("generation") or "") for row in current if str(row.get("generation") or "")}
+    if len(generations) != 1:
+        return None
+    if _verification_row_contract(current) != _verification_route_contract(routes):
+        return None
+    return next(iter(generations))
+
 TEXT_TRIAGE_SCHEMA = {
     "type": "object",
     "properties": {
@@ -3621,7 +3707,6 @@ class Stage2BWorker:
                     except (OSError, json.JSONDecodeError, TypeError):
                         manifest = {}
                         manifest_sha = ""
-                generation = hashlib.sha256(manifest_sha.encode("utf-8") + b"\0" + payload_bytes).hexdigest()
                 try:
                     payload = json.loads(payload_bytes)
                 except json.JSONDecodeError:
@@ -3629,6 +3714,20 @@ class Stage2BWorker:
                     # the same coarse filesystem timestamp must be retried.
                     continue
                 routes = [route for route in payload.get("routes") or [] if route.get("target") in {"pi5", "oneplus"}]
+                # Human structural review mutates routes.json (decision, note,
+                # reviewed evidence, timestamps) but does not alter Pi5/OnePlus
+                # verification work. Use only the machine-verification contract
+                # for new generations. On upgrade from W or older, retain the
+                # live generation when its persisted normal rows still match so
+                # completed Text/Vision/Artifact work is not replayed merely
+                # because the generation algorithm improved.
+                existing_rows = (
+                    await self._store.list_book_jobs_raw(postprocess_job_id)
+                    if hasattr(self._store, "list_book_jobs_raw") else []
+                )
+                generation = _compatible_current_generation(existing_rows, routes)
+                if not generation:
+                    generation = _verification_contract_generation(manifest_sha, routes)
                 created_total += await self._store.sync_routes(
                     postprocess_job_id,
                     int(job["conversion_job_id"]),

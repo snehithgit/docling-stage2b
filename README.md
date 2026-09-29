@@ -1,3 +1,12 @@
+## 2026.09.29.40.11X — structural-review pipeline monotonicity
+
+- Stage 2B generation identity now excludes mutable Stage 2A human structural-review metadata.
+- Accepting/dismissing/reviewing structural findings no longer replays completed Text/Vision/Artifact verification when machine verification routes are unchanged.
+- Upgrade compatibility preserves the current W-or-older verification generation when its persisted machine-route contract still matches the current Stage 2A machine routes.
+- Genuine Pi5/OnePlus route/source/reason changes still create a new Stage 2B generation.
+- Once the last structural blocker is resolved and Stage 2C is current, the existing strict pipeline sequencer proceeds directly to Stage 3.
+- Full details: `docs/RELEASE_VALIDATION_2026.09.29.40.11X.md`.
+
 ## 2026.09.28.40.11W — Text / Vision / Artifact worker interlock
 
 - Replaces independent Verification-page Start/Stop/Auto controls with one **Text · Vision · Artifact** scheduler interlock.

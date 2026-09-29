@@ -16,6 +16,8 @@ from app.config import AppConfig
 
 from app.stage2b import (
     _inspect_pi5_text,
+    _verification_contract_generation,
+    _compatible_current_generation,
     _inspect_vision_region,
     _json_from_model_response,
     _merge_vision,
@@ -806,6 +808,67 @@ class Stage2BMigrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("stage2c_entry_id", cols)
             self.assertIn("stage2c_entry_error", cols)
 
+class Stage2BGenerationIdentityTests(unittest.TestCase):
+    def test_human_structural_review_metadata_does_not_change_machine_generation(self):
+        machine = route("R1", "pi5")
+        pending = {
+            "route_id": "H1", "target": "human", "code": "READING_ORDER_ANOMALY",
+            "status": "pending", "source": {"type": "diagnostic_group", "count": 1},
+        }
+        reviewed = dict(pending)
+        reviewed.update({
+            "status": "accepted", "human_decision": "accepted",
+            "human_reviewed_pages": [2], "human_decided_at_epoch": 12345.0,
+            "human_decision_note": "checked source page",
+        })
+        first = _verification_contract_generation("source-sha", [machine, pending])
+        second = _verification_contract_generation("source-sha", [machine, reviewed])
+        self.assertEqual(first, second)
+
+    def test_machine_route_change_does_change_machine_generation(self):
+        first_route = route("R1", "pi5")
+        changed = dict(first_route)
+        changed["source"] = {**first_route["source"], "page": 9}
+        self.assertNotEqual(
+            _verification_contract_generation("source-sha", [first_route]),
+            _verification_contract_generation("source-sha", [changed]),
+        )
+
+    def test_upgrade_preserves_existing_generation_when_live_contract_matches(self):
+        machine = route("R1", "pi5")
+        row = {
+            "is_current": 1, "generation": "legacy-w-generation",
+            "route_id": machine["route_id"], "target": machine["target"],
+            "code": machine["code"], "priority": machine["priority"],
+            "priority_score": 0,
+            "source_json": json.dumps(machine["source"], sort_keys=True),
+            "action": machine["action"], "reason": machine["reason"],
+        }
+        self.assertEqual(_compatible_current_generation([row], [machine]), "legacy-w-generation")
+        reviewed_human = {
+            "route_id": "H1", "target": "human", "code": "TABLE_GRID_ANOMALY",
+            "status": "dismissed", "human_decision": "dismissed",
+        }
+        self.assertEqual(
+            _compatible_current_generation([row], [machine, reviewed_human]),
+            "legacy-w-generation",
+        )
+
+    def test_upgrade_does_not_preserve_generation_when_machine_contract_changed(self):
+        machine = route("R1", "pi5")
+        row = {
+            "is_current": 1, "generation": "legacy-w-generation",
+            "route_id": machine["route_id"], "target": machine["target"],
+            "code": machine["code"], "priority": machine["priority"],
+            "priority_score": 0,
+            "source_json": json.dumps(machine["source"], sort_keys=True),
+            "action": machine["action"], "reason": machine["reason"],
+        }
+        changed = dict(machine)
+        changed["reason"] = "new verification reason"
+        self.assertIsNone(_compatible_current_generation([row], [changed]))
+
+
 class Stage2BRouteSyncCacheTests(unittest.IsolatedAsyncioTestCase):
     async def test_unchanged_route_files_do_not_resync_database(self):
         from types import SimpleNamespace
@@ -845,6 +908,62 @@ class Stage2BRouteSyncCacheTests(unittest.IsolatedAsyncioTestCase):
             routes.write_text(json.dumps({"routes": [route("R1", "pi5"), route("R2", "oneplus")]}), encoding="utf-8")
             self.assertEqual(await worker.sync_routes_once(), 1)
             self.assertEqual(store.calls, 2)
+
+
+class Stage2BStructuralReviewMonotonicityTests(unittest.IsolatedAsyncioTestCase):
+    async def test_resolving_human_structural_route_does_not_create_new_stage2b_generation(self):
+        from app.stage2b import Stage2BWorker
+
+        class FakePostprocessStore:
+            async def list_jobs(self, limit=1000):
+                return [{
+                    "id": 17, "conversion_job_id": 170, "status": "completed",
+                    "result_dir": "book__job17", "output_filename": "book.zip",
+                }]
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            processed = root / "processed"
+            result = processed / "book__job17"
+            result.mkdir(parents=True)
+            machine = route("R1", "pi5")
+            human = {
+                "route_id": "H1", "target": "human", "code": "READING_ORDER_ANOMALY",
+                "priority": "high", "status": "pending",
+                "source": {"type": "diagnostic_group", "count": 1},
+                "action": "review_before_chunking", "reason": "test structural finding",
+            }
+            routes_path = result / "routes.json"
+            routes_path.write_text(json.dumps({"routes": [machine, human]}), encoding="utf-8")
+            (result / "source_manifest.json").write_text(
+                json.dumps({"converted_zip_sha256": "immutable-source-sha"}), encoding="utf-8"
+            )
+            store = Stage2BStore(str(root / "jobs.db"))
+            await store.initialize()
+            cfg = SimpleNamespace(processed_dir=str(processed), stage2b_artifact_sweep_enabled=False)
+            worker = Stage2BWorker(
+                lambda: cfg, store, FakePostprocessStore(), SimpleNamespace(notify=lambda *_args, **_kwargs: None)
+            )
+
+            self.assertEqual(await worker.sync_routes_once(), 1)
+            before = await store.list_book_jobs_raw(17)
+            self.assertEqual(len(before), 1)
+            first_generation = before[0]["generation"]
+
+            human_reviewed = dict(human)
+            human_reviewed.update({
+                "status": "accepted", "human_decision": "accepted",
+                "human_reviewed_pages": [4], "human_decided_at_epoch": 999.0,
+                "human_decision_note": "source checked",
+            })
+            routes_path.write_text(json.dumps({"routes": [machine, human_reviewed]}), encoding="utf-8")
+
+            self.assertEqual(await worker.sync_routes_once(), 0)
+            after = await store.list_book_jobs_raw(17)
+            current = [row for row in after if row["is_current"]]
+            self.assertEqual(len(after), 1)
+            self.assertEqual(len(current), 1)
+            self.assertEqual(current[0]["generation"], first_generation)
 
 
 class Stage2BManualBookBackoffTests(unittest.IsolatedAsyncioTestCase):
