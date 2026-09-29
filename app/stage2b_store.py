@@ -1152,6 +1152,32 @@ class Stage2BStore:
             item["source"] = json.loads(item.pop("source_json") or "{}")
         except json.JSONDecodeError:
             item["source"] = {}
+        try:
+            request_meta = json.loads(item.get("request_json") or "{}")
+            if not isinstance(request_meta, dict):
+                request_meta = {}
+        except (json.JSONDecodeError, TypeError):
+            request_meta = {}
+        try:
+            result_meta = json.loads(item.get("result_json") or "{}")
+            if not isinstance(result_meta, dict):
+                result_meta = {}
+        except (json.JSONDecodeError, TypeError):
+            result_meta = {}
+        provider = str(
+            result_meta.get("vision_provider")
+            or result_meta.get("text_provider")
+            or result_meta.get("provider")
+            or request_meta.get("vision_provider")
+            or request_meta.get("text_provider")
+            or request_meta.get("provider")
+            or request_meta.get("selected_processor")
+            or item.get("claimed_by")
+            or ""
+        ).strip().lower()
+        if provider:
+            item["execution_provider"] = provider
+        item["timing_recorded"] = bool(item.get("processing_seconds") is not None and float(item.get("processing_seconds") or 0) > 0)
         item.pop("request_json", None)
         item.pop("result_json", None)
         return item

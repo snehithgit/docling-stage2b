@@ -1,4 +1,4 @@
-## 2026.09.29.40.11AB — optional secured Colab Qwen3-VL verifier
+## 2026.09.29.40.11AC — truthful Colab provenance + API-key validation
 
 - Adds Google Colab/KoboldCpp as an **optional, explicit** provider for Text verification, Vision verification, Human Visual Evidence Recovery, and the shared Artifact idle pool. Local Pi5/OnePlus behavior remains the default and there is no automatic cloud fallback.
 - Adds a secured Qwen3-VL-8B Colab notebook. Each runtime generates a strong API key, passes it to KoboldCpp via `KCPP_PASSWORD`, and exposes the OpenAI-compatible endpoint through the Cloudflare tunnel.

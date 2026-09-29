@@ -25,7 +25,7 @@ import httpx
 from .archive import select_docling_document
 from .book_lifecycle import quarantine_book_artifacts, quarantine_conversion_job, restore_quarantined_artifacts
 from .config import AppConfig, config_path, load_config, save_config
-from .colab_provider import normalize_colab_url, read_colab_api_key, write_colab_api_key, clear_colab_api_key
+from .colab_provider import normalize_colab_url, read_colab_api_key, write_colab_api_key, clear_colab_api_key, colab_api_key_error
 from .database import JobStore
 from .docling_client import DoclingApiError, DoclingClient
 from .events import EventBroker
@@ -3093,6 +3093,7 @@ async def stage2b_status() -> dict:
     quota = await runtime.groq_quota.snapshot() if cloud_selected else None
     key_ready = bool(__import__("os").environ.get(runtime.config.text_cloud_api_key_env, "").strip())
     colab_key_ready = bool(read_colab_api_key(runtime.config))
+    colab_key_problem = colab_api_key_error(runtime.config)
     colab_ready = bool(runtime.config.colab_enabled and runtime.config.colab_url and colab_key_ready)
     return {
         "enabled": runtime.config.stage2b_enabled,
@@ -3135,6 +3136,7 @@ async def stage2b_status() -> dict:
             "url": runtime.config.colab_url,
             "model": runtime.config.colab_model,
             "api_key_configured": colab_key_ready,
+            "api_key_error": colab_key_problem,
             "connection_configured": colab_ready,
             "artifact_enabled": bool(runtime.config.colab_artifact_enabled),
             "endpoint_circuit": dict(runtime.stage2b_worker.worker_state.get("colab", {}).get("endpoint_circuit") or {}),
@@ -4034,11 +4036,13 @@ async def stage2b_provider_update(kind: str, update: VerifierProviderUpdate) -> 
 @app.get("/api/stage2b/colab")
 async def stage2b_colab_status() -> dict:
     key_ready = bool(read_colab_api_key(runtime.config))
+    key_problem = colab_api_key_error(runtime.config)
     return {
         "enabled": bool(runtime.config.colab_enabled),
         "url": runtime.config.colab_url,
         "model": runtime.config.colab_model,
         "api_key_configured": key_ready,
+        "api_key_error": key_problem,
         "artifact_enabled": bool(runtime.config.colab_artifact_enabled),
         "active": bool(runtime.stage2b_worker.dispatch_reservations.get("colab")),
         "worker": dict(runtime.stage2b_worker.worker_state.get("colab") or {}),
@@ -4070,7 +4074,8 @@ async def stage2b_colab_test() -> dict:
         raise HTTPException(status_code=409, detail="Colab tunnel URL is not configured.")
     api_key = read_colab_api_key(config)
     if not api_key:
-        raise HTTPException(status_code=409, detail="Colab API key is not configured.")
+        key_problem = colab_api_key_error(config)
+        raise HTTPException(status_code=409, detail=key_problem or "Colab API key is not configured.")
     client = OpenAICompatibleVerifier(
         config.colab_url, timeout_seconds=min(60, int(config.colab_timeout_seconds)), api_key=api_key
     )

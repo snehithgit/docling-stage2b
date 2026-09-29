@@ -817,3 +817,13 @@ def test_review_pages_link_directly_to_matching_docling_bbox():
     assert "Opened ${wantedRef} from the review page." in docling_js
     assert "focusSelectedBox" in docling_js
     assert "Back to review" in docling_js
+
+
+def test_verification_results_show_execution_provider_and_truthful_legacy_timing():
+    html = read("verification.html")
+    js = read("verification.js")
+    assert "<th>Provider</th>" in html
+    assert "job.execution_provider" in js
+    assert "Legacy / unknown" in js
+    assert "Not recorded" in js
+    assert "Existing completed rows keep their original execution provider" in js

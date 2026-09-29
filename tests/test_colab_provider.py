@@ -121,3 +121,44 @@ def test_colab_can_claim_shared_artifact_work(tmp_path):
         assert job is not None
         assert job["_artifact_worker"] == "colab"
     asyncio.run(run())
+
+
+def test_colab_api_key_rejects_unicode_header_characters(tmp_path, monkeypatch):
+    cfg = AppConfig(colab_api_key_path=str(tmp_path / "colab.key"), colab_api_key_env="TEST_COLAB_UNICODE")
+    monkeypatch.delenv("TEST_COLAB_UNICODE", raising=False)
+    with pytest.raises(ValueError, match="non-ASCII"):
+        write_colab_api_key(cfg, "abcdefghijklmnop—bad")
+    with pytest.raises(ValueError, match="whitespace or control"):
+        write_colab_api_key(cfg, "abcdefghijklmnop bad")
+
+
+def test_public_verification_row_exposes_execution_provider_without_raw_payload(tmp_path):
+    async def run():
+        store = Stage2BStore(str(tmp_path / "jobs.db"))
+        await store.initialize()
+        await store.sync_routes(
+            1, 1, "g1",
+            [{"route_id":"V1","target":"oneplus","source":{"type":"picture","index":0}}],
+            "book__job1", "book.zip",
+        )
+        row = (await store.list_jobs(limit=10))[0]
+        assert await store.mark_processing(int(row["id"]), "manual")
+        await store.mark_completed(
+            int(row["id"]), 12.5, "koboldcpp", "https://example.trycloudflare.com/v1",
+            "TECHNICAL_USEFUL", {"vision_provider":"colab"}, {"vision_provider":"colab"}, "artifact.json",
+        )
+        public = (await store.list_results("oneplus", limit=10))[0]
+        assert public["execution_provider"] == "colab"
+        assert public["timing_recorded"] is True
+        assert "request_json" not in public and "result_json" not in public
+    asyncio.run(run())
+
+
+def test_invalid_legacy_colab_key_is_treated_as_unconfigured_without_crashing(tmp_path, monkeypatch):
+    from app.colab_provider import colab_api_key_error
+    cfg = AppConfig(colab_api_key_path=str(tmp_path / "colab.key"), colab_api_key_env="TEST_COLAB_INVALID_LEGACY")
+    monkeypatch.delenv("TEST_COLAB_INVALID_LEGACY", raising=False)
+    Path = __import__('pathlib').Path
+    Path(cfg.colab_api_key_path).write_text("abcdefghijklmnop—bad\n", encoding="utf-8")
+    assert read_colab_api_key(cfg) == ""
+    assert "non-ASCII" in (colab_api_key_error(cfg) or "")

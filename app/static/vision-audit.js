@@ -16,7 +16,7 @@ const pretty = value => {
   if (typeof value === "string") return value;
   try { return JSON.stringify(value, null, 2); } catch (_) { return String(value); }
 };
-const fmtSeconds = value => Number(value || 0) ? `${Number(value).toFixed(1)}s` : "—";
+const fmtSeconds = value => (value !== null && value !== undefined && Number(value) > 0) ? `${Number(value).toFixed(1)}s` : "Duration not recorded";
 const fmtConfidence = value => value === null || value === undefined ? "—" : `${Math.round(Number(value) * 100)}%`;
 
 function feedback(message, kind="") {

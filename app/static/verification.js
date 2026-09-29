@@ -241,8 +241,8 @@ function renderModes(status) {
   const textName = textVerifierName(status), visionName = visionVerifierName(status);
   const title = document.getElementById("pi5-title"); if (title) title.textContent = textName;
   const visionTitle = document.getElementById("oneplus-title"); if (visionTitle) visionTitle.textContent = visionName;
-  const resultsTitle = document.getElementById("pi5-results-title"); if (resultsTitle) resultsTitle.textContent = `${textName} results`;
-  const visionResultsTitle = document.getElementById("oneplus-results-title"); if (visionResultsTitle) visionResultsTitle.textContent = `${visionName} results`;
+  const resultsTitle = document.getElementById("pi5-results-title"); if (resultsTitle) resultsTitle.textContent = "Text verification results";
+  const visionResultsTitle = document.getElementById("oneplus-results-title"); if (visionResultsTitle) visionResultsTitle.textContent = "Vision verification results";
   const col = document.getElementById("text-column-title"); if (col) col.textContent = textName;
   const vcol = document.getElementById("vision-column-title"); if (vcol) vcol.textContent = visionName;
   const pair = document.getElementById("verifier-pair-title"); if (pair) pair.textContent = `${textName} + ${visionName}`;
@@ -262,14 +262,14 @@ function renderModes(status) {
   }
   const colabHealth = document.getElementById("colab-health");
   if (colabHealth) {
-    const keyText = colab.api_key_configured ? "API key saved" : "API key missing";
+    const keyText = colab.api_key_error ? `API key invalid · ${colab.api_key_error}` : (colab.api_key_configured ? "API key saved" : "API key missing");
     const circuit = colab.endpoint_circuit || {};
     const detail = circuit.open ? `Endpoint waiting · ${circuit.last_error || "connection failed"}` : (colab.connection_configured ? "Configured · use Test connection for a live probe" : "Paste the current tunnel URL and API key");
     colabHealth.innerHTML = `<span class="status ${colab.connection_configured && !circuit.open ? "completed" : "pending"}">${colab.enabled ? "Configured" : "Disabled"}</span><span class="device-model">${esc(colab.model || "koboldcpp")}</span><small>${esc(keyText)} · ${esc(detail)}</small>`;
   }
   const artifactColabLabel = document.getElementById("artifact-colab-label"); if (artifactColabLabel) artifactColabLabel.textContent = colab.enabled && colab.artifact_enabled ? " + Colab" : "";
   const note = document.getElementById("verifier-status-note");
-  if (note) note.textContent = `Text: ${textName}${status?.text_provider?.primary_model ? ` · ${status.text_provider.primary_model}` : ""} | Vision: ${visionName}${status?.vision_provider?.primary_model ? ` · ${status.vision_provider.primary_model}` : ""} · explicit selection, no automatic provider fallback`;
+  if (note) note.textContent = `Selected for NEW/PENDING work — Text: ${textName}${status?.text_provider?.primary_model ? ` · ${status.text_provider.primary_model}` : ""} | Vision: ${visionName}${status?.vision_provider?.primary_model ? ` · ${status.vision_provider.primary_model}` : ""}. Existing completed rows keep their original execution provider; selecting Colab does not rerun them.`;
   const quota = quotaFromStatus(status);
   const interlockMode = String(status?.interlock?.mode || "mixed");
   const interlockBadge = document.getElementById("interlock-mode");
@@ -432,7 +432,10 @@ function renderBooks(data, status) {
 }
 
 function secondsText(value) {
-  const n = Number(value || 0); if (!n) return "—"; return n < 60 ? `${n.toFixed(1)}s` : `${Math.floor(n/60)}m ${(n%60).toFixed(0)}s`;
+  if (value === null || value === undefined || value === "") return "Not recorded";
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return "Not recorded";
+  return n < 60 ? `${n.toFixed(1)}s` : `${Math.floor(n/60)}m ${(n%60).toFixed(0)}s`;
 }
 
 function renderResults(target, data) {
@@ -473,7 +476,8 @@ function renderResults(target, data) {
         : `<a class="mini-action" href="/text-audit?job=${encodeURIComponent(job.id)}">Audit</a>`;
       action = `${auditLink}${reviewLink}<button class="mini-action" onclick="manualCrosscheck(${job.id}, this)" ${running?"disabled":""}>${running?"Cross-checking…":cross.status==="completed"?"Cross-check again":crossLabel}</button><button class="mini-action quiet-action" onclick="rerunVerificationJob(${job.id}, this)">Rerun</button>${cross.status ? `<span class="crosscheck-result ${esc(cross.status)}">${esc(cross.summary || cross.status)}</span>` : ""}`;
     }
-    return `<tr><td data-label="Route"><span class="file-name">${esc(book)}</span><span class="file-subtitle">${esc(job.route_id)} · ${esc(job.code || "review")} · priority ${esc(job.priority || "normal")}${job.priority_score != null ? ` (${esc(job.priority_score)}/100)` : ""}</span>${error}</td><td data-label="Page">${esc(source.page ?? "—")}</td><td data-label="Status">${statusPill(job.status)}</td><td data-label="Verdict">${esc(job.verdict || "—")}</td><td data-label="Time">${esc(secondsText(job.processing_seconds))}</td><td data-label="Actions" class="align-right"><div class="document-actions verification-result-actions">${action}</div></td></tr>`;
+    const executedBy = job.execution_provider ? verifierProviderName(job.execution_provider, job.target) : "Legacy / unknown";
+    return `<tr><td data-label="Route"><span class="file-name">${esc(book)}</span><span class="file-subtitle">${esc(job.route_id)} · ${esc(job.code || "review")} · priority ${esc(job.priority || "normal")}${job.priority_score != null ? ` (${esc(job.priority_score)}/100)` : ""}</span>${error}</td><td data-label="Page">${esc(source.page ?? "—")}</td><td data-label="Status">${statusPill(job.status)}</td><td data-label="Provider">${esc(executedBy)}</td><td data-label="Verdict">${esc(job.verdict || "—")}</td><td data-label="Time">${esc(secondsText(job.processing_seconds))}</td><td data-label="Actions" class="align-right"><div class="document-actions verification-result-actions">${action}</div></td></tr>`;
   }).join("");
 }
 

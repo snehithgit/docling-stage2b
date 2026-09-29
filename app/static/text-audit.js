@@ -10,7 +10,7 @@ const requestedJobId = new URLSearchParams(location.search).get("job");
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
 const pretty = value => { try { return typeof value === "string" ? value : JSON.stringify(value, null, 2); } catch (_) { return String(value); } };
-const fmtSeconds = value => Number(value || 0) ? `${Number(value).toFixed(1)}s` : "—";
+const fmtSeconds = value => (value !== null && value !== undefined && Number(value) > 0) ? `${Number(value).toFixed(1)}s` : "Duration not recorded";
 
 function feedback(message, kind="") {
   const box = $("ta-feedback");
