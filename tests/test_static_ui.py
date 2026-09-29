@@ -281,7 +281,7 @@ def test_dashboard_surfaces_cloud_quota_warning_and_dynamic_text_provider():
     assert 'doc.text_verifier_label || "Text"' in js
 
 
-def test_verification_exposes_explicit_text_and_vision_provider_selectors_without_fallback():
+def test_verification_exposes_explicit_provider_pool_and_moves_physical_worker_settings_off_page():
     html = read("verification.html")
     js = read("verification.js")
     assert 'id="text-provider-select"' in html
@@ -289,16 +289,44 @@ def test_verification_exposes_explicit_text_and_vision_provider_selectors_withou
     assert html.count('<option value="pi5">Pi5 Vision</option>') == 2
     assert html.count('<option value="oneplus">OnePlus Vision</option>') == 2
     assert html.count('<option value="groq">Groq Vision</option>') == 2
-    assert html.count('<option value="colab">Colab Qwen-VL</option>') == 2
-    assert 'id="colab-url"' in html
-    assert 'id="colab-api-key"' in html
-    assert 'id="colab-artifact-enabled"' in html
-    assert "/api/stage2b/colab" in js
-    assert "/api/stage2b/colab/test" in js
+    assert html.count('<option value="colab">Colab worker pool</option>') == 2
+    assert 'href="/workers"' in html
+    assert 'href="/review-workers"' in html
+    assert 'id="colab-url"' not in html
+    assert 'id="colab-api-key"' not in html
     assert html.lower().count("no automatic fallback") >= 2
     assert '/api/stage2b/providers/${kind}' in js
     assert 'JSON.stringify({provider})' in js
     assert "automatic fallback" in js.lower()
+
+
+def test_workers_page_supports_individual_stop_artifact_participation_and_multiple_colab_workers():
+    html = read("workers.html")
+    js = read("workers.js")
+    assert "Stop/resume each physical worker independently" in html
+    assert "Add Colab worker" in html
+    assert "Participate in Artifact sweep" in js
+    assert "Stop after current job" in js
+    assert "/api/workers/local/${local}" in js
+    assert "/api/workers/colab" in js
+    assert "/api/workers/colab/${wid}/test" in js
+    assert "Remove" in js
+
+
+def test_review_worker_page_is_deferred_until_primary_machine_work_is_complete_and_human_remains_authoritative():
+    html = read("review-workers.html")
+    js = read("review-workers.js")
+    text_review = read("review.html")
+    vision_review = read("vision-audit.js")
+    assert "All Text + Vision + Artifact machine jobs across the library must finish first" in html
+    assert "They never set" in html and "human_verified" in html
+    assert "Text review" in js and "Vision review" in js
+    assert "/api/review-workers/settings" in js
+    assert "/api/review-workers/status" in js
+    assert 'id="ai-review-assistant-card"' in text_review
+    assert "AI REVIEW ASSISTANT · COLAB" in text_review
+    assert "aiReviewAssistantBlock" in vision_review
+    assert "Human authority preserved" in vision_review
 
 
 def test_verification_exposes_persistent_groq_usage_audit_table():

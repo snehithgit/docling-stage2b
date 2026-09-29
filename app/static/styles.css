@@ -1208,3 +1208,15 @@ button.mini-action { cursor: pointer; }
 .global-attention-strip strong { color: #765719; font-size: 11px; }
 .global-attention-strip span { color: #765719; font-size: 10px; }
 @media (max-width: 680px) { .global-attention-strip { align-items: flex-start; flex-direction: column; } }
+
+/* 40.11AD worker registry + deferred AI review-assistant */
+.worker-card-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(310px,1fr)); gap:14px; }
+.worker-admin-card { display:grid; gap:10px; align-content:start; }
+.worker-admin-card .field-label { margin-bottom:-5px; }
+.review-worker-assignment { display:grid; gap:10px; }
+.review-assignment-row { display:grid; grid-template-columns:minmax(220px,1fr) auto auto; align-items:center; gap:14px; padding:11px 12px; border:1px solid var(--line); border-radius:10px; background:#fff; }
+.review-assignment-row > div:first-child { display:grid; gap:3px; min-width:0; }
+.review-assignment-row small { color:var(--muted); }
+.ai-review-assistant-card { border-color:#d8caee; background:#fbf8ff; }
+.ai-review-assistant-inline { margin-top:12px; padding:12px; border:1px solid #d8caee; border-radius:10px; background:#fbf8ff; }
+@media (max-width:760px) { .review-assignment-row { grid-template-columns:1fr; align-items:start; } }

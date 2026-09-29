@@ -607,7 +607,7 @@ class Stage2BStore:
         shared pool lets any enabled healthy verifier worker steal pending work without
         rewriting or duplicating historical rows.
         """
-        if worker not in {"pi5", "oneplus", "colab"}:
+        if worker not in {"pi5", "oneplus", "colab"} and not str(worker).startswith("colab-"):
             raise ValueError("Unsupported artifact worker")
         return await self._run(self._claim_next_artifact_sync, worker)
 

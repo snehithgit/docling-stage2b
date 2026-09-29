@@ -126,6 +126,30 @@ function renderPi5Suggestion(entry, originalText) {
   $("use-pi5-suggestion").disabled = !usable;
 }
 
+function renderAiReviewAssistant(entry) {
+  const card = $("ai-review-assistant-card");
+  if (!card) return;
+  const a = entry?.ai_review_assistant || null;
+  if (!a) {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+  const recommendation = String(a.recommendation || "NEEDS_HUMAN").replaceAll("_", " ");
+  const confidence = Number(a.confidence);
+  const confidenceText = Number.isFinite(confidence) ? `${Math.round(confidence * 100)}% confidence` : "confidence not reported";
+  const worker = String(a.worker_name || a.worker_id || "Colab worker");
+  $("ai-review-assistant-meta").textContent = `${recommendation} · ${confidenceText} · ${worker}`;
+  $("ai-review-assistant-reason").textContent = String(a.reason || "No reason supplied.");
+  const suggested = String(a.suggested_text || "").trim();
+  const textEl = $("ai-review-assistant-text");
+  const useBtn = $("use-ai-review-assistant");
+  textEl.hidden = !suggested;
+  textEl.textContent = suggested;
+  useBtn.hidden = !suggested;
+  useBtn.disabled = !suggested;
+}
+
 function friendlyReason(value) {
   const raw = String(value || "");
   const known = {
@@ -188,6 +212,7 @@ function setReviewUnavailable(text) {
   $("reject").disabled = true;
   $("reset").disabled = true;
   $("use-pi5-suggestion").disabled = true;
+  if ($("ai-review-assistant-card")) $("ai-review-assistant-card").hidden = true;
   $("edit-heading").textContent = "Review record unavailable";
   $("edit-status").textContent = "Not ready";
   $("edit-note").textContent = "The verifier result is preserved. Editing is disabled until its review record is available.";
@@ -283,6 +308,7 @@ async function loadDoclingContext() {
   $("original").value = rawTarget;
   renderAppliedState(currentEntry, rawTarget);
   renderPi5Suggestion(currentEntry, rawTarget);
+  renderAiReviewAssistant(currentEntry);
   const targetBits = isTable
     ? [`Table ${data.table_index}`, `cell ${data.cell_index}`, `rows ${data.row_start}–${Math.max(data.row_start, Number(data.row_end || data.row_start + 1) - 1)}`, `cols ${data.col_start}–${Math.max(data.col_start, Number(data.col_end || data.col_start + 1) - 1)}`]
     : [`Docling text #${data.source_index}`];
@@ -424,6 +450,7 @@ async function load() {
     $("reset").disabled = false;
     renderAppliedState(currentEntry, original);
     renderPi5Suggestion(currentEntry, original);
+    renderAiReviewAssistant(currentEntry);
     renderContextRows("docling-above", [], "Raw Docling text above is unavailable.");
     renderContextRows("docling-below", [], "Raw Docling text below is unavailable.");
     renderDiff();
@@ -521,6 +548,14 @@ document.addEventListener("keydown", event => {
   }
   if (!editing && event.key === "]") navigateQueue(1);
   if (!editing && event.key === "[") navigateQueue(-1);
+});
+
+$("use-ai-review-assistant").addEventListener("click", () => {
+  const suggestion = String(currentEntry?.ai_review_assistant?.suggested_text || "").trim();
+  if (!suggestion) return;
+  $("correction").value = suggestion;
+  renderDiff(String(currentEntry?.original_text || ""), suggestion);
+  $("correction").focus();
 });
 
 $("use-pi5-suggestion").addEventListener("click", () => {

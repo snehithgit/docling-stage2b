@@ -78,6 +78,8 @@ from .book_lifecycle_lock import BookLifecycleLocks
 from .telegram_bot import TelegramBotService
 from .stage2b_store import HUMAN_VISUAL_RECOVERY_CODE, Stage2BStore
 from .worker import ConversionWorker
+from .worker_registry import WorkerRegistry
+from .review_workers import ReviewAssistantStore, ReviewAssistantService
 from .version import APP_VERSION
 from .table_repair import (
     TABLE_ROW_COLLAPSE_CODE, ensure_collapse_scan, table_repair_context, parse_tsv_matrix,
@@ -385,6 +387,42 @@ class ColabVerifierUpdate(BaseModel):
         if url and not url.startswith(("http://", "https://")):
             raise ValueError("Enter a valid http(s) Colab/KoboldCpp URL")
         return url
+
+
+class LocalWorkerUpdate(BaseModel):
+    paused: bool | None = None
+    artifact_enabled: bool | None = None
+
+
+class ColabWorkerCreate(BaseModel):
+    name: str = Field(default="", max_length=80)
+
+
+class ColabWorkerUpdate(BaseModel):
+    name: str | None = Field(default=None, max_length=80)
+    enabled: bool | None = None
+    paused: bool | None = None
+    url: str | None = Field(default=None, max_length=2000)
+    model: str | None = Field(default=None, max_length=200)
+    api_key: str | None = Field(default=None, max_length=500)
+    clear_api_key: bool = False
+    artifact_enabled: bool | None = None
+
+    @field_validator("url")
+    @classmethod
+    def validate_worker_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        url = normalize_colab_url(value)
+        if url and not url.startswith(("http://", "https://")):
+            raise ValueError("Enter a valid http(s) Colab/KoboldCpp URL")
+        return url
+
+
+class ReviewWorkerSettingsUpdate(BaseModel):
+    enabled: bool = False
+    text_worker_ids: list[str] = Field(default_factory=list, max_length=32)
+    vision_worker_ids: list[str] = Field(default_factory=list, max_length=32)
 
 
 class EquipmentManualAssignment(BaseModel):
@@ -818,6 +856,7 @@ def _artifact_inventory_for_book(job: dict, verification_rows: list[dict], proce
                 "human_verified": bool(downstream.get("human_verified")) if downstream else False,
                 "current_authoritative": True,
                 "human_evidence_recovery_required": bool(downstream.get("human_evidence_recovery_required")) if downstream else False,
+                "ai_review_assistant": downstream.get("ai_review_assistant") if downstream else None,
                 "rag_eligible": visual_rag.get("rag_eligible") if visual_rag else False,
                 "rag_eligibility_reason": visual_rag.get("rag_eligibility_reason") if visual_rag else None,
                 "visual_evidence_id": visual_rag.get("visual_evidence_id") if visual_rag else None,
@@ -841,12 +880,20 @@ class Runtime:
             lambda: self.config, self.postprocess_store, self.events, self.groq_quota
         )
         self.stage2b_store = Stage2BStore(self.config.database_path)
+        self.worker_registry = WorkerRegistry(self.config.database_path)
+        self.worker_registry.ensure_legacy_colab(self.config)
         self.book_lifecycle_locks = BookLifecycleLocks()
         self.oneplus_controller = OnePlusController(lambda: self.config)
         self.stage2b_worker = Stage2BWorker(
             lambda: self.config, self.stage2b_store, self.postprocess_store, self.events,
             self.groq_quota, self.oneplus_controller.restart,
             lifecycle_lock_getter=self.book_lifecycle_locks.get,
+            worker_registry=self.worker_registry,
+        )
+        self.review_assistant_store = ReviewAssistantStore(self.config.database_path)
+        self.review_assistant = ReviewAssistantService(
+            lambda: self.config, self.worker_registry, self.review_assistant_store,
+            self.stage2b_store, self.postprocess_store, self.stage2b_worker, self.events,
         )
         self.stage3_builder = Stage3ChunkBuilder(
             lambda: self.config, self.postprocess_store, self.client, self.events, self.stage2b_store,
@@ -2134,6 +2181,7 @@ async def lifespan(_: FastAPI):
     await runtime.worker.start()
     await runtime.postprocess_worker.start()
     await runtime.stage2b_worker.start()
+    await runtime.review_assistant.start()
     await runtime.start_pipeline_sequence()
     await runtime.telegram_bot.start()
     yield
@@ -2141,6 +2189,7 @@ async def lifespan(_: FastAPI):
     await runtime.stop_pipeline_sequence()
     await runtime.stop_safety_refresh()
     await runtime.stage3_builder.stop()
+    await runtime.review_assistant.stop()
     await runtime.stage2b_worker.stop()
     await runtime.postprocess_worker.stop()
     await runtime.worker.stop()
@@ -3092,9 +3141,12 @@ async def stage2b_status() -> dict:
     cloud_selected = runtime.config.text_verifier_provider == "groq" or runtime.config.vision_verifier_provider == "groq"
     quota = await runtime.groq_quota.snapshot() if cloud_selected else None
     key_ready = bool(__import__("os").environ.get(runtime.config.text_cloud_api_key_env, "").strip())
-    colab_key_ready = bool(read_colab_api_key(runtime.config))
-    colab_key_problem = colab_api_key_error(runtime.config)
-    colab_ready = bool(runtime.config.colab_enabled and runtime.config.colab_url and colab_key_ready)
+    registry_snapshot = runtime.worker_registry.snapshot(runtime.config)
+    colab_rows = list(registry_snapshot.get("colab_workers") or [])
+    configured_colabs = runtime.worker_registry.configured_colabs(runtime.config, include_paused=True)
+    colab_ready = bool(configured_colabs)
+    colab_key_ready = any(bool(runtime.worker_registry.read_api_key(str(item.get("id")))) for item in colab_rows)
+    colab_key_problem = next((runtime.worker_registry.api_key_error(str(item.get("id"))) for item in colab_rows if runtime.worker_registry.api_key_error(str(item.get("id")))), None)
     return {
         "enabled": runtime.config.stage2b_enabled,
         "text_provider": {
@@ -3132,14 +3184,14 @@ async def stage2b_status() -> dict:
             "sequence": "normal_text_vision_first_then_idle_workers",
         },
         "colab": {
-            "enabled": bool(runtime.config.colab_enabled),
-            "url": runtime.config.colab_url,
-            "model": runtime.config.colab_model,
+            "enabled": bool(any(item.get("enabled") for item in colab_rows)),
+            "pool_size": len(colab_rows),
+            "ready_workers": len(configured_colabs),
             "api_key_configured": colab_key_ready,
             "api_key_error": colab_key_problem,
             "connection_configured": colab_ready,
-            "artifact_enabled": bool(runtime.config.colab_artifact_enabled),
-            "endpoint_circuit": dict(runtime.stage2b_worker.worker_state.get("colab", {}).get("endpoint_circuit") or {}),
+            "artifact_enabled": bool(any(item.get("artifact_enabled") and item.get("enabled") for item in colab_rows)),
+            "workers_url": "/workers",
         },
         "counts": await runtime.stage2b_store.counts(),
         "workloads": await runtime.stage2b_store.workload_counts(),
@@ -4031,6 +4083,159 @@ async def stage2b_provider_update(kind: str, update: VerifierProviderUpdate) -> 
         "mode": ("cloud" if provider == "groq" else ("remote" if provider == "colab" else "offline")),
         "label": label, "automatic_fallback": False,
     }
+
+
+def _worker_registry_public() -> dict:
+    snap = runtime.worker_registry.snapshot(runtime.config)
+    reservations = runtime.stage2b_worker.dispatch_reservations
+    local = {}
+    for worker_id in ("pi5", "oneplus"):
+        state = dict(snap.get("local", {}).get(worker_id) or {})
+        worker_state = dict(runtime.stage2b_worker.worker_state.get(worker_id) or {})
+        local[worker_id] = {
+            "id": worker_id,
+            "name": "Pi5" if worker_id == "pi5" else "OnePlus",
+            "paused": bool(state.get("paused")),
+            "artifact_enabled": bool(state.get("artifact_enabled", True)),
+            "active": worker_id in reservations or bool(worker_state.get("active_job_id")),
+            "reservation": reservations.get(worker_id),
+            "state": worker_state,
+        }
+    colabs = []
+    for worker in snap.get("colab_workers") or []:
+        worker_id = str(worker.get("id"))
+        provider = f"colab:{worker_id}"
+        state = dict(runtime.stage2b_worker.worker_state.get(provider) or {})
+        key_ready = bool(runtime.worker_registry.read_api_key(worker_id))
+        colabs.append({
+            **worker,
+            "api_key_configured": key_ready,
+            "api_key_error": runtime.worker_registry.api_key_error(worker_id),
+            "connection_configured": bool(worker.get("enabled") and worker.get("url") and key_ready),
+            "active": provider in reservations or bool(state.get("active_job_id")),
+            "reservation": reservations.get(provider),
+            "state": state,
+        })
+    return {
+        "local": local,
+        "colab_workers": colabs,
+        "review": snap.get("review") or {},
+        "interlock_mode": runtime.stage2b_interlock_mode(),
+    }
+
+
+@app.get("/api/workers")
+async def workers_status() -> dict:
+    return _worker_registry_public()
+
+
+@app.put("/api/workers/local/{worker_id}")
+async def update_local_worker(worker_id: str, update: LocalWorkerUpdate) -> dict:
+    if worker_id not in {"pi5", "oneplus"}:
+        raise HTTPException(status_code=404, detail="Unknown local worker")
+    state = runtime.worker_registry.update_local(
+        worker_id, paused=update.paused, artifact_enabled=update.artifact_enabled
+    )
+    runtime.events.notify("worker_registry_updated")
+    return {"worker_id": worker_id, **state}
+
+
+@app.post("/api/workers/colab")
+async def add_colab_worker(request: ColabWorkerCreate) -> dict:
+    worker = runtime.worker_registry.add_colab(name=request.name)
+    runtime.events.notify("worker_registry_updated")
+    return worker
+
+
+@app.put("/api/workers/colab/{worker_id}")
+async def update_colab_worker(worker_id: str, update: ColabWorkerUpdate) -> dict:
+    provider = f"colab:{worker_id}"
+    active = bool(runtime.stage2b_worker.dispatch_reservations.get(provider))
+    updates = update.model_dump(exclude={"api_key", "clear_api_key"}, exclude_none=True)
+    # "Stop after current job" must be writable while a request is in flight.
+    # Any configuration mutation that could change the endpoint/model/secret is
+    # still rejected until the physical worker becomes idle.
+    if active:
+        changed_fields = set(updates)
+        has_secret_change = bool(update.clear_api_key or (update.api_key is not None and str(update.api_key).strip()))
+        if changed_fields - {"paused"} or has_secret_change:
+            raise HTTPException(status_code=409, detail="Only Stop/Resume may be changed while this Colab worker has an active request")
+    try:
+        worker = runtime.worker_registry.update_colab(worker_id, updates)
+        if update.clear_api_key:
+            runtime.worker_registry.clear_api_key(worker_id)
+        elif update.api_key is not None and str(update.api_key).strip():
+            runtime.worker_registry.write_api_key(worker_id, str(update.api_key).strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    runtime.stage2b_worker.reset_provider_connection(provider)
+    runtime.events.notify("worker_registry_updated")
+    return {
+        **worker,
+        "api_key_configured": bool(runtime.worker_registry.read_api_key(worker_id)),
+        "api_key_error": runtime.worker_registry.api_key_error(worker_id),
+    }
+
+
+@app.delete("/api/workers/colab/{worker_id}")
+async def delete_colab_worker(worker_id: str) -> dict:
+    provider = f"colab:{worker_id}"
+    if runtime.stage2b_worker.dispatch_reservations.get(provider):
+        raise HTTPException(status_code=409, detail="Stop/wait for the active request before removing this worker")
+    if not runtime.worker_registry.remove_colab(worker_id):
+        raise HTTPException(status_code=404, detail="Colab worker not found")
+    runtime.events.notify("worker_registry_updated")
+    return {"deleted": True, "worker_id": worker_id}
+
+
+@app.post("/api/workers/colab/{worker_id}/test")
+async def test_colab_worker(worker_id: str) -> dict:
+    provider = f"colab:{worker_id}"
+    if runtime.stage2b_worker.dispatch_reservations.get(provider):
+        raise HTTPException(status_code=409, detail="Wait for this Colab worker's active request to finish before testing it")
+    worker = runtime.worker_registry.get_colab(worker_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Colab worker not found")
+    if not worker.get("enabled"):
+        raise HTTPException(status_code=409, detail="Enable this Colab worker first")
+    endpoint = str(worker.get("url") or "").strip()
+    api_key = runtime.worker_registry.read_api_key(worker_id)
+    if not endpoint or not api_key:
+        raise HTTPException(status_code=409, detail="Colab URL/API key is not configured")
+    client = OpenAICompatibleVerifier(endpoint, timeout_seconds=min(60, int(runtime.config.colab_timeout_seconds)), api_key=api_key)
+    try:
+        health = await client.health()
+        if not health.reachable:
+            raise HTTPException(status_code=503, detail=health.detail or "Colab endpoint unavailable")
+        await client.chat_text("Reply with exactly OK.", "Authentication probe.", model=str(worker.get("model") or "koboldcpp"), max_tokens=2)
+    except HTTPException:
+        raise
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code if exc.response is not None else 0
+        raise HTTPException(status_code=401 if status in {401, 403} else 503, detail=f"Colab generation probe failed: HTTP {status}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Colab generation probe failed: {exc}") from exc
+    runtime.stage2b_worker.reset_provider_connection(f"colab:{worker_id}")
+    return {"ok": True, "worker_id": worker_id, "model": worker.get("model") or "koboldcpp"}
+
+
+@app.get("/api/review-workers/settings")
+async def review_worker_settings() -> dict:
+    return {"settings": runtime.worker_registry.snapshot(runtime.config).get("review") or {}, "workers": _worker_registry_public()["colab_workers"]}
+
+
+@app.put("/api/review-workers/settings")
+async def update_review_worker_settings(update: ReviewWorkerSettingsUpdate) -> dict:
+    settings = runtime.worker_registry.update_review(
+        enabled=update.enabled, text_worker_ids=update.text_worker_ids, vision_worker_ids=update.vision_worker_ids
+    )
+    runtime.events.notify("review_worker_settings_updated")
+    return settings
+
+
+@app.get("/api/review-workers/status")
+async def review_worker_status() -> dict:
+    return await runtime.review_assistant.status()
 
 
 @app.get("/api/stage2b/colab")
@@ -5488,6 +5693,7 @@ def _human_review_entries(result_dir: Path) -> list[dict]:
             "verification_verdict": entry.get("verification_verdict"),
             "oneplus_crosscheck": entry.get("oneplus_crosscheck"),
             "manual_crosschecks": entry.get("manual_crosschecks") or [],
+            "ai_review_assistant": entry.get("ai_review_assistant"),
         })
     entries.sort(key=lambda item: (bool(item.get("human_verified")), int(item.get("page") or 0), str(item.get("route_id") or "")))
     return entries
@@ -6222,6 +6428,16 @@ async def oneplus_control_page():
 @app.get("/verification")
 async def verification_page():
     return FileResponse(STATIC_DIR / "verification.html")
+
+
+@app.get("/workers")
+async def workers_page():
+    return FileResponse(STATIC_DIR / "workers.html")
+
+
+@app.get("/review-workers")
+async def review_workers_page():
+    return FileResponse(STATIC_DIR / "review-workers.html")
 
 
 @app.get("/text-audit")

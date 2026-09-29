@@ -67,6 +67,17 @@ function cropCard(job, crop) {
   </article>`;
 }
 
+function aiReviewAssistantBlock(downstream) {
+  const a = downstream?.ai_review_assistant;
+  if (!a) return "";
+  const recommendation = String(a.recommendation || "NEEDS_HUMAN").replaceAll("_", " ");
+  const confidence = Number(a.confidence);
+  const confidenceText = Number.isFinite(confidence) ? `${Math.round(confidence * 100)}% confidence` : "confidence not reported";
+  const tagsText = Array.isArray(a.visible_text) ? a.visible_text.slice(0, 12) : [];
+  const tagsObjects = Array.isArray(a.visible_objects) ? a.visible_objects.slice(0, 12) : [];
+  return `<section class="ai-review-assistant-inline"><div class="vision-audit-section-label">AI review assistant · advisory only</div><div class="vision-audit-kv"><span>Recommendation</span><strong>${esc(recommendation)}</strong><span>Confidence</span><strong>${esc(confidenceText)}</strong><span>Worker</span><strong>${esc(a.worker_name || a.worker_id || "Colab worker")}</strong></div>${a.reason ? `<p class="vision-audit-summary-text"><strong>Reason:</strong> ${esc(a.reason)}</p>` : ""}${a.corrected_summary ? `<p class="vision-audit-summary-text"><strong>Suggested summary:</strong> ${esc(a.corrected_summary)}</p>` : ""}${tagsText.length ? `<div class="vision-audit-section-label">Suggested visible text</div>${tagList(tagsText, "")}` : ""}${tagsObjects.length ? `<div class="vision-audit-section-label">Suggested objects</div>${tagList(tagsObjects, "")}` : ""}<p class="format-note"><strong>Human authority preserved.</strong> This recommendation cannot approve, exclude, or overwrite the visual by itself.</p></section>`;
+}
+
 function renderJob(job) {
   const c = job.classification || {};
   const source = job.source || {};
@@ -105,7 +116,7 @@ function renderJob(job) {
         ${doclingReviewUrl(job) ? `<div class="document-actions"><a class="mini-action primary-mini" href="${esc(doclingReviewUrl(job))}">Open Docling PDF bbox</a></div>` : ""}
       </div>
       <div class="vision-audit-explanation vision-audit-summary-first">
-        ${failed ? `<section><div class="vision-audit-section-label">Verification failed</div><p class="queue-error">${esc(job.error_type || "Error")}: ${esc(job.error_message || "Vision verification failed")}</p></section>` : `<section><div class="vision-audit-section-label">Result</div><h3>${esc(humanVerdict(c.verdict || job.verdict))}</h3><p class="vision-audit-summary-text">${esc(effectiveSummary || "No short summary was produced.")}</p><div class="vision-audit-kv"><span>Category</span><strong>${esc(effectiveCategory)}</strong><span>Pipeline</span><strong>${esc(downstreamLabel)}</strong></div></section>${decisionButtons}`}
+        ${failed ? `<section><div class="vision-audit-section-label">Verification failed</div><p class="queue-error">${esc(job.error_type || "Error")}: ${esc(job.error_message || "Vision verification failed")}</p></section>` : `<section><div class="vision-audit-section-label">Result</div><h3>${esc(humanVerdict(c.verdict || job.verdict))}</h3><p class="vision-audit-summary-text">${esc(effectiveSummary || "No short summary was produced.")}</p><div class="vision-audit-kv"><span>Category</span><strong>${esc(effectiveCategory)}</strong><span>Pipeline</span><strong>${esc(downstreamLabel)}</strong></div></section>${aiReviewAssistantBlock(downstream)}${decisionButtons}`}
       </div>
     </div>
     ${!failed ? `<div class="vision-audit-evidence-counts">${effectiveText.length} important label${effectiveText.length === 1 ? "" : "s"} · ${effectiveObjects.length} object${effectiveObjects.length === 1 ? "" : "s"} · ${cropCount} crop${cropCount === 1 ? "" : "s"}</div><details class="vision-audit-details extracted-detail"><summary>Show extracted detail</summary><div class="vision-audit-detail-grid"><section><div class="vision-audit-section-label">Important visible text</div>${tagList(effectiveText, "No legible text reported")}</section><section><div class="vision-audit-section-label">Visible objects / structures</div>${tagList(effectiveObjects, "No objects reported")}</section></div><p class="format-note"><strong>Why it was checked:</strong> ${esc(job.reason || request.reason || "No route reason recorded")}${c.unresolved_reason ? ` · ${esc(c.unresolved_reason)}` : ""}</p></details>` : ""}

@@ -55,7 +55,7 @@
 })();
 
 (() => {
-  const version = "2026.09.29.40.11AC";
+  const version = "2026.09.29.40.11AD";
   const sidebar = document.querySelector('.sidebar');
   if (!sidebar) return;
   const badge = document.createElement('div');
@@ -97,6 +97,22 @@
         queue.insertAdjacentElement('beforebegin', add);
       }
     }
+    const verification = [...nav.querySelectorAll('a')].find(link => link.getAttribute('href') === '/verification');
+    if (verification) {
+      if (![...nav.querySelectorAll('a')].some(link => link.getAttribute('href') === '/workers')) {
+        const workers = document.createElement('a');
+        workers.href = '/workers';
+        workers.innerHTML = '<span class="nav-item-label">Workers</span>';
+        verification.insertAdjacentElement('afterend', workers);
+      }
+      const workersLink = [...nav.querySelectorAll('a')].find(link => link.getAttribute('href') === '/workers');
+      if (workersLink && ![...nav.querySelectorAll('a')].some(link => link.getAttribute('href') === '/review-workers')) {
+        const reviewWorkers = document.createElement('a');
+        reviewWorkers.href = '/review-workers';
+        reviewWorkers.innerHTML = '<span class="nav-item-label">Review workers</span>';
+        workersLink.insertAdjacentElement('afterend', reviewWorkers);
+      }
+    }
     const rag = [...nav.querySelectorAll('a')].find(link => link.getAttribute('href') === '/retrieval');
     if (rag) {
       const label = rag.querySelector('.nav-item-label');
@@ -131,7 +147,9 @@
     '/convert': ['Advanced one-off conversion', 'This tool produces a standalone Docling ZIP and does not register a pipeline book. Use Add book for normal manuals.', 'Run one-off conversion'],
     '/queue': ['Conversion queue & settings', 'Start or monitor managed conversion jobs here. Stage 2A begins after Docling conversion completes.', 'Start or inspect the queue'],
     '/book': ['Sequential book pipeline', 'Follow Convert → Analyze → Verify → Finalize → Chunk. Failed or stale upstream stages block every downstream stage.', 'Complete the highlighted stage'],
-    '/verification': ['Stage 2B verification', 'Run and retry device/cloud checks here. Stage 2C cannot start until every current verification route succeeds.', 'Clear pending and failed checks'],
+    '/verification': ['Stage 2B verification', 'Run and retry verification here. Physical worker configuration and Artifact participation live on the Workers page.', 'Clear pending and failed checks'],
+    '/workers': ['Inference workers', 'Stop/resume each physical device independently, manage multiple Colab workers, and choose Artifact sweep participants.', 'Configure worker participation'],
+    '/review-workers': ['AI review workers', 'After Text, Vision, and Artifact machine work finishes, assigned Colab workers can prepare second-opinion suggestions for the human review queue. Human decisions remain authoritative.', 'Assign review workers'],
     '/artifact-audit': ['Technical visual audit', 'Inspect technical pictures produced by verification. Rerunning a visual verification makes downstream Stage 2C/Stage 3/machine embeddings stale.', 'Resolve visual evidence'],
     '/text-audit': ['Text verification audit', 'Inspect verifier decisions and source-image transcription. Human corrections take precedence and trigger downstream rebuilding.', 'Resolve questionable text'],
     '/vision-audit': ['Vision evidence audit', 'Review what the vision verifier extracted before it becomes RAG visual evidence.', 'Confirm evidence quality'],

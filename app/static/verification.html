@@ -4,8 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Verification · Docling Auto-Convert</title>
-<link rel="stylesheet" href="/assets/styles.css?v=2026.09.29.40.11AC" />
-<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.29.40.11AC" />
+<link rel="stylesheet" href="/assets/styles.css?v=2026.09.29.40.11AD" />
+<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.29.40.11AD" />
 </head>
 <body class="ui29">
 <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -57,7 +57,7 @@
       <div class="verification-device-grid always-visible-devices" aria-label="Verification devices">
         <article class="verification-device-card compact-device-card">
           <div class="device-card-top"><div><p class="eyebrow">Text verifier</p><h2 id="pi5-title">Text</h2></div><span class="mode-badge paused" id="pi5-mode">Manual</span></div>
-          <div class="provider-selector"><label for="text-provider-select">Processor</label><select id="text-provider-select" onchange="changeProvider('text', this)"><option value="pi5">Pi5 Vision</option><option value="oneplus">OnePlus Vision</option><option value="groq">Groq Vision</option><option value="colab">Colab Qwen-VL</option></select><small>Selected processor only · no automatic fallback</small></div>
+          <div class="provider-selector"><label for="text-provider-select">Processor</label><select id="text-provider-select" onchange="changeProvider('text', this)"><option value="pi5">Pi5 Vision</option><option value="oneplus">OnePlus Vision</option><option value="groq">Groq Vision</option><option value="colab">Colab worker pool</option></select><small>Selected processor only · no automatic fallback</small></div>
           <div class="device-health device-health-primary" id="pi5-health">Checking verifier…</div>
           <div class="active-stage" id="pi5-stage">Idle</div>
           <div class="verification-big-stats"><strong id="pi5-done">0</strong><span>completed</span><strong id="pi5-failed">0</strong><span>failed</span></div>
@@ -65,7 +65,7 @@
         </article>
         <article class="verification-device-card compact-device-card">
           <div class="device-card-top"><div><p class="eyebrow">Vision verifier</p><h2 id="oneplus-title">Vision</h2></div><span class="mode-badge paused" id="oneplus-mode">Manual</span></div>
-          <div class="provider-selector"><label for="vision-provider-select">Processor</label><select id="vision-provider-select" onchange="changeProvider('vision', this)"><option value="pi5">Pi5 Vision</option><option value="oneplus">OnePlus Vision</option><option value="groq">Groq Vision</option><option value="colab">Colab Qwen-VL</option></select><small>Selected processor only · no automatic fallback</small></div>
+          <div class="provider-selector"><label for="vision-provider-select">Processor</label><select id="vision-provider-select" onchange="changeProvider('vision', this)"><option value="pi5">Pi5 Vision</option><option value="oneplus">OnePlus Vision</option><option value="groq">Groq Vision</option><option value="colab">Colab worker pool</option></select><small>Selected processor only · no automatic fallback</small></div>
           <div class="device-health device-health-primary" id="oneplus-health">Checking verifier…</div>
           <div class="active-stage" id="oneplus-stage">Idle</div>
           <div class="verification-big-stats"><strong id="oneplus-done">0</strong><span>completed</span><strong id="oneplus-failed">0</strong><span>failed</span></div>
@@ -81,21 +81,9 @@
           <p class="interlock-card-note">Auto continuously releases eligible artifacts after their book's normal routes finish.</p>
         </article>
         <article class="verification-device-card compact-device-card colab-worker-card">
-          <div class="device-card-top"><div><p class="eyebrow">Optional remote worker</p><h2>Google Colab · KoboldCpp</h2></div><span class="mode-badge paused" id="colab-mode">Disabled</span></div>
-          <label class="field-label" for="colab-url">Tunnel URL</label>
-          <input class="text-input" id="colab-url" type="url" placeholder="https://xxxx.trycloudflare.com" autocomplete="off" />
-          <label class="field-label" for="colab-model">OpenAI model name</label>
-          <input class="text-input" id="colab-model" type="text" value="koboldcpp" autocomplete="off" />
-          <label class="field-label" for="colab-api-key">API key</label>
-          <input class="text-input" id="colab-api-key" type="password" placeholder="Leave blank to keep saved key" autocomplete="new-password" />
-          <label class="checkbox-row"><input id="colab-enabled" type="checkbox" /> Enable Colab provider</label>
-          <label class="checkbox-row"><input id="colab-artifact-enabled" type="checkbox" /> Let Colab join Artifact idle pool</label>
-          <div class="document-actions">
-            <button class="secondary-button" id="colab-save" type="button" onclick="saveColabProvider(this)">Save</button>
-            <button class="secondary-button" id="colab-test" type="button" onclick="testColabProvider(this)">Test connection</button>
-          </div>
-          <div class="device-health device-health-primary" id="colab-health">Not configured</div>
-          <p class="interlock-card-note">The API key is stored separately and never returned to the browser. Paste the key printed by the secured Colab notebook.</p>
+          <div class="device-card-top"><div><p class="eyebrow">Physical workers</p><h2>Worker pool</h2></div><span class="mode-badge auto">Separate settings</span></div>
+          <div class="device-health device-health-primary"><span class="status completed">Pi5 · OnePlus · Colab pool</span><span class="device-model">Per-worker controls</span><small>Stop/resume devices, add multiple Colab workers, and select Artifact participants on the Workers page.</small></div>
+          <div class="document-actions"><a class="secondary-button" href="/workers">Manage workers</a><a class="secondary-button" href="/review-workers">Review workers</a></div>
         </article>
       </div>
       <div class="verification-failure-strip" id="retry-failed-strip" hidden>
@@ -182,8 +170,8 @@
 
   </main>
 </div>
-<script src="/assets/nav.js?v=2026.09.29.40.11AC"></script>
-<script src="/assets/verification.js?v=2026.09.29.40.11AC"></script>
+<script src="/assets/nav.js?v=2026.09.29.40.11AD"></script>
+<script src="/assets/verification.js?v=2026.09.29.40.11AD"></script>
 </body>
 </html>
 
