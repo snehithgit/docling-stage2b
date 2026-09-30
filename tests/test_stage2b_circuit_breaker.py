@@ -135,3 +135,57 @@ def test_oneplus_workload_cooldown_defers_without_retry_budget(tmp_path: Path):
         assert "stage2b_oneplus_workload_deferred" in events.names
 
     asyncio.run(run())
+
+
+def test_dynamic_colab_artifact_auth_failure_opens_worker_specific_circuit(tmp_path: Path):
+    from app.worker_registry import WorkerRegistry
+
+    async def run():
+        store = Stage2BStore(str(tmp_path / "jobs.db"))
+        await store.initialize()
+        await store.create_artifact_sweep_jobs(
+            21, 21, "g", "book__job21", "book.zip",
+            [{"route_id":"AV1","target":"oneplus","source":{"type":"picture","index":1,"artifact_sweep":True}}],
+        )
+        await store.start_artifact_sweep("oneplus")
+        await store.release_ready_artifact_sweeps(21)
+
+        cfg = AppConfig(
+            processed_dir=str(tmp_path / "processed"),
+            database_path=str(tmp_path / "jobs.db"),
+            stage2b_endpoint_breaker_base_seconds=30,
+            stage2b_endpoint_breaker_max_seconds=300,
+        )
+        registry = WorkerRegistry(cfg.database_path)
+        item = registry.add_colab(name="Artifact GPU")
+        registry.update_colab(item["id"], {
+            "enabled": True,
+            "url": "https://artifact.trycloudflare.com",
+            "artifact_enabled": True,
+        })
+        registry.write_api_key(item["id"], "c" * 32)
+        provider = f"colab:{item['id']}"
+        events = Events()
+        worker = Stage2BWorker(lambda: cfg, store, PostprocessStoreStub(), events, worker_registry=registry)
+        worker._ensure_provider_state(provider)
+
+        artifact = await store.claim_next_artifact(item["id"])
+        assert artifact is not None
+        artifact["_artifact_worker"] = provider
+
+        async def unauthorized(*_args, **_kwargs):
+            request = httpx.Request("POST", "https://artifact.trycloudflare.com/v1/chat/completions")
+            response = httpx.Response(401, request=request)
+            raise httpx.HTTPStatusError("unauthorized", request=request, response=response)
+
+        worker._run_oneplus = unauthorized
+        await worker._run_job("oneplus", artifact, preclaimed=True, run_mode_override="artifact_shared", state_key=provider)
+
+        saved = (await store.list_book_jobs_raw(21))[0]
+        assert saved["status"] == "pending"
+        assert saved["retry_count"] == 0
+        assert saved["error_type"] == "ColabEndpointUnavailable"
+        assert worker._endpoint_circuit[provider]["open"] is True
+        assert worker._endpoint_circuit["colab"]["open"] is False
+
+    asyncio.run(run())

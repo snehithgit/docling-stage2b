@@ -21,6 +21,13 @@ def _utc_after(seconds: int) -> str:
     return (datetime.now(UTC) + timedelta(seconds=max(0, int(seconds)))).isoformat()
 
 
+def _load_ledger_sync(path: Path) -> dict[str, Any]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    except Exception:
+        return {}
+
+
 def _signature(entry: dict[str, Any], review_type: str) -> str:
     if review_type == "text":
         payload = {
@@ -220,8 +227,12 @@ class ReviewAssistantService:
         await asyncio.gather(*([self._task] if self._task else [])+list(self._active.values()), return_exceptions=True)
         self._active.clear()
 
-    async def _sync_candidates(self) -> bool:
-        settings=self._registry.snapshot(self._config_getter()).get("review") or {}
+    async def _sync_candidates(self, settings: dict[str, Any] | None = None) -> bool:
+        # The supervisor already has the registry snapshot for this cycle. Reuse
+        # its review settings instead of rereading worker_registry.json, and fan
+        # independent per-book ledger reads out concurrently.
+        if settings is None:
+            settings=(await asyncio.to_thread(self._registry.snapshot, self._config_getter())).get("review") or {}
         if not settings.get("enabled"):
             self._machine_blockers = 0
             return False
@@ -233,12 +244,15 @@ class ReviewAssistantService:
         # library, not merely lower priority than routes from the same book.
         if self._machine_blockers:
             return False
+        config = self._config_getter()
+        candidates: list[tuple[int, str, Path]] = []
         for book in books:
             jid=int(book.get("postprocess_job_id") or 0); result_dir_name=str(book.get("result_dir") or "")
             if not jid or not result_dir_name: continue
-            path=Path(self._config_getter().processed_dir)/Path(result_dir_name).name/"correction_ledger.json"
-            try: ledger=json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
-            except Exception: ledger={}
+            path=Path(config.processed_dir)/Path(result_dir_name).name/"correction_ledger.json"
+            candidates.append((jid, result_dir_name, path))
+        ledgers = await asyncio.gather(*(asyncio.to_thread(_load_ledger_sync, path) for _, _, path in candidates))
+        for (jid, result_dir_name, _path), ledger in zip(candidates, ledgers):
             for entry in ledger.get("entries") or []:
                 if entry.get("status")=="superseded": continue
                 if entry.get("entry_type")=="text_correction" and not entry.get("human_verified") and str(entry.get("verification_verdict") or "").upper() in {"LIKELY_CORRUPT","UNCERTAIN"}:
@@ -270,18 +284,19 @@ class ReviewAssistantService:
     async def _loop(self) -> None:
         while not self._stop.is_set():
             try:
-                config=self._config_getter(); settings=self._registry.snapshot(config).get("review") or {}
+                config=self._config_getter(); registry_snapshot=await asyncio.to_thread(self._registry.snapshot, config); settings=registry_snapshot.get("review") or {}
+                worker_map={str(item.get("id")): item for item in (registry_snapshot.get("colab_workers") or [])}
                 # Review workers have their own per-physical-worker pause state.
                 # They are gated by completion of the primary Text/Vision/Artifact
                 # workload, not by legacy Pi5/OnePlus role pause flags.
                 if settings.get("enabled"):
-                    machine_clear = await self._sync_candidates()
+                    machine_clear = await self._sync_candidates(settings)
                     text=set(settings.get("text_worker_ids") or []); vision=set(settings.get("vision_worker_ids") or [])
                     if not machine_clear:
                         await asyncio.sleep(max(2,int(getattr(config,"stage2b_poll_interval_seconds",3))))
                         continue
                     for wid in sorted(text|vision):
-                        worker=self._registry.get_colab(wid)
+                        worker=worker_map.get(wid)
                         if not worker or not worker.get("enabled") or worker.get("paused"): continue
                         provider=f"colab:{wid}"
                         if provider in self._worker.dispatch_reservations: continue

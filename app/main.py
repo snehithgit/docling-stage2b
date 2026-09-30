@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from concurrent.futures import ThreadPoolExecutor
 
 from contextlib import asynccontextmanager
 import asyncio
@@ -2334,78 +2335,91 @@ def _result_counts(path: str, modified: int, size: int) -> dict:
             "applied": sum(e.get("status") == "applied" for e in entries)}
 
 
+def _enrich_postprocess_row(row: dict, processed_dir: Path) -> dict:
+    """Enrich one post-process row; safe to execute in a bounded worker pool."""
+    row["quality_status"] = None
+    row["quality_display_label"] = None
+    row["integrity_status"] = None
+    row["integrity_display_label"] = None
+    row["ledger_available"] = False
+    row["overlays_available"] = False
+    row["stage2c_status"] = "not_built"
+    row["stage2c_progress"] = None
+    row["chunks_available"] = False
+    row["stage3_status"] = "not_built"
+    row["stage3_progress"] = None
+    row["text_verifier_label"] = _verifier_provider_label(runtime.config.text_verifier_provider, "text")
+    row["human_review_mandatory"] = bool(runtime.config.stage2c_require_human_review)
+    row["stage2c_auto_finalize"] = bool(runtime.config.stage2c_auto_finalize_after_stage2b)
+    result_dir = row.get("result_dir")
+    if row.get("status") != "completed" or not result_dir:
+        return row
+    result_path = processed_dir / Path(result_dir).name
+    row["ledger_available"] = (result_path / "correction_ledger.json").is_file()
+    row["overlays_available"] = (result_path / "chunk_overlays.jsonl").is_file()
+    row["chunks_available"] = (result_path / "chunks.jsonl").is_file()
+    try:
+        ledger_path = result_path / "correction_ledger.json"
+        stat = ledger_path.stat()
+        row["result_counts"] = _result_counts(str(ledger_path), stat.st_mtime_ns, stat.st_size)
+    except (OSError, ValueError, TypeError, AttributeError):
+        row["result_counts"] = None
+    review = human_review_summary(result_path, require_human=bool(runtime.config.stage2c_require_human_review))
+    row.update(review)
+    structural_review = stage2a_human_review_summary(result_path)
+    row["structural_review_total"] = int(structural_review.get("total") or 0)
+    row["structural_review_pending"] = int(structural_review.get("blocking_review_required") or 0)
+    row["structural_review_resolved"] = int(structural_review.get("resolved") or 0)
+    state = runtime.stage2b_worker.stage2c_state_for(int(row.get("id") or 0))
+    if state:
+        row["stage2c_status"] = state.get("status") or "not_built"
+        row["stage2c_progress"] = state
+    else:
+        stage2c_path = result_path / "stage2c_backfill.json"
+        if stage2c_path.is_file():
+            try:
+                persisted_stage2c = json.loads(stage2c_path.read_text(encoding="utf-8"))
+                row["stage2c_status"] = persisted_stage2c.get("status") or "not_built"
+                row["stage2c_progress"] = persisted_stage2c
+            except (OSError, json.JSONDecodeError, TypeError):
+                row["stage2c_status"] = "not_built"
+    stage3_state = runtime.stage3_builder.state_for(int(row.get("id") or 0))
+    if stage3_state:
+        row["stage3_status"] = stage3_state.get("status") or "not_built"
+        row["stage3_progress"] = stage3_state
+    elif row["chunks_available"]:
+        row["stage3_status"] = "ready"
+    summary_path = result_path / "summary.json"
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return row
+    coverage = summary.get("coverage") or {}
+    integrity = summary.get("integrity") or {}
+    route_summary = summary.get("routes") or {}
+    row["quality_status"] = coverage.get("status")
+    row["quality_display_label"] = coverage.get("display_label")
+    row["integrity_status"] = integrity.get("status")
+    row["integrity_display_label"] = integrity.get("display_label")
+    row["route_candidates_detected"] = int(route_summary.get("total_candidates_detected") or row.get("route_count") or 0)
+    row["route_deferred"] = int(route_summary.get("deferred") or 0)
+    row["route_safety_valve_triggered"] = bool(route_summary.get("safety_valve_triggered") or row["route_deferred"])
+    return row
+
+
 def enrich_postprocess_jobs(rows: list[dict]) -> list[dict]:
-    """Add human-facing quality labels without changing machine status fields."""
+    """Add human-facing quality labels with bounded per-book filesystem fan-out."""
+    if not rows:
+        return rows
     processed_dir = Path(runtime.config.processed_dir)
-    for row in rows:
-        row["quality_status"] = None
-        row["quality_display_label"] = None
-        row["integrity_status"] = None
-        row["integrity_display_label"] = None
-        row["ledger_available"] = False
-        row["overlays_available"] = False
-        row["stage2c_status"] = "not_built"
-        row["stage2c_progress"] = None
-        row["chunks_available"] = False
-        row["stage3_status"] = "not_built"
-        row["stage3_progress"] = None
-        row["text_verifier_label"] = _verifier_provider_label(runtime.config.text_verifier_provider, "text")
-        row["human_review_mandatory"] = bool(runtime.config.stage2c_require_human_review)
-        row["stage2c_auto_finalize"] = bool(runtime.config.stage2c_auto_finalize_after_stage2b)
-        result_dir = row.get("result_dir")
-        if row.get("status") != "completed" or not result_dir:
-            continue
-        result_path = processed_dir / Path(result_dir).name
-        row["ledger_available"] = (result_path / "correction_ledger.json").is_file()
-        row["overlays_available"] = (result_path / "chunk_overlays.jsonl").is_file()
-        row["chunks_available"] = (result_path / "chunks.jsonl").is_file()
-        try:
-            ledger_path = result_path / "correction_ledger.json"
-            stat = ledger_path.stat()
-            row["result_counts"] = _result_counts(str(ledger_path), stat.st_mtime_ns, stat.st_size)
-        except (OSError, ValueError, TypeError, AttributeError):
-            row["result_counts"] = None
-        review = human_review_summary(result_path, require_human=bool(runtime.config.stage2c_require_human_review))
-        row.update(review)
-        structural_review = stage2a_human_review_summary(result_path)
-        row["structural_review_total"] = int(structural_review.get("total") or 0)
-        row["structural_review_pending"] = int(structural_review.get("blocking_review_required") or 0)
-        row["structural_review_resolved"] = int(structural_review.get("resolved") or 0)
-        state = runtime.stage2b_worker.stage2c_state_for(int(row.get("id") or 0))
-        if state:
-            row["stage2c_status"] = state.get("status") or "not_built"
-            row["stage2c_progress"] = state
-        else:
-            stage2c_path = result_path / "stage2c_backfill.json"
-            if stage2c_path.is_file():
-                try:
-                    persisted_stage2c = json.loads(stage2c_path.read_text(encoding="utf-8"))
-                    row["stage2c_status"] = persisted_stage2c.get("status") or "not_built"
-                    row["stage2c_progress"] = persisted_stage2c
-                except (OSError, json.JSONDecodeError, TypeError):
-                    row["stage2c_status"] = "not_built"
-        stage3_state = runtime.stage3_builder.state_for(int(row.get("id") or 0))
-        if stage3_state:
-            row["stage3_status"] = stage3_state.get("status") or "not_built"
-            row["stage3_progress"] = stage3_state
-        elif row["chunks_available"]:
-            row["stage3_status"] = "ready"
-        summary_path = result_path / "summary.json"
-        try:
-            summary = json.loads(summary_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError, TypeError):
-            continue
-        coverage = summary.get("coverage") or {}
-        integrity = summary.get("integrity") or {}
-        route_summary = summary.get("routes") or {}
-        row["quality_status"] = coverage.get("status")
-        row["quality_display_label"] = coverage.get("display_label")
-        row["integrity_status"] = integrity.get("status")
-        row["integrity_display_label"] = integrity.get("display_label")
-        row["route_candidates_detected"] = int(route_summary.get("total_candidates_detected") or row.get("route_count") or 0)
-        row["route_deferred"] = int(route_summary.get("deferred") or 0)
-        row["route_safety_valve_triggered"] = bool(route_summary.get("safety_valve_triggered") or row["route_deferred"])
-    return rows
+    workers = min(8, max(1, len(rows)))
+    if workers == 1:
+        return [_enrich_postprocess_row(rows[0], processed_dir)]
+    # This function itself is called through asyncio.to_thread(). A small,
+    # bounded pool parallelizes independent per-book stat/JSON reads without
+    # consuming the global asyncio executor with one task per file.
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="postprocess-enrich") as pool:
+        return list(pool.map(lambda row: _enrich_postprocess_row(row, processed_dir), rows))
 
 
 def attach_stage2(rows: list[dict], postprocess_rows: list[dict]) -> list[dict]:
@@ -2471,8 +2485,20 @@ def _audit_diagnostic_row(result_dir: Path) -> dict:
         return {"review_required": 0, "vision_review_required": 0, "vision_evidence_recovery_required": 0, "gate_status": "unknown"}
 
 
-@app.get("/api/errors")
-async def errors() -> dict:
+# /api/errors is polled by nav.js on *every* page across the whole app (see
+# static/nav.js), so its cost is a site-wide tax rather than something only
+# the /errors page pays for. Building the payload walks every completed book
+# on disk (correction ledger, routes.json, summary.json, audit-gate state),
+# so it gets slower as more books are processed -- and used to redo that
+# full walk, serially, on each individual page load. A short TTL cache lets
+# concurrent page loads (and the verification page's 3-second poll) share
+# one computation instead of each re-walking every processed book.
+_ERRORS_CACHE_TTL_SECONDS = 4.0
+_errors_cache: dict = {"payload": None, "computed_at": 0.0}
+_errors_cache_lock = asyncio.Lock()
+
+
+async def _build_errors_payload() -> dict:
     conversion_jobs = enrich_jobs(await runtime.store.list_jobs(limit=-1, failures_only=True))
     raw_postprocess = await runtime.postprocess_store.list_jobs(limit=-1)
     postprocess_rows = await asyncio.to_thread(enrich_postprocess_jobs, raw_postprocess)
@@ -2482,12 +2508,23 @@ async def errors() -> dict:
     stage2c_failed = [row for row in postprocess_rows if str(row.get("stage2c_status") or "") == "failed"]
     stage3_failed = [row for row in postprocess_rows if str(row.get("stage3_status") or "") == "failed"]
 
+    # Each completed book's audit read is independent of every other book's,
+    # so fan them out concurrently instead of awaiting them one at a time.
+    # With N completed books this turns an O(N) chain of serial file-I/O
+    # round trips into effectively one round trip.
+    auditable_rows = [
+        row for row in postprocess_rows
+        if row.get("status") == "completed" and row.get("result_dir")
+    ]
+    audit_results = await asyncio.gather(*[
+        asyncio.to_thread(
+            _audit_diagnostic_row,
+            Path(runtime.config.processed_dir) / Path(str(row["result_dir"])).name,
+        )
+        for row in auditable_rows
+    ])
     audit_rows: list[dict] = []
-    for row in postprocess_rows:
-        if row.get("status") != "completed" or not row.get("result_dir"):
-            continue
-        result_dir = Path(runtime.config.processed_dir) / Path(str(row["result_dir"])).name
-        audit = await asyncio.to_thread(_audit_diagnostic_row, result_dir)
+    for row, audit in zip(auditable_rows, audit_results):
         if int(audit.get("review_required") or 0) > 0:
             audit_rows.append({
                 "postprocess_job_id": int(row.get("id") or 0),
@@ -2525,6 +2562,23 @@ async def errors() -> dict:
         "audit": audit_rows,
         "circuits": circuits,
     }
+
+
+@app.get("/api/errors")
+async def errors() -> dict:
+    now = time.monotonic()
+    cached_payload = _errors_cache["payload"]
+    if cached_payload is not None and (now - _errors_cache["computed_at"]) < _ERRORS_CACHE_TTL_SECONDS:
+        return cached_payload
+    async with _errors_cache_lock:
+        now = time.monotonic()
+        cached_payload = _errors_cache["payload"]
+        if cached_payload is not None and (now - _errors_cache["computed_at"]) < _ERRORS_CACHE_TTL_SECONDS:
+            return cached_payload
+        payload = await _build_errors_payload()
+        _errors_cache["payload"] = payload
+        _errors_cache["computed_at"] = time.monotonic()
+        return payload
 
 
 @app.get("/api/settings")
@@ -3136,17 +3190,30 @@ def _verifier_provider_model(config: AppConfig, provider: str) -> str | None:
     return None
 
 
+def _stage2b_colab_registry_snapshot(config: AppConfig) -> tuple[list[dict], list[dict], bool, str | None]:
+    """Single registry read + single key-file read per worker for hot status polling."""
+    status = runtime.worker_registry.snapshot_with_key_status(config)
+    snapshot = status.get("snapshot") or {}
+    colab_rows = list(snapshot.get("colab_workers") or [])
+    configured = list(status.get("configured_colabs") or [])
+    key_status = status.get("key_status") or {}
+    key_ready = any(bool((key_status.get(str(item.get("id"))) or {}).get("api_key_configured")) for item in colab_rows)
+    key_problem = next(
+        (str(value.get("api_key_error")) for value in key_status.values() if value.get("api_key_error")),
+        None,
+    )
+    return colab_rows, configured, key_ready, key_problem
+
+
 @app.get("/api/stage2b/status")
 async def stage2b_status() -> dict:
     cloud_selected = runtime.config.text_verifier_provider == "groq" or runtime.config.vision_verifier_provider == "groq"
     quota = await runtime.groq_quota.snapshot() if cloud_selected else None
     key_ready = bool(__import__("os").environ.get(runtime.config.text_cloud_api_key_env, "").strip())
-    registry_snapshot = runtime.worker_registry.snapshot(runtime.config)
-    colab_rows = list(registry_snapshot.get("colab_workers") or [])
-    configured_colabs = runtime.worker_registry.configured_colabs(runtime.config, include_paused=True)
+    colab_rows, configured_colabs, colab_key_ready, colab_key_problem = await asyncio.to_thread(
+        _stage2b_colab_registry_snapshot, runtime.config
+    )
     colab_ready = bool(configured_colabs)
-    colab_key_ready = any(bool(runtime.worker_registry.read_api_key(str(item.get("id")))) for item in colab_rows)
-    colab_key_problem = next((runtime.worker_registry.api_key_error(str(item.get("id"))) for item in colab_rows if runtime.worker_registry.api_key_error(str(item.get("id")))), None)
     return {
         "enabled": runtime.config.stage2b_enabled,
         "text_provider": {
@@ -3691,14 +3758,20 @@ async def vision_audit_waive_recovery(job_id: int, entry_id: str) -> dict:
     if not job or not job.get("result_dir"):
         raise HTTPException(status_code=404, detail="Post-process job not found.")
     result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
-    try:
-        async with runtime.stage2b_worker._stage2c_ledger_lock:
-            entry = await asyncio.to_thread(waive_human_visual_evidence_recovery, result_dir, entry_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    audit = await asyncio.to_thread(
-        verifier_audit_summary, result_dir, text_require_human=bool(runtime.config.stage2c_require_human_review)
-    )
+    # Held for the whole book, same as the sibling structural-review/table-repair
+    # endpoints below: without this, this ledger write can race a concurrent
+    # POST /api/postprocess/jobs/{job_id}/delete, which quarantines/removes
+    # result_dir out from under an in-flight write and can resurrect a stray
+    # orphaned book directory (see book_lifecycle_lock.py's docstring).
+    async with runtime.book_lifecycle_locks.get(int(job_id)):
+        try:
+            async with runtime.stage2b_worker._stage2c_ledger_lock:
+                entry = await asyncio.to_thread(waive_human_visual_evidence_recovery, result_dir, entry_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        audit = await asyncio.to_thread(
+            verifier_audit_summary, result_dir, text_require_human=bool(runtime.config.stage2c_require_human_review)
+        )
     runtime.events.notify("human_visual_evidence_recovery_waived")
     return {"ok": True, "entry": entry, "audit": audit}
 
@@ -3709,14 +3782,17 @@ async def vision_audit_undo_decision(job_id: int, entry_id: str) -> dict:
     if not job or not job.get("result_dir"):
         raise HTTPException(status_code=404, detail="Post-process job not found.")
     result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
-    try:
-        async with runtime.stage2b_worker._stage2c_ledger_lock:
-            entry = await asyncio.to_thread(undo_human_visual_decision, result_dir, entry_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    audit = await asyncio.to_thread(
-        verifier_audit_summary, result_dir, text_require_human=bool(runtime.config.stage2c_require_human_review)
-    )
+    # See vision_audit_waive_recovery above: this must hold the book lifecycle
+    # lock so it cannot race a concurrent book deletion.
+    async with runtime.book_lifecycle_locks.get(int(job_id)):
+        try:
+            async with runtime.stage2b_worker._stage2c_ledger_lock:
+                entry = await asyncio.to_thread(undo_human_visual_decision, result_dir, entry_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        audit = await asyncio.to_thread(
+            verifier_audit_summary, result_dir, text_require_human=bool(runtime.config.stage2c_require_human_review)
+        )
     runtime.events.notify("human_visual_decision_undone")
     return {"ok": True, "entry": entry, "audit": audit}
 
@@ -4032,9 +4108,26 @@ async def maintenance_stale_files_clear(request: StaleCleanupConfirmRequest) -> 
     return result
 
 
+_STAGE2B_BOOKS_CACHE_TTL_SECONDS = 4.0
+_stage2b_books_cache: dict[str, object] = {"payload": None, "computed_at": 0.0}
+_stage2b_books_cache_lock = asyncio.Lock()
+
+
 @app.get("/api/stage2b/books")
 async def stage2b_books() -> dict:
-    return {"books": await runtime.stage2b_store.list_books()}
+    now = time.monotonic()
+    cached = _stage2b_books_cache.get("payload")
+    if cached is not None and now - float(_stage2b_books_cache.get("computed_at") or 0.0) < _STAGE2B_BOOKS_CACHE_TTL_SECONDS:
+        return cached  # type: ignore[return-value]
+    async with _stage2b_books_cache_lock:
+        now = time.monotonic()
+        cached = _stage2b_books_cache.get("payload")
+        if cached is not None and now - float(_stage2b_books_cache.get("computed_at") or 0.0) < _STAGE2B_BOOKS_CACHE_TTL_SECONDS:
+            return cached  # type: ignore[return-value]
+        payload = {"books": await runtime.stage2b_store.list_books()}
+        _stage2b_books_cache["payload"] = payload
+        _stage2b_books_cache["computed_at"] = time.monotonic()
+        return payload
 
 
 @app.post("/api/stage2b/books/{postprocess_job_id}/start")
@@ -4086,7 +4179,9 @@ async def stage2b_provider_update(kind: str, update: VerifierProviderUpdate) -> 
 
 
 def _worker_registry_public() -> dict:
-    snap = runtime.worker_registry.snapshot(runtime.config)
+    status = runtime.worker_registry.snapshot_with_key_status(runtime.config)
+    snap = status.get("snapshot") or {}
+    key_status = status.get("key_status") or {}
     reservations = runtime.stage2b_worker.dispatch_reservations
     local = {}
     for worker_id in ("pi5", "oneplus"):
@@ -4106,11 +4201,12 @@ def _worker_registry_public() -> dict:
         worker_id = str(worker.get("id"))
         provider = f"colab:{worker_id}"
         state = dict(runtime.stage2b_worker.worker_state.get(provider) or {})
-        key_ready = bool(runtime.worker_registry.read_api_key(worker_id))
+        key = key_status.get(worker_id) or {}
+        key_ready = bool(key.get("api_key_configured"))
         colabs.append({
             **worker,
             "api_key_configured": key_ready,
-            "api_key_error": runtime.worker_registry.api_key_error(worker_id),
+            "api_key_error": key.get("api_key_error"),
             "connection_configured": bool(worker.get("enabled") and worker.get("url") and key_ready),
             "active": provider in reservations or bool(state.get("active_job_id")),
             "reservation": reservations.get(provider),
@@ -4126,14 +4222,17 @@ def _worker_registry_public() -> dict:
 
 @app.get("/api/workers")
 async def workers_status() -> dict:
-    return _worker_registry_public()
+    # WorkerRegistry does synchronous JSON-file I/O under a threading.RLock;
+    # this page is polled every few seconds by static/workers.js, so route it
+    # through a thread instead of blocking the single event loop on every poll.
+    return await asyncio.to_thread(_worker_registry_public)
 
 
 @app.put("/api/workers/local/{worker_id}")
 async def update_local_worker(worker_id: str, update: LocalWorkerUpdate) -> dict:
     if worker_id not in {"pi5", "oneplus"}:
         raise HTTPException(status_code=404, detail="Unknown local worker")
-    state = runtime.worker_registry.update_local(
+    state = await runtime.stage2b_worker.update_local_worker_admin(
         worker_id, paused=update.paused, artifact_enabled=update.artifact_enabled
     )
     runtime.events.notify("worker_registry_updated")
@@ -4142,7 +4241,7 @@ async def update_local_worker(worker_id: str, update: LocalWorkerUpdate) -> dict
 
 @app.post("/api/workers/colab")
 async def add_colab_worker(request: ColabWorkerCreate) -> dict:
-    worker = runtime.worker_registry.add_colab(name=request.name)
+    worker = await asyncio.to_thread(runtime.worker_registry.add_colab, name=request.name)
     runtime.events.notify("worker_registry_updated")
     return worker
 
@@ -4150,84 +4249,100 @@ async def add_colab_worker(request: ColabWorkerCreate) -> dict:
 @app.put("/api/workers/colab/{worker_id}")
 async def update_colab_worker(worker_id: str, update: ColabWorkerUpdate) -> dict:
     provider = f"colab:{worker_id}"
-    active = bool(runtime.stage2b_worker.dispatch_reservations.get(provider))
     updates = update.model_dump(exclude={"api_key", "clear_api_key"}, exclude_none=True)
-    # "Stop after current job" must be writable while a request is in flight.
-    # Any configuration mutation that could change the endpoint/model/secret is
-    # still rejected until the physical worker becomes idle.
-    if active:
-        changed_fields = set(updates)
-        has_secret_change = bool(update.clear_api_key or (update.api_key is not None and str(update.api_key).strip()))
-        if changed_fields - {"paused"} or has_secret_change:
-            raise HTTPException(status_code=409, detail="Only Stop/Resume may be changed while this Colab worker has an active request")
     try:
-        worker = runtime.worker_registry.update_colab(worker_id, updates)
-        if update.clear_api_key:
-            runtime.worker_registry.clear_api_key(worker_id)
-        elif update.api_key is not None and str(update.api_key).strip():
-            runtime.worker_registry.write_api_key(worker_id, str(update.api_key).strip())
+        worker = await runtime.stage2b_worker.update_colab_worker_admin(
+            worker_id, updates, api_key=update.api_key, clear_api_key=update.clear_api_key
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        message = str(exc)
+        status = 409 if "scheduled for removal" in message else 422
+        raise HTTPException(status_code=status, detail=message) from exc
+    if worker is None:
+        raise HTTPException(status_code=404, detail="Colab worker not found")
     runtime.stage2b_worker.reset_provider_connection(provider)
     runtime.events.notify("worker_registry_updated")
+    status = await asyncio.to_thread(runtime.worker_registry.snapshot_with_key_status, runtime.config)
+    key = (status.get("key_status") or {}).get(worker_id) or {}
     return {
         **worker,
-        "api_key_configured": bool(runtime.worker_registry.read_api_key(worker_id)),
-        "api_key_error": runtime.worker_registry.api_key_error(worker_id),
+        "api_key_configured": bool(key.get("api_key_configured")),
+        "api_key_error": key.get("api_key_error"),
     }
 
 
 @app.delete("/api/workers/colab/{worker_id}")
 async def delete_colab_worker(worker_id: str) -> dict:
-    provider = f"colab:{worker_id}"
-    if runtime.stage2b_worker.dispatch_reservations.get(provider):
-        raise HTTPException(status_code=409, detail="Stop/wait for the active request before removing this worker")
-    if not runtime.worker_registry.remove_colab(worker_id):
+    result = await runtime.stage2b_worker.remove_colab_worker_admin(worker_id)
+    state = str(result.get("state") or "")
+    if state == "missing":
         raise HTTPException(status_code=404, detail="Colab worker not found")
     runtime.events.notify("worker_registry_updated")
-    return {"deleted": True, "worker_id": worker_id}
+    if state == "pending":
+        return {
+            "deleted": False,
+            "pending_removal": True,
+            "worker_id": worker_id,
+            "detail": "Removal requested; the current job will finish and the worker will then be removed automatically",
+        }
+    return {"deleted": True, "pending_removal": False, "worker_id": worker_id}
 
 
 @app.post("/api/workers/colab/{worker_id}/test")
 async def test_colab_worker(worker_id: str) -> dict:
     provider = f"colab:{worker_id}"
-    if runtime.stage2b_worker.dispatch_reservations.get(provider):
-        raise HTTPException(status_code=409, detail="Wait for this Colab worker's active request to finish before testing it")
-    worker = runtime.worker_registry.get_colab(worker_id)
+    owner = f"{provider}:admin-test:{uuid.uuid4().hex}"
+    try:
+        worker = await runtime.stage2b_worker.reserve_colab_worker_for_admin(worker_id, owner)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not worker:
         raise HTTPException(status_code=404, detail="Colab worker not found")
-    if not worker.get("enabled"):
-        raise HTTPException(status_code=409, detail="Enable this Colab worker first")
-    endpoint = str(worker.get("url") or "").strip()
-    api_key = runtime.worker_registry.read_api_key(worker_id)
-    if not endpoint or not api_key:
-        raise HTTPException(status_code=409, detail="Colab URL/API key is not configured")
-    client = OpenAICompatibleVerifier(endpoint, timeout_seconds=min(60, int(runtime.config.colab_timeout_seconds)), api_key=api_key)
     try:
-        health = await client.health()
-        if not health.reachable:
-            raise HTTPException(status_code=503, detail=health.detail or "Colab endpoint unavailable")
-        await client.chat_text("Reply with exactly OK.", "Authentication probe.", model=str(worker.get("model") or "koboldcpp"), max_tokens=2)
-    except HTTPException:
-        raise
-    except httpx.HTTPStatusError as exc:
-        status = exc.response.status_code if exc.response is not None else 0
-        raise HTTPException(status_code=401 if status in {401, 403} else 503, detail=f"Colab generation probe failed: HTTP {status}") from exc
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Colab generation probe failed: {exc}") from exc
-    runtime.stage2b_worker.reset_provider_connection(f"colab:{worker_id}")
-    return {"ok": True, "worker_id": worker_id, "model": worker.get("model") or "koboldcpp"}
+        if not worker.get("enabled"):
+            raise HTTPException(status_code=409, detail="Enable this Colab worker first")
+        endpoint = str(worker.get("url") or "").strip()
+        api_key = await asyncio.to_thread(runtime.worker_registry.read_api_key, worker_id)
+        if not endpoint or not api_key:
+            raise HTTPException(status_code=409, detail="Colab URL/API key is not configured")
+        client = OpenAICompatibleVerifier(endpoint, timeout_seconds=min(60, int(runtime.config.colab_timeout_seconds)), api_key=api_key)
+        try:
+            health = await client.health()
+            if not health.reachable:
+                raise HTTPException(status_code=503, detail=health.detail or "Colab endpoint unavailable")
+            await client.chat_text("Reply with exactly OK.", "Authentication probe.", model=str(worker.get("model") or "koboldcpp"), max_tokens=2)
+        except HTTPException:
+            raise
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code if exc.response is not None else 0
+            raise HTTPException(status_code=401 if status in {401, 403} else 503, detail=f"Colab generation probe failed: HTTP {status}") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=f"Colab generation probe failed: {exc}") from exc
+        runtime.stage2b_worker.reset_provider_connection(provider)
+        return {"ok": True, "worker_id": worker_id, "model": worker.get("model") or "koboldcpp"}
+    finally:
+        await runtime.stage2b_worker._release_provider(provider, owner)
 
 
 @app.get("/api/review-workers/settings")
 async def review_worker_settings() -> dict:
-    return {"settings": runtime.worker_registry.snapshot(runtime.config).get("review") or {}, "workers": _worker_registry_public()["colab_workers"]}
+    # One asyncio.to_thread() call computes _worker_registry_public(), which
+    # already includes a snapshot() internally -- previously this endpoint
+    # did that same synchronous snapshot() a second time on top, both
+    # unthreaded.
+    public = await asyncio.to_thread(_worker_registry_public)
+    return {"settings": public.get("review") or {}, "workers": public["colab_workers"]}
 
 
 @app.put("/api/review-workers/settings")
 async def update_review_worker_settings(update: ReviewWorkerSettingsUpdate) -> dict:
-    settings = runtime.worker_registry.update_review(
-        enabled=update.enabled, text_worker_ids=update.text_worker_ids, vision_worker_ids=update.vision_worker_ids
+    settings = await asyncio.to_thread(
+        runtime.worker_registry.update_review,
+        enabled=update.enabled, text_worker_ids=update.text_worker_ids, vision_worker_ids=update.vision_worker_ids,
     )
     runtime.events.notify("review_worker_settings_updated")
     return settings
@@ -5809,21 +5924,26 @@ async def repair_human_correction_entry(job_id: int, entry_id: str) -> dict:
     )
     if verification_row is None:
         raise HTTPException(status_code=404, detail="Completed verifier result for this review entry was not found.")
-    try:
-        outcome = await runtime.stage2b_worker.ensure_stage2c_entry(int(verification_row.get("id") or 0))
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except Exception as exc:
-        runtime.events.notify(
-            "stage2c_ledger_repair_error",
-            postprocess_job_id=job_id,
-            verification_job_id=int(verification_row.get("id") or 0),
-            entry_id=entry_id,
-        )
-        raise HTTPException(
-            status_code=503,
-            detail="The verifier result is safe, but its review record could not be published yet. Retry this review in a moment.",
-        ) from exc
+    # ensure_stage2c_entry() writes into this book's correction_ledger.json;
+    # hold the book lifecycle lock so it cannot race a concurrent
+    # POST /api/postprocess/jobs/{job_id}/delete (see vision_audit_waive_recovery
+    # above for why).
+    async with runtime.book_lifecycle_locks.get(int(job_id)):
+        try:
+            outcome = await runtime.stage2b_worker.ensure_stage2c_entry(int(verification_row.get("id") or 0))
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except Exception as exc:
+            runtime.events.notify(
+                "stage2c_ledger_repair_error",
+                postprocess_job_id=job_id,
+                verification_job_id=int(verification_row.get("id") or 0),
+                entry_id=entry_id,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="The verifier result is safe, but its review record could not be published yet. Retry this review in a moment.",
+            ) from exc
     if str(outcome.get("state") or "") != "ready" or not isinstance(outcome.get("entry"), dict):
         raise HTTPException(status_code=409, detail="This verifier result does not require a repairable human-review entry.")
     runtime.events.notify(
@@ -6092,17 +6212,23 @@ async def docling_page_review_save(job_id: int, request: DoclingReviewSaveReques
     if converted_zip is None:
         raise HTTPException(status_code=404, detail="Immutable converted Docling ZIP is not available.")
     pdf_path, _conversion = await _docling_review_source_pdf(job)
-    try:
-        document, _member = await asyncio.to_thread(load_document_from_zip, converted_zip)
-        with fitz.open(pdf_path) as pdf:
-            index = int(request.page) - 1
-            if index < 0 or index >= len(pdf):
-                raise HTTPException(status_code=404, detail="PDF page not found.")
-            p = pdf[index]
-            page_width, page_height = float(p.rect.width), float(p.rect.height)
-        manifest = await asyncio.to_thread(_load_json_file, result_dir / "source_manifest.json")
-        source_sha = str(manifest.get("converted_zip_sha256") or "")
-        async with runtime.book_lifecycle_locks.get(int(job_id)):
+    # The whole handler -- including the reads below, not just the final
+    # write -- runs under the book lifecycle lock. Reading the converted ZIP
+    # / PDF / manifest before taking the lock would leave a window where a
+    # concurrent POST /api/postprocess/jobs/{job_id}/delete could quarantine
+    # result_dir in between, and the later locked write could then resurrect
+    # a stray directory at that path (see book_lifecycle_lock.py).
+    async with runtime.book_lifecycle_locks.get(int(job_id)):
+        try:
+            document, _member = await asyncio.to_thread(load_document_from_zip, converted_zip)
+            with fitz.open(pdf_path) as pdf:
+                index = int(request.page) - 1
+                if index < 0 or index >= len(pdf):
+                    raise HTTPException(status_code=404, detail="PDF page not found.")
+                p = pdf[index]
+                page_width, page_height = float(p.rect.width), float(p.rect.height)
+            manifest = await asyncio.to_thread(_load_json_file, result_dir / "source_manifest.json")
+            source_sha = str(manifest.get("converted_zip_sha256") or "")
             repair = await asyncio.to_thread(
                 save_docling_page_repair,
                 result_dir,
@@ -6130,10 +6256,10 @@ async def docling_page_review_save(job_id: int, request: DoclingReviewSaveReques
                         deactivate_table_repair, result_dir, int(match.group(1)),
                         reason="superseded_by_docling_page_review",
                     )
-    except HTTPException:
-        raise
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except HTTPException:
+            raise
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     runtime.events.notify("docling_page_repair_saved", postprocess_job_id=job_id, repair_id=repair.get("repair_id"))
     return {"saved": True, "repair": repair, "stage3_stale": True}
 

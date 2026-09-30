@@ -157,3 +157,16 @@ def test_book_delete_reservation_blocks_new_pipeline_work_and_pending_verificati
     assert asyncio.run(post.get_job(post_id))["status"] == "deleting"
     assert asyncio.run(post.cancel_book_deletion(post_id, "completed")) is True
     assert asyncio.run(post.get_job(post_id))["status"] == "completed"
+
+
+def test_book_lifecycle_lock_cache_does_not_grow_forever():
+    import gc
+    from app.book_lifecycle_lock import BookLifecycleLocks
+
+    locks = BookLifecycleLocks()
+    lock = locks.get(123)
+    assert locks.cached_lock_count() == 1
+    assert locks.get(123) is lock
+    del lock
+    gc.collect()
+    assert locks.cached_lock_count() == 0

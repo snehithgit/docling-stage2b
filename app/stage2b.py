@@ -37,7 +37,7 @@ from .worker_registry import WorkerRegistry
 from .stage2c import (
     ALL_DIAGRAM_CATEGORIES, DECORATIVE_IMAGE_CATEGORIES, TECHNICAL_DIAGRAM_CATEGORIES,
     TECHNICAL_IMAGE_CATEGORIES, analyze_text_structure, correction_fidelity,
-    STAGE2C_RULE_VERSION, human_review_summary, image_structure_evidence, merge_human_visual_evidence, normalize_human_verified_ledger, revalidate_unreviewed_text_entries, source_sha256, source_transcription_safety_profile, supersede_vision_entries_for_routes, upsert_ledger_entry, vision_enrichment_status,
+    STAGE2C_RULE_VERSION, _authoritative_visual_subjects, _vision_requires_human, human_review_summary, image_structure_evidence, merge_human_visual_evidence, normalize_human_verified_ledger, revalidate_unreviewed_text_entries, source_sha256, source_transcription_safety_profile, supersede_vision_entries_for_routes, upsert_ledger_entry, vision_enrichment_status,
 )
 
 
@@ -2671,6 +2671,111 @@ class Stage2BWorker:
     def dispatch_reservations(self) -> dict[str, str]:
         return dict(self._provider_reservations)
 
+    async def update_local_worker_admin(
+        self, worker_id: str, *, paused: bool | None = None, artifact_enabled: bool | None = None
+    ) -> dict[str, Any]:
+        """Coordinate local Stop/Resume/participation changes with dispatch."""
+        if self._worker_registry is None:
+            raise ValueError("Worker registry is unavailable")
+        if worker_id not in {"pi5", "oneplus"}:
+            raise ValueError("Local worker must be pi5 or oneplus")
+        async with self._dispatch_lock:
+            return await asyncio.to_thread(
+                self._worker_registry.update_local, worker_id,
+                paused=paused, artifact_enabled=artifact_enabled,
+            )
+
+    async def update_colab_worker_admin(
+        self,
+        worker_id: str,
+        updates: dict[str, Any],
+        *,
+        api_key: str | None = None,
+        clear_api_key: bool = False,
+    ) -> dict[str, Any] | None:
+        """Atomically coordinate Colab config writes with provider dispatch.
+
+        The dispatch lock closes the check-then-act window between the HTTP
+        admin endpoint and scheduler reservation. While a worker is active, only
+        its paused flag may change; endpoint/model/secret changes wait for idle.
+        """
+        if self._worker_registry is None:
+            return None
+        provider = f"colab:{worker_id}"
+        async with self._dispatch_lock:
+            existing = await asyncio.to_thread(self._worker_registry.get_colab, worker_id)
+            if not existing:
+                return None
+            self._ensure_provider_state(provider)
+            active = bool(self._provider_reservations.get(provider)) or self._device_locks[provider].locked()
+            changed_fields = set(updates)
+            has_secret_change = bool(clear_api_key or (api_key is not None and str(api_key).strip()))
+            if active and (changed_fields - {"paused"} or has_secret_change):
+                raise RuntimeError("Only Stop/Resume may be changed while this Colab worker has an active request")
+            worker = await asyncio.to_thread(self._worker_registry.update_colab, worker_id, updates)
+            if clear_api_key:
+                await asyncio.to_thread(self._worker_registry.clear_api_key, worker_id)
+            elif api_key is not None and str(api_key).strip():
+                await asyncio.to_thread(self._worker_registry.write_api_key, worker_id, str(api_key).strip())
+        return worker
+
+    async def remove_colab_worker_admin(self, worker_id: str) -> dict[str, Any]:
+        """Remove an idle worker or atomically mark a busy worker for drain/removal."""
+        if self._worker_registry is None:
+            return {"state": "missing", "worker_id": worker_id}
+        provider = f"colab:{worker_id}"
+        async with self._dispatch_lock:
+            existing = await asyncio.to_thread(self._worker_registry.get_colab, worker_id)
+            if not existing:
+                return {"state": "missing", "worker_id": worker_id}
+            self._ensure_provider_state(provider)
+            active = bool(self._provider_reservations.get(provider)) or self._device_locks[provider].locked()
+            if active:
+                await asyncio.to_thread(self._worker_registry.request_remove_colab, worker_id)
+                return {"state": "pending", "worker_id": worker_id}
+            removed = await asyncio.to_thread(self._worker_registry.remove_colab, worker_id)
+            if not removed:
+                return {"state": "missing", "worker_id": worker_id}
+            self.forget_colab_worker(worker_id)
+            return {"state": "deleted", "worker_id": worker_id}
+
+    async def reserve_colab_worker_for_admin(self, worker_id: str, owner: str) -> dict[str, Any] | None:
+        """Reserve one Colab worker for an explicit admin probe without scheduler races."""
+        if self._worker_registry is None:
+            return None
+        provider = f"colab:{worker_id}"
+        async with self._dispatch_lock:
+            worker = await asyncio.to_thread(self._worker_registry.get_colab, worker_id)
+            if not worker:
+                return None
+            self._ensure_provider_state(provider)
+            if worker.get("remove_requested"):
+                raise ValueError("This Colab worker is already scheduled for removal after its current job")
+            if provider in self._provider_reservations or self._device_locks[provider].locked():
+                raise RuntimeError("Wait for this Colab worker's active request to finish before testing it")
+            self._provider_reservations[provider] = owner
+            return worker
+
+    def forget_colab_worker(self, worker_id: str) -> None:
+        """Drop a removed Colab worker's runtime state.
+
+        _ensure_provider_state() only initializes a provider's circuit-breaker
+        / lock / cooldown / worker_state entries the first time it's seen and
+        is a no-op afterwards. Without this, a future worker that reuses this
+        worker_id (the registry hands out the lowest free colab-<n> slot)
+        would silently inherit the removed worker's open circuit, cooldown,
+        or completed-job stats instead of starting clean. Call this after
+        WorkerRegistry.remove_colab() has actually removed the worker,
+        whichever code path triggered the removal (idle removal or a
+        drain-safe removal releasing its provider reservation).
+        """
+        provider = f"colab:{worker_id}"
+        self._device_locks.pop(provider, None)
+        self._endpoint_circuit.pop(provider, None)
+        self._endpoint_probe_locks.pop(provider, None)
+        self._artifact_worker_cooldown_until.pop(provider, None)
+        self.worker_state.pop(provider, None)
+
     def _registry_snapshot(self) -> dict[str, Any]:
         if self._worker_registry is None:
             return {
@@ -2723,7 +2828,12 @@ class Stage2BWorker:
             return bool(self._worker_registry.local_state(provider).get("paused"))
         if provider.startswith("colab:"):
             worker = self._colab_worker(provider.split(":", 1)[1])
-            return bool(not worker or worker.get("paused") or not worker.get("enabled"))
+            return bool(
+                not worker
+                or worker.get("paused")
+                or worker.get("remove_requested")
+                or not worker.get("enabled")
+            )
         return False
 
     def _artifact_participates(self, provider: str) -> bool:
@@ -2759,11 +2869,32 @@ class Stage2BWorker:
         return None
 
     async def _reserve_provider(self, provider: str, owner: str) -> bool:
-        """Reserve one physical provider before a queue row is claimed."""
+        """Reserve one physical provider before a queue row is claimed.
+
+        The final registry eligibility check happens under the same dispatch
+        lock used by worker-admin Stop/Remove/Update operations. This prevents a
+        scheduler task that selected a worker just before an admin mutation from
+        claiming it after that worker was stopped or removed.
+        """
         self._ensure_provider_state(provider)
         if provider not in self._device_locks:
             return False
         async with self._dispatch_lock:
+            if self._worker_registry is not None:
+                if provider in {"pi5", "oneplus"}:
+                    local = await asyncio.to_thread(self._worker_registry.local_state, provider)
+                    if local.get("paused"):
+                        return False
+                elif provider.startswith("colab:"):
+                    worker_id = provider.split(":", 1)[1]
+                    worker = await asyncio.to_thread(self._worker_registry.get_colab, worker_id)
+                    if (
+                        not worker
+                        or not worker.get("enabled")
+                        or worker.get("paused")
+                        or worker.get("remove_requested")
+                    ):
+                        return False
             if provider in self._provider_reservations:
                 return False
             # Also respect explicit/manual/RAG calls that already hold the final
@@ -2774,9 +2905,22 @@ class Stage2BWorker:
             return True
 
     async def _release_provider(self, provider: str, owner: str) -> None:
+        removed_worker_id: str | None = None
         async with self._dispatch_lock:
             if self._provider_reservations.get(provider) == owner:
+                # A Colab Remove request is drain-safe: the in-flight inference
+                # finishes, then the worker is deleted before the reservation is
+                # released so no new queue lane can reclaim it in between.
+                if provider.startswith("colab:") and self._worker_registry is not None:
+                    worker_id = provider.split(":", 1)[1]
+                    worker = self._worker_registry.get_colab(worker_id)
+                    if worker and worker.get("remove_requested"):
+                        if self._worker_registry.remove_colab(worker_id):
+                            removed_worker_id = worker_id
+                            self.forget_colab_worker(worker_id)
                 self._provider_reservations.pop(provider, None)
+        if removed_worker_id:
+            self._events.notify("worker_registry_updated")
 
     async def _normal_work_waiting_for_provider(self, provider: str) -> bool:
         """Artifact work yields to runnable Text/Vision work for a physical provider."""
@@ -4454,7 +4598,7 @@ class Stage2BWorker:
             if not is_artifact_sweep and not is_human_recovery:
                 await self._store.arm_artifact_sweep_for_book(int(job["postprocess_job_id"]))
             if not preclaimed:
-                claimed = await self._store.mark_processing(int(job["id"]), run_mode)
+                claimed = await self._store.mark_processing(int(job["id"]), run_mode, str(dispatch_provider or target))
                 if not claimed:
                     logger.info("Stage 2B job %s lost claim race; leaving owner state untouched", job.get("id"))
                     return
@@ -4466,7 +4610,7 @@ class Stage2BWorker:
             self._events.notify(f"stage2b_{state_key}_started")
             route_timeout_value = (
                 int(config.colab_timeout_seconds) + 60
-                if dispatch_provider == "colab" else
+                if str(dispatch_provider).startswith("colab") else
                 (config.stage2b_pi5_job_timeout_seconds if target == "pi5" else config.stage2b_oneplus_job_timeout_seconds)
             )
             # Pi5 timeout is enforced per inference request after acquiring the
@@ -4592,9 +4736,17 @@ class Stage2BWorker:
             provider = str(dispatch_provider or target).lower()
             retryable = status >= 500 or status in {408, 429}
             seconds = time.monotonic() - started
-            if provider == "colab" and status in {401, 403, 404}:
+            if (provider == "colab" or provider.startswith("colab:")) and status in {401, 403, 404}:
+                # Match the provider-branching pattern used everywhere else in this
+                # file (see _endpoint_provider_ready, _client_for,
+                # _vision_client_for_role, and the job-timeout check below): a
+                # dynamic per-worker Colab job (dispatch_provider == "colab:<id>",
+                # set for Artifact-sweep dispatch) must open *that* worker's own
+                # circuit, not the shared legacy "colab" one, or its auth/tunnel
+                # failures fall through to the unconditional mark_failed() below
+                # instead of deferring and backing off.
                 delay = await self._open_endpoint_circuit(
-                    "colab", f"HTTP {status}: Colab tunnel/authentication is not usable",
+                    provider, f"HTTP {status}: Colab tunnel/authentication is not usable",
                     event_context=await self._notification_job_context(job, error=exc),
                 )
                 await self._store.mark_deferred(
@@ -5113,6 +5265,36 @@ class Stage2BWorker:
             wrapped.model_override = str(self._model_override_for_provider(provider) or "koboldcpp")
         return wrapped
 
+    @staticmethod
+    def _review_entry_still_needs_assistance(ledger: dict[str, Any], entry_id: str, review_type: str) -> bool:
+        entries = [item for item in (ledger.get("entries") or []) if item.get("status") != "superseded"]
+        if review_type == "text":
+            entry = next((item for item in entries if str(item.get("entry_id")) == str(entry_id)), None)
+            return bool(
+                entry
+                and entry.get("entry_type") == "text_correction"
+                and not entry.get("human_verified")
+                and str(entry.get("verification_verdict") or "").upper() in {"LIKELY_CORRUPT", "UNCERTAIN"}
+            )
+        vision = [item for item in entries if item.get("entry_type") == "vision_enrichment"]
+        for item in _authoritative_visual_subjects(vision):
+            if str(item.get("entry_id")) == str(entry_id):
+                return bool(_vision_requires_human(item))
+        return False
+
+    @staticmethod
+    def _discarded_review_result(review_type: str, worker_id: str, reason: str) -> dict[str, Any]:
+        return {
+            "schema": "marine-ai-review-assistant/v1",
+            "review_type": review_type,
+            "worker_id": worker_id,
+            "discarded": True,
+            "stored": False,
+            "discard_reason": reason,
+            "human_authority_preserved": True,
+            "created_at_epoch": time.time(),
+        }
+
     async def run_review_assistant_job(
         self, *, worker_id: str, postprocess_job_id: int, entry_id: str, review_type: str
     ) -> dict[str, Any]:
@@ -5166,6 +5348,10 @@ class Stage2BWorker:
             expected_type = "text_correction" if review_type == "text" else "vision_enrichment"
             if str(entry.get("entry_type")) != expected_type:
                 raise ValueError("Review entry type no longer matches the queued job")
+            if not self._review_entry_still_needs_assistance(ledger, entry_id, review_type):
+                return self._discarded_review_result(
+                    review_type, worker_id, "Human review was already resolved before AI assistance started"
+                )
 
             config = self._config_getter()
             conversion = await self._postprocess_store.get_conversion_job(int(post_job.get("conversion_job_id") or 0))
@@ -5266,6 +5452,13 @@ class Stage2BWorker:
                 current_entry = next((item for item in (current.get("entries") or []) if str(item.get("entry_id")) == str(entry_id) and item.get("status") != "superseded"), None)
                 if not current_entry:
                     raise ValueError("Human-review entry changed while AI review was running")
+                if not self._review_entry_still_needs_assistance(current, entry_id, review_type):
+                    suggestion["stored"] = False
+                    suggestion["discarded"] = True
+                    suggestion["discard_reason"] = "Human review was resolved while AI assistance was running"
+                    self._events.notify("review_assistant_stale_result_discarded")
+                    return suggestion
+                suggestion["stored"] = True
                 current_entry["ai_review_assistant"] = suggestion
                 await asyncio.to_thread(
                     upsert_ledger_entry, result_dir, str(current.get("source_zip_sha256") or ""), current_entry

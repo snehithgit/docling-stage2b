@@ -32,6 +32,7 @@ class WorkerRegistry:
     def _default(self) -> dict[str, Any]:
         return {
             "schema": _SCHEMA,
+            "legacy_colab_import_done": False,
             "local": {
                 "pi5": {"paused": False, "artifact_enabled": True},
                 "oneplus": {"paused": False, "artifact_enabled": True},
@@ -56,6 +57,7 @@ class WorkerRegistry:
         if not isinstance(data, dict):
             data = self._default()
         base = self._default()
+        base["legacy_colab_import_done"] = bool(data.get("legacy_colab_import_done", False))
         local = data.get("local") if isinstance(data.get("local"), dict) else {}
         for worker_id in ("pi5", "oneplus"):
             item = local.get(worker_id) if isinstance(local.get(worker_id), dict) else {}
@@ -78,6 +80,7 @@ class WorkerRegistry:
                 "url": normalize_colab_url(str(raw.get("url") or "")),
                 "model": str(raw.get("model") or "koboldcpp").strip()[:200] or "koboldcpp",
                 "artifact_enabled": bool(raw.get("artifact_enabled", False)),
+                "remove_requested": bool(raw.get("remove_requested", False)),
                 "created_at_epoch": float(raw.get("created_at_epoch") or time.time()),
                 "updated_at_epoch": float(raw.get("updated_at_epoch") or time.time()),
             })
@@ -105,31 +108,41 @@ class WorkerRegistry:
         os.chmod(self.path, 0o600)
 
     def ensure_legacy_colab(self, config: Any) -> None:
-        """One-time compatibility import of the pre-multi-worker Colab card."""
+        """Import the pre-multi-worker Colab card exactly once.
+
+        The migration marker is durable even when the resulting worker is later
+        deleted. Without it, deleting the last dynamic Colab worker causes the
+        still-populated legacy config fields to recreate ``colab-1`` on the next
+        status read.
+        """
         with self._lock:
             data = self._read_unlocked()
+            if data.get("legacy_colab_import_done"):
+                return
             if data.get("colab_workers"):
+                data["legacy_colab_import_done"] = True
+                self._write_unlocked(data)
                 return
             url = normalize_colab_url(str(getattr(config, "colab_url", "") or ""))
             enabled = bool(getattr(config, "colab_enabled", False))
             legacy_key = Path(str(getattr(config, "colab_api_key_path", "") or ""))
-            if not (url or enabled or legacy_key.is_file()):
-                self._write_unlocked(data)
-                return
-            worker = {
-                "id": "colab-1",
-                "name": "Colab 1",
-                "enabled": enabled,
-                "paused": False,
-                "url": url,
-                "model": str(getattr(config, "colab_model", "koboldcpp") or "koboldcpp"),
-                "artifact_enabled": bool(getattr(config, "colab_artifact_enabled", False)),
-                "created_at_epoch": time.time(),
-                "updated_at_epoch": time.time(),
-            }
-            data["colab_workers"] = [worker]
+            if url or enabled or legacy_key.is_file():
+                worker = {
+                    "id": "colab-1",
+                    "name": "Colab 1",
+                    "enabled": enabled,
+                    "paused": False,
+                    "url": url,
+                    "model": str(getattr(config, "colab_model", "koboldcpp") or "koboldcpp"),
+                    "artifact_enabled": bool(getattr(config, "colab_artifact_enabled", False)),
+                    "remove_requested": False,
+                    "created_at_epoch": time.time(),
+                    "updated_at_epoch": time.time(),
+                }
+                data["colab_workers"] = [worker]
+            data["legacy_colab_import_done"] = True
             self._write_unlocked(data)
-            if legacy_key.is_file():
+            if data.get("colab_workers") and legacy_key.is_file():
                 target = self.secret_path("colab-1")
                 target.parent.mkdir(parents=True, exist_ok=True)
                 if not target.exists():
@@ -141,6 +154,51 @@ class WorkerRegistry:
             self.ensure_legacy_colab(config)
         with self._lock:
             return self._read_unlocked()
+
+    def snapshot_with_key_status(self, config: Any | None = None) -> dict[str, Any]:
+        """Return one registry snapshot plus one key-file read per Colab worker.
+
+        Hot status pages call this instead of snapshot()+configured_colabs()+
+        read_api_key()+api_key_error(), which used to re-read the registry and
+        each secret file multiple times per poll.
+        """
+        if config is not None:
+            self.ensure_legacy_colab(config)
+        with self._lock:
+            data = self._read_unlocked()
+        key_status: dict[str, dict[str, Any]] = {}
+        configured: list[dict[str, Any]] = []
+        for item in data.get("colab_workers") or []:
+            worker_id = str(item.get("id") or "")
+            raw = ""
+            error: str | None = None
+            try:
+                raw = self.secret_path(worker_id).read_text(encoding="utf-8").strip()
+            except OSError:
+                raw = ""
+            key = ""
+            if raw:
+                try:
+                    key = validate_colab_api_key(raw)
+                except ValueError as exc:
+                    error = str(exc)
+            ready = bool(key)
+            key_status[worker_id] = {
+                "api_key_configured": ready,
+                "api_key_error": error,
+            }
+            if (
+                not item.get("remove_requested")
+                and item.get("enabled")
+                and item.get("url")
+                and ready
+            ):
+                configured.append(dict(item))
+        return {
+            "snapshot": data,
+            "key_status": key_status,
+            "configured_colabs": configured,
+        }
 
     def local_state(self, worker_id: str) -> dict[str, Any]:
         with self._lock:
@@ -179,6 +237,7 @@ class WorkerRegistry:
                 "url": "",
                 "model": "koboldcpp",
                 "artifact_enabled": False,
+                "remove_requested": False,
                 "created_at_epoch": time.time(),
                 "updated_at_epoch": time.time(),
             }
@@ -200,6 +259,16 @@ class WorkerRegistry:
             for index, item in enumerate(data["colab_workers"]):
                 if item["id"] != worker_id:
                     continue
+                # Re-checked here, inside the lock, against the freshest data --
+                # not by the caller against a snapshot taken before this call.
+                # A worker queued for removal must never be reconfigured, and a
+                # caller that read the worker (e.g. to build a 404/"already
+                # removing" response) before calling update_colab() could be
+                # racing a concurrent request_remove_colab() for the same
+                # worker; only a check made under this same lock, at write
+                # time, is authoritative.
+                if item.get("remove_requested") and "remove_requested" not in updates:
+                    raise ValueError("This Colab worker is already scheduled for removal after its current job")
                 found = dict(item)
                 if "name" in updates:
                     found["name"] = str(updates["name"] or worker_id).strip()[:80] or worker_id
@@ -213,11 +282,36 @@ class WorkerRegistry:
                     found["model"] = str(updates["model"] or "koboldcpp").strip()[:200] or "koboldcpp"
                 if "artifact_enabled" in updates:
                     found["artifact_enabled"] = bool(updates["artifact_enabled"])
+                if "remove_requested" in updates:
+                    found["remove_requested"] = bool(updates["remove_requested"])
                 found["updated_at_epoch"] = time.time()
                 data["colab_workers"][index] = found
                 break
             if found is None:
                 raise ValueError("Colab worker not found")
+            self._write_unlocked(data)
+            return dict(found)
+
+
+    def request_remove_colab(self, worker_id: str) -> dict[str, Any]:
+        """Drain a busy worker and remove it as soon as its reservation clears."""
+        with self._lock:
+            data = self._read_unlocked()
+            found = None
+            for index, item in enumerate(data["colab_workers"]):
+                if item["id"] != worker_id:
+                    continue
+                found = dict(item)
+                found["paused"] = True
+                found["remove_requested"] = True
+                found["updated_at_epoch"] = time.time()
+                data["colab_workers"][index] = found
+                break
+            if found is None:
+                raise ValueError("Colab worker not found")
+            review = data["review"]
+            review["text_worker_ids"] = [x for x in review.get("text_worker_ids", []) if x != worker_id]
+            review["vision_worker_ids"] = [x for x in review.get("vision_worker_ids", []) if x != worker_id]
             self._write_unlocked(data)
             return dict(found)
 
@@ -241,7 +335,7 @@ class WorkerRegistry:
     def update_review(self, *, enabled: bool, text_worker_ids: list[str], vision_worker_ids: list[str]) -> dict[str, Any]:
         with self._lock:
             data = self._read_unlocked()
-            valid = {item["id"] for item in data["colab_workers"] if item.get("enabled")}
+            valid = {item["id"] for item in data["colab_workers"] if item.get("enabled") and not item.get("remove_requested")}
             text_ids = [x for x in dict.fromkeys(str(v) for v in text_worker_ids) if x in valid]
             vision_ids = [x for x in dict.fromkeys(str(v) for v in vision_worker_ids) if x in valid]
             data["review"] = {
@@ -303,6 +397,8 @@ class WorkerRegistry:
         data = self.snapshot(config)
         result = []
         for item in data["colab_workers"]:
+            if item.get("remove_requested"):
+                continue
             if not item.get("enabled") or not item.get("url") or not self.read_api_key(item["id"]):
                 continue
             if not include_paused and item.get("paused"):

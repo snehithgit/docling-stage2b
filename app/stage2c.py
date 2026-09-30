@@ -967,7 +967,17 @@ def normalize_human_verified_ledger(result_dir: Path) -> int:
 
 
 
-def human_review_summary(result_dir: Path, require_human: bool = True) -> dict[str, Any]:
+def _load_correction_ledger(result_dir: Path) -> dict[str, Any]:
+    path = result_dir / "correction_ledger.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {}
+
+
+def human_review_summary(
+    result_dir: Path, require_human: bool = True, *, ledger: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Return manual-audit and unresolved counts for current text routes.
 
     Automatic source-image reconstructions with ``status=applied`` are already
@@ -975,12 +985,13 @@ def human_review_summary(result_dir: Path, require_human: bool = True) -> dict[s
     When human review is optional, only genuinely unresolved ``pending`` or
     ``proposed`` entries are surfaced as automation-unresolved. Human review
     remains available as an audit/manual override for every current text entry.
+
+    ``ledger`` lets a caller that has already loaded and parsed
+    ``correction_ledger.json`` (e.g. ``verifier_audit_summary``) pass it in
+    directly instead of this function re-reading the same file from disk.
     """
-    path = result_dir / "correction_ledger.json"
-    try:
-        ledger = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
-    except (OSError, json.JSONDecodeError, TypeError):
-        ledger = {}
+    if ledger is None:
+        ledger = _load_correction_ledger(result_dir)
     entries = [
         item for item in (ledger.get("entries") or [])
         if item.get("status") != "superseded" and item.get("entry_type") == "text_correction"
@@ -1407,12 +1418,12 @@ def verifier_audit_summary(result_dir: Path, *, text_require_human: bool = False
     entries block when the verifier left them uncertain/unresolved and no human
     Technical/Decorative or Useful/Not-useful decision has been saved.
     """
-    text = human_review_summary(result_dir, require_human=text_require_human)
-    path = result_dir / "correction_ledger.json"
-    try:
-        ledger = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
-    except (OSError, json.JSONDecodeError, TypeError):
-        ledger = {}
+    # Loaded once and shared with human_review_summary() below -- this file
+    # used to be read and JSON-parsed twice per call (once here, once again
+    # inside human_review_summary), on every completed book, on every call
+    # to /api/errors, which itself runs on every page load site-wide.
+    ledger = _load_correction_ledger(result_dir)
+    text = human_review_summary(result_dir, require_human=text_require_human, ledger=ledger)
     vision_entries = [e for e in (ledger.get("entries") or []) if e.get("entry_type") == "vision_enrichment" and e.get("status") != "superseded"]
     visual_subjects = _authoritative_visual_subjects(vision_entries)
     visual_required = [e for e in visual_subjects if _vision_requires_human(e)]

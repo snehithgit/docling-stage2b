@@ -1,3 +1,15 @@
+## 2026.09.30.40.11AF — worker-race hardening + hot-path performance completion
+
+- Colab/local worker administration is serialized with scheduler dispatch; stale selected workers cannot be claimed after Stop/Remove, and admin Test holds a real provider reservation.
+- Dynamic Colab auth/tunnel failures use the correct per-worker circuit breaker and removed worker runtime state is discarded.
+- AI review-assistant suggestions are revalidated before inference and again before ledger publication; human-resolved entries never receive stale late suggestions.
+- Worker/status polling performs one registry read plus one secret read per Colab worker instead of repeated synchronous file I/O.
+- Stage 2B public list queries no longer fetch full verifier request/result payloads; execution-provider provenance is persisted separately.
+- `/api/errors` and `/api/stage2b/books` use short shared caches; completed-book enrichment and audit reads are parallelized.
+- Verification polling pauses heavy refresh work in hidden tabs and runs at a lower visible cadence.
+- Per-book lifecycle locks use weak retention so long-lived processes do not accumulate obsolete lock objects.
+- Raw Docling, human decisions, Stage 2A/2B/2C/Stage 3 semantics, and existing processed data remain unchanged.
+
 ## 2026.09.29.40.11AC — truthful Colab provenance + API-key validation
 
 - Adds Google Colab/KoboldCpp as an **optional, explicit** provider for Text verification, Vision verification, Human Visual Evidence Recovery, and the shared Artifact idle pool. Local Pi5/OnePlus behavior remains the default and there is no automatic cloud fallback.

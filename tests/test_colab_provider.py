@@ -162,3 +162,14 @@ def test_invalid_legacy_colab_key_is_treated_as_unconfigured_without_crashing(tm
     Path(cfg.colab_api_key_path).write_text("abcdefghijklmnop—bad\n", encoding="utf-8")
     assert read_colab_api_key(cfg) == ""
     assert "non-ASCII" in (colab_api_key_error(cfg) or "")
+
+
+def test_public_stage2b_select_excludes_large_raw_payload_columns(tmp_path):
+    async def run():
+        store = Stage2BStore(str(tmp_path / "jobs.db"))
+        await store.initialize()
+        columns = store._public_select_columns or ""
+        assert '"request_json"' not in columns
+        assert '"result_json"' not in columns
+        assert '"execution_provider"' in columns
+    asyncio.run(run())

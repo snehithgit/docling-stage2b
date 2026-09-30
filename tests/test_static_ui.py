@@ -104,11 +104,13 @@ def test_all_primary_pages_link_to_verification():
         assert 'href="/verification"' in read(name), name
 
 
-def test_verification_polling_never_overlaps():
+def test_verification_polling_never_overlaps_and_backs_off_when_hidden():
     js = read("verification.js")
     assert "refreshInFlight" in js
     assert "setInterval(" not in js
-    assert "setTimeout(pollVerification, 3000)" in js
+    assert 'document.visibilityState === "visible" ? 5000 : 15000' in js
+    assert 'document.addEventListener("visibilitychange"' in js
+    assert "window.clearTimeout(refreshTimer)" in js
 
 
 def test_oneplus_page_is_llama_only_and_keeps_nonbusy_disabled_cursor():

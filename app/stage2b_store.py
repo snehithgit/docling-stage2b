@@ -33,6 +33,48 @@ class Stage2BStore:
     def __init__(self, database_path: str) -> None:
         self.database_path = Path(database_path)
         self._lock = asyncio.Lock()
+        self._public_select_columns: str | None = None
+
+    @staticmethod
+    def _execution_provider_from_payloads(
+        request_json: str | None, result_json: str | None, claimed_by: str | None = None
+    ) -> str | None:
+        # claimed_by is the physical provider chosen by the scheduler and is
+        # more specific than payload metadata (which often says only "colab").
+        claimed = str(claimed_by or "").strip().lower()
+        if claimed:
+            if claimed.startswith("colab-"):
+                return f"colab:{claimed}"
+            return claimed
+        for raw in (result_json, request_json):
+            if not raw:
+                continue
+            try:
+                payload = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            provider = str(
+                payload.get("vision_provider")
+                or payload.get("text_provider")
+                or payload.get("provider")
+                or payload.get("selected_processor")
+                or ""
+            ).strip().lower()
+            if provider:
+                return provider
+        return None
+
+    def _refresh_public_select_columns(self, conn: sqlite3.Connection) -> None:
+        columns = [str(row[1]) for row in conn.execute("PRAGMA table_info(verification_jobs)").fetchall()]
+        public = [name for name in columns if name not in {"request_json", "result_json"}]
+        self._public_select_columns = ", ".join(f'"{name}"' for name in public)
+
+    def _public_columns_sql(self, conn: sqlite3.Connection) -> str:
+        if not self._public_select_columns:
+            self._refresh_public_select_columns(conn)
+        return str(self._public_select_columns)
 
     def _connect(self) -> sqlite3.Connection:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
@@ -94,6 +136,7 @@ class Stage2BStore:
                     error_type TEXT,
                     error_message TEXT,
                     claimed_by TEXT,
+                    execution_provider TEXT,
                     stage2c_entry_state TEXT,
                     stage2c_entry_id TEXT,
                     stage2c_entry_error TEXT,
@@ -111,6 +154,8 @@ class Stage2BStore:
                 conn.execute("ALTER TABLE verification_jobs ADD COLUMN priority_score INTEGER NOT NULL DEFAULT 0")
             if "claimed_by" not in columns:
                 conn.execute("ALTER TABLE verification_jobs ADD COLUMN claimed_by TEXT")
+            if "execution_provider" not in columns:
+                conn.execute("ALTER TABLE verification_jobs ADD COLUMN execution_provider TEXT")
             if "stage2c_entry_state" not in columns:
                 conn.execute("ALTER TABLE verification_jobs ADD COLUMN stage2c_entry_state TEXT")
             if "stage2c_entry_id" not in columns:
@@ -119,10 +164,44 @@ class Stage2BStore:
                 conn.execute("ALTER TABLE verification_jobs ADD COLUMN stage2c_entry_error TEXT")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_verification_runnable ON verification_jobs(target, is_current, status, authorized, next_attempt_at)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_verification_postprocess ON verification_jobs(postprocess_job_id, is_current)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_verification_results_public "
+                "ON verification_jobs(target, is_current, status, id DESC)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_verification_books_aggregate "
+                "ON verification_jobs(is_current, postprocess_job_id, result_dir, output_filename, code, target, status, claimed_by)"
+            )
             conn.execute("""CREATE TABLE IF NOT EXISTS stage2b_migrations (
                 name TEXT PRIMARY KEY,
                 applied_at TEXT NOT NULL
             )""")
+            provider_migration = "execution_provider_v1"
+            already = conn.execute(
+                "SELECT 1 FROM stage2b_migrations WHERE name=?", (provider_migration,)
+            ).fetchone()
+            if already is None:
+                rows = conn.execute(
+                    """SELECT id, request_json, result_json, claimed_by
+                       FROM verification_jobs
+                       WHERE execution_provider IS NULL OR execution_provider=''"""
+                ).fetchall()
+                updates = []
+                for row in rows:
+                    provider = self._execution_provider_from_payloads(
+                        row["request_json"], row["result_json"], row["claimed_by"]
+                    )
+                    if provider:
+                        updates.append((provider, int(row["id"])))
+                if updates:
+                    conn.executemany(
+                        "UPDATE verification_jobs SET execution_provider=? WHERE id=?", updates
+                    )
+                conn.execute(
+                    "INSERT INTO stage2b_migrations(name, applied_at) VALUES (?, ?)",
+                    (provider_migration, utcnow()),
+                )
+            self._refresh_public_select_columns(conn)
             # Older releases could leave a prepared artifact row with no run_mode.
             # Treat that as the dependency-gated awaiting state so idle workers can
             # release it once the book's normal Text/Vision routes are complete.
@@ -397,7 +476,7 @@ class Stage2BStore:
                            started_at=NULL, completed_at=NULL, processing_seconds=NULL,
                            retry_count=0, next_attempt_at=NULL, model=NULL, endpoint=NULL,
                            verdict=NULL, request_json=NULL, result_json=NULL, artifact_path=NULL,
-                           error_type=NULL, error_message=NULL, claimed_by=NULL,
+                           error_type=NULL, error_message=NULL, claimed_by=NULL, execution_provider=NULL,
                            stage2c_entry_state=NULL, stage2c_entry_id=NULL, stage2c_entry_error=NULL,
                            source_json=?, result_dir=?, output_filename=?, is_current=1
                        WHERE id=?""",
@@ -653,19 +732,20 @@ class Stage2BStore:
             claimed["_preclaimed_processing"] = True
             return claimed
 
-    async def mark_processing(self, job_id: int, run_mode: str) -> bool:
-        return await self._run(self._mark_processing_sync, job_id, run_mode)
+    async def mark_processing(self, job_id: int, run_mode: str, claimed_by: str | None = None) -> bool:
+        return await self._run(self._mark_processing_sync, job_id, run_mode, claimed_by)
 
-    def _mark_processing_sync(self, job_id: int, run_mode: str) -> bool:
+    def _mark_processing_sync(self, job_id: int, run_mode: str, claimed_by: str | None) -> bool:
         with self._connection() as conn:
             cursor = conn.execute(
                 """UPDATE verification_jobs
                    SET status='processing', started_at=?, completed_at=NULL,
                        attempt_count=attempt_count+1, run_mode=?, next_attempt_at=NULL,
-                       error_type=NULL, error_message=NULL,
+                       error_type=NULL, error_message=NULL, claimed_by=?,
+                       execution_provider=COALESCE(?, execution_provider),
                        stage2c_entry_state=NULL, stage2c_entry_id=NULL, stage2c_entry_error=NULL
                    WHERE id=? AND is_current=1 AND status='pending' """,
-                (utcnow(), run_mode, job_id),
+                (utcnow(), run_mode, claimed_by, self._execution_provider_from_payloads(None, None, claimed_by), job_id),
             )
             return cursor.rowcount == 1
 
@@ -721,14 +801,21 @@ class Stage2BStore:
 
     def _mark_completed_sync(self, job_id, seconds, model, endpoint, verdict, request_json, result_json, artifact_path) -> None:
         with self._connection() as conn:
+            claimed = conn.execute(
+                "SELECT claimed_by FROM verification_jobs WHERE id=?", (job_id,)
+            ).fetchone()
+            provider = self._execution_provider_from_payloads(
+                request_json, result_json, claimed["claimed_by"] if claimed else None
+            )
             conn.execute(
                 """UPDATE verification_jobs
                    SET status='completed', completed_at=?, processing_seconds=?,
                        model=?, endpoint=?, verdict=?, request_json=?, result_json=?,
+                       execution_provider=COALESCE(?, execution_provider),
                        artifact_path=?, authorized=0, retry_count=0, next_attempt_at=NULL,
                        error_type=NULL, error_message=NULL
                    WHERE id=?""",
-                (utcnow(), seconds, model, endpoint, verdict, request_json, result_json, artifact_path, job_id),
+                (utcnow(), seconds, model, endpoint, verdict, request_json, result_json, provider, artifact_path, job_id),
             )
 
     async def mark_deferred(self, job_id: int, error_type: str, error_message: str, delay_seconds: int = 60) -> None:
@@ -786,7 +873,7 @@ class Stage2BStore:
                    SET status='pending', authorized=1, run_mode='manual',
                        started_at=NULL, completed_at=NULL, processing_seconds=NULL,
                        verdict=NULL, request_json=NULL, result_json=NULL, artifact_path=NULL,
-                       retry_count=0, next_attempt_at=NULL,
+                       execution_provider=NULL, claimed_by=NULL, retry_count=0, next_attempt_at=NULL,
                        error_type=NULL, error_message=NULL,
                        stage2c_entry_state=NULL, stage2c_entry_id=NULL, stage2c_entry_error=NULL
                    WHERE id=? AND is_current=1 AND status IN ('completed','failed')""",
@@ -803,7 +890,7 @@ class Stage2BStore:
                 """UPDATE verification_jobs
                    SET status='pending', authorized=1, run_mode='manual',
                        started_at=NULL, completed_at=NULL, retry_count=0, next_attempt_at=NULL,
-                       error_type=NULL, error_message=NULL,
+                       execution_provider=NULL, claimed_by=NULL, error_type=NULL, error_message=NULL,
                        stage2c_entry_state=NULL, stage2c_entry_id=NULL, stage2c_entry_error=NULL
                    WHERE id=? AND status='failed' AND is_current=1""",
                 (job_id,),
@@ -1029,7 +1116,7 @@ class Stage2BStore:
         where = "WHERE is_current=1" if current_only else ""
         with self._connection() as conn:
             rows = conn.execute(
-                f"SELECT * FROM verification_jobs {where} ORDER BY id DESC LIMIT ?",
+                f"SELECT {self._public_columns_sql(conn)} FROM verification_jobs {where} ORDER BY id DESC LIMIT ?",
                 (limit,),
             ).fetchall()
             return [self._public_row(row) for row in rows]
@@ -1058,7 +1145,7 @@ class Stage2BStore:
     def _list_results_sync(self, target: str, limit: int) -> list[dict[str, Any]]:
         with self._connection() as conn:
             rows = conn.execute(
-                """SELECT * FROM verification_jobs
+                f"""SELECT {self._public_columns_sql(conn)} FROM verification_jobs
                    WHERE target=? AND is_current=1 AND status IN ('completed','failed')
                    ORDER BY CASE status WHEN 'failed' THEN 0 ELSE 1 END, id DESC LIMIT ?""",
                 (target, limit),
@@ -1071,7 +1158,7 @@ class Stage2BStore:
     def _list_remaining_sync(self, target: str, limit: int) -> list[dict[str, Any]]:
         with self._connection() as conn:
             rows = conn.execute(
-                """SELECT * FROM verification_jobs
+                f"""SELECT {self._public_columns_sql(conn)} FROM verification_jobs
                    WHERE target=? AND is_current=1 AND status IN ('pending','processing','failed')
                    ORDER BY CASE status WHEN 'processing' THEN 0 WHEN 'failed' THEN 1 ELSE 2 END,
                             CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 ELSE 3 END,
@@ -1165,7 +1252,8 @@ class Stage2BStore:
         except (json.JSONDecodeError, TypeError):
             result_meta = {}
         provider = str(
-            result_meta.get("vision_provider")
+            item.get("execution_provider")
+            or result_meta.get("vision_provider")
             or result_meta.get("text_provider")
             or result_meta.get("provider")
             or request_meta.get("vision_provider")

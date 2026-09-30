@@ -188,3 +188,199 @@ def test_review_assistant_waits_until_text_vision_and_artifact_machine_jobs_fini
         assert {j["review_type"] for j in jobs} == {"text", "vision"}
 
     asyncio.run(run())
+
+
+def test_legacy_colab_import_is_one_time_and_deleted_worker_stays_deleted(tmp_path: Path):
+    key_path = tmp_path / "legacy-colab.key"
+    key_path.write_text("k" * 32 + "\n", encoding="utf-8")
+    cfg = AppConfig(
+        database_path=str(tmp_path / "jobs.db"),
+        processed_dir=str(tmp_path / "processed"),
+        input_dir=str(tmp_path / "input"),
+        output_dir=str(tmp_path / "output"),
+        colab_enabled=True,
+        colab_url="https://legacy.trycloudflare.com",
+        colab_api_key_path=str(key_path),
+    )
+    registry = WorkerRegistry(cfg.database_path)
+
+    registry.ensure_legacy_colab(cfg)
+    snap = registry.snapshot(cfg)
+    assert snap["legacy_colab_import_done"] is True
+    assert [w["id"] for w in snap["colab_workers"]] == ["colab-1"]
+
+    assert registry.remove_colab("colab-1") is True
+    # A later status/snapshot call must not recreate the deleted worker from
+    # the still-populated legacy config fields.
+    snap = registry.snapshot(cfg)
+    assert snap["legacy_colab_import_done"] is True
+    assert snap["colab_workers"] == []
+
+
+def test_busy_colab_removal_drains_and_is_finalized_when_reservation_releases(tmp_path: Path):
+    async def run():
+        cfg = _config(tmp_path)
+        registry = WorkerRegistry(cfg.database_path)
+        item = registry.add_colab(name="Busy GPU")
+        registry.update_colab(item["id"], {
+            "enabled": True,
+            "url": "https://busy.trycloudflare.com",
+            "artifact_enabled": True,
+        })
+        registry.write_api_key(item["id"], "z" * 32)
+        registry.update_review(
+            enabled=True,
+            text_worker_ids=[item["id"]],
+            vision_worker_ids=[item["id"]],
+        )
+
+        events = SimpleNamespace(notify=lambda *args, **kwargs: None)
+        worker = Stage2BWorker(
+            lambda: cfg, None, None, events, worker_registry=registry
+        )
+        provider = f"colab:{item['id']}"
+        worker._ensure_provider_state(provider)
+        worker._provider_reservations[provider] = "test-owner"
+
+        requested = registry.request_remove_colab(item["id"])
+        assert requested["paused"] is True
+        assert requested["remove_requested"] is True
+        assert registry.configured_colabs(cfg) == []
+        snap = registry.snapshot(cfg)
+        assert snap["review"]["text_worker_ids"] == []
+        assert snap["review"]["vision_worker_ids"] == []
+
+        await worker._release_provider(provider, "test-owner")
+        assert registry.get_colab(item["id"]) is None
+        assert provider not in worker.dispatch_reservations
+        assert not registry.secret_path(item["id"]).exists()
+
+    asyncio.run(run())
+
+
+def test_worker_registry_hot_snapshot_reads_registry_and_each_key_once(tmp_path: Path):
+    cfg = _config(tmp_path)
+    registry = WorkerRegistry(cfg.database_path)
+    first = registry.add_colab(name="A")
+    second = registry.add_colab(name="B")
+    for item, key in ((first, "a" * 32), (second, "b" * 32)):
+        registry.update_colab(item["id"], {"enabled": True, "url": f"https://{item['id']}.trycloudflare.com"})
+        registry.write_api_key(item["id"], key)
+
+    read_count = 0
+    key_reads: dict[str, int] = {}
+    original_read = registry._read_unlocked
+    original_secret_path = registry.secret_path
+
+    def counted_read():
+        nonlocal read_count
+        read_count += 1
+        return original_read()
+
+    class CountingSecret:
+        def __init__(self, worker_id: str):
+            self.worker_id = worker_id
+            self.path = original_secret_path(worker_id)
+        def read_text(self, *args, **kwargs):
+            key_reads[self.worker_id] = key_reads.get(self.worker_id, 0) + 1
+            return self.path.read_text(*args, **kwargs)
+
+    registry._read_unlocked = counted_read  # type: ignore[method-assign]
+    registry.secret_path = lambda worker_id: CountingSecret(worker_id)  # type: ignore[method-assign]
+    status = registry.snapshot_with_key_status()
+    assert read_count == 1
+    assert key_reads == {"colab-1": 1, "colab-2": 1}
+    assert [item["id"] for item in status["configured_colabs"]] == ["colab-1", "colab-2"]
+
+
+def test_colab_admin_update_serializes_against_scheduler_reservation(tmp_path: Path):
+    import threading
+
+    async def run():
+        cfg = _config(tmp_path)
+        registry = WorkerRegistry(cfg.database_path)
+        item = registry.add_colab(name="Race GPU")
+        registry.update_colab(item["id"], {"enabled": True, "url": "https://race.trycloudflare.com"})
+        registry.write_api_key(item["id"], "r" * 32)
+        worker = Stage2BWorker(lambda: cfg, None, None, SimpleNamespace(notify=lambda *a, **k: None), worker_registry=registry)
+        provider = f"colab:{item['id']}"
+
+        entered = threading.Event()
+        release = threading.Event()
+        original_get = registry.get_colab
+
+        def slow_get(worker_id: str):
+            entered.set()
+            release.wait(timeout=2)
+            return original_get(worker_id)
+
+        registry.get_colab = slow_get  # type: ignore[method-assign]
+        update_task = asyncio.create_task(worker.update_colab_worker_admin(item["id"], {"model": "new-model"}))
+        assert await asyncio.to_thread(entered.wait, 1.0)
+        reserve_task = asyncio.create_task(worker._reserve_provider(provider, "race-owner"))
+        await asyncio.sleep(0.05)
+        assert reserve_task.done() is False
+        release.set()
+        updated = await update_task
+        assert updated and updated["model"] == "new-model"
+        assert await reserve_task is True
+        await worker._release_provider(provider, "race-owner")
+
+    asyncio.run(run())
+
+
+def test_colab_delete_blocks_stale_scheduler_claim_after_removal(tmp_path: Path):
+    import threading
+
+    async def run():
+        cfg = _config(tmp_path)
+        registry = WorkerRegistry(cfg.database_path)
+        item = registry.add_colab(name="Delete Race")
+        registry.update_colab(item["id"], {"enabled": True, "url": "https://delete.trycloudflare.com"})
+        registry.write_api_key(item["id"], "d" * 32)
+        worker = Stage2BWorker(lambda: cfg, None, None, SimpleNamespace(notify=lambda *a, **k: None), worker_registry=registry)
+        provider = f"colab:{item['id']}"
+
+        entered = threading.Event()
+        release = threading.Event()
+        original_remove = registry.remove_colab
+
+        def slow_remove(worker_id: str):
+            entered.set()
+            release.wait(timeout=2)
+            return original_remove(worker_id)
+
+        registry.remove_colab = slow_remove  # type: ignore[method-assign]
+        delete_task = asyncio.create_task(worker.remove_colab_worker_admin(item["id"]))
+        assert await asyncio.to_thread(entered.wait, 1.0)
+        stale_claim = asyncio.create_task(worker._reserve_provider(provider, "stale-owner"))
+        await asyncio.sleep(0.05)
+        assert stale_claim.done() is False
+        release.set()
+        result = await delete_task
+        assert result["state"] == "deleted"
+        assert await stale_claim is False
+        assert provider not in worker.dispatch_reservations
+
+    asyncio.run(run())
+
+
+def test_review_assistant_pending_predicate_rejects_human_resolved_entries(tmp_path: Path):
+    cfg = _config(tmp_path)
+    worker = Stage2BWorker(lambda: cfg, None, None, SimpleNamespace(notify=lambda *a, **k: None))
+    text = {"entries": [{
+        "entry_id": "t1", "entry_type": "text_correction", "status": "pending",
+        "verification_verdict": "UNCERTAIN", "human_verified": False,
+    }]}
+    assert worker._review_entry_still_needs_assistance(text, "t1", "text") is True
+    text["entries"][0]["human_verified"] = True
+    assert worker._review_entry_still_needs_assistance(text, "t1", "text") is False
+
+    vision = {"entries": [{
+        "entry_id": "v1", "entry_type": "vision_enrichment", "status": "pending",
+        "verification_verdict": "UNCERTAIN", "unresolved": True,
+        "picture_index": 1,
+    }]}
+    assert worker._review_entry_still_needs_assistance(vision, "v1", "vision") is True
+    vision["entries"][0]["human_visual_decision"] = "technical"
+    assert worker._review_entry_still_needs_assistance(vision, "v1", "vision") is False

@@ -2,8 +2,10 @@ const esc = (value) => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp
 const selectedBookId = Number(new URLSearchParams(location.search).get("job") || 0);
 let lastStatus = {};
 function verifierProviderName(provider, fallback) {
-  const value = String(provider || fallback || "").toLowerCase();
-  return ({pi5:"Pi5", oneplus:"OnePlus", groq:"Groq", colab:"Colab"})[value] || String(provider || fallback || "Verifier");
+  const raw = String(provider || fallback || "");
+  const value = raw.toLowerCase();
+  if (value.startsWith("colab:")) return `Colab ${raw.split(":", 2)[1] || "worker"}`;
+  return ({pi5:"Pi5", oneplus:"OnePlus", groq:"Groq", colab:"Colab"})[value] || raw || "Verifier";
 }
 function textVerifierName(status = lastStatus) { return `Text verifier · ${verifierProviderName(status?.text_provider?.provider, "pi5")}`; }
 function visionVerifierName(status = lastStatus) { return `Vision verifier · ${verifierProviderName(status?.vision_provider?.provider, "oneplus")}`; }
@@ -556,7 +558,20 @@ async function load() {
     await loadSafetyRefreshStatus();
   } finally { refreshInFlight = false; }
 }
-async function pollVerification() { try { await load(); } catch (error) { feedback(error.message); } finally { refreshTimer = window.setTimeout(pollVerification, 3000); } }
+async function pollVerification() {
+  try {
+    if (document.visibilityState === "visible") await load();
+  } catch (error) {
+    feedback(error.message);
+  } finally {
+    refreshTimer = window.setTimeout(pollVerification, document.visibilityState === "visible" ? 5000 : 15000);
+  }
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") return;
+  if (refreshTimer) window.clearTimeout(refreshTimer);
+  refreshTimer = window.setTimeout(pollVerification, 0);
+});
 const retryAllFailedButton = document.getElementById("retry-all-failed"); if (retryAllFailedButton) retryAllFailedButton.addEventListener("click", () => retryAllFailed(retryAllFailedButton));
 const revalidateAllButton = document.getElementById("revalidate-all-books"); if (revalidateAllButton) revalidateAllButton.addEventListener("click", startSafetyRefreshAll);
 pollVerification();
