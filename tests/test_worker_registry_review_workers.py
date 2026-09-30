@@ -418,25 +418,25 @@ def test_manual_anomaly_job_survives_automatic_candidate_retirement(tmp_path: Pa
     asyncio.run(run())
 
 
-def test_automatic_anomaly_job_is_third_pass_after_normal_review(tmp_path: Path):
+def test_anomaly_job_requires_explicit_manual_queue_after_normal_review(tmp_path: Path):
     async def run():
         cfg = _config(tmp_path)
         Path(cfg.processed_dir).mkdir(parents=True)
         result_dir = Path(cfg.processed_dir) / "book__job11"
         result_dir.mkdir()
-        ledger = {
-            "entries": [{
-                "entry_id": "g:text:R1", "entry_type": "text_correction",
-                "status": "pending", "human_verified": False,
-                "verification_verdict": "LIKELY_CORRUPT", "page": 2,
-                "source_index": 4, "source_type": "text",
-                "original_text": "PUMP PRESURE", "proposed_text": "PUMP PRESSURE",
-                "ai_review_assistant": {
-                    "recommendation": "KEEP_ORIGINAL", "confidence": 0.99,
-                },
-            }]
+        entry = {
+            "entry_id": "g:text:R1", "entry_type": "text_correction",
+            "status": "pending", "human_verified": False,
+            "verification_verdict": "LIKELY_CORRUPT", "page": 2,
+            "source_index": 4, "source_type": "text",
+            "original_text": "PUMP PRESURE", "proposed_text": "PUMP PRESSURE",
+            "ai_review_assistant": {
+                "recommendation": "KEEP_ORIGINAL", "confidence": 0.99,
+            },
         }
-        (result_dir / "correction_ledger.json").write_text(json.dumps(ledger), encoding="utf-8")
+        (result_dir / "correction_ledger.json").write_text(
+            json.dumps({"entries": [entry]}), encoding="utf-8"
+        )
 
         registry = WorkerRegistry(cfg.database_path)
         w = registry.add_colab(name="Anomaly GPU")
@@ -460,9 +460,15 @@ def test_automatic_anomaly_job_is_third_pass_after_normal_review(tmp_path: Path)
         )
         assert await service._sync_candidates() is True
         jobs = await store.list_jobs()
+        # Normal Review Assistant work is generated automatically, but AH5
+        # only sends anomaly work after the user explicitly chooses Yes.
+        assert {j["review_type"] for j in jobs} == {"text"}
+
+        queued = await store.queue_manual_anomaly(
+            11, "book__job11", entry, "anomaly_text"
+        )
+        assert queued["status"] == "pending"
+        jobs = await store.list_jobs()
         assert {j["review_type"] for j in jobs} == {"text", "anomaly_text"}
-        counts = await store.counts()
-        assert counts["text_pending"] == 1
-        assert counts["anomaly_text_pending"] == 1
 
     asyncio.run(run())
