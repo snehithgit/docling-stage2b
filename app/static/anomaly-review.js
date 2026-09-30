@@ -49,17 +49,16 @@ function anomalyResultBlock(item) {
 }
 
 function actionBlock(item) {
-  if (item.state === "processing") {
-    return '<div class="document-actions"><button class="secondary-button" disabled>Colab reviewing…</button></div>';
-  }
-  if (item.state === "queued") {
-    return '<div class="document-actions"><button class="secondary-button" disabled>Queued for Colab</button></div>';
-  }
-  if (item.state === "dismissed") {
-    return `<div class="document-actions"><button class="secondary-button ar-action" data-action="reopen" data-job="${item.postprocess_job_id}" data-entry="${esc(item.entry_id)}" data-type="${item.review_type}">Reopen decision</button><button class="primary-button ar-action" data-action="queue" data-job="${item.postprocess_job_id}" data-entry="${esc(item.entry_id)}" data-type="${item.review_type}">Yes · re-verify with Colab</button></div>`;
-  }
-  const yesLabel = item.state === "reviewed" ? "Re-run with Colab" : "Yes · re-verify with Colab";
-  return `<div class="document-actions"><button class="primary-button ar-action" data-action="queue" data-job="${item.postprocess_job_id}" data-entry="${esc(item.entry_id)}" data-type="${item.review_type}">${yesLabel}</button><button class="secondary-button ar-action" data-action="dismiss" data-job="${item.postprocess_job_id}" data-entry="${esc(item.entry_id)}" data-type="${item.review_type}">No · dismiss</button><a class="mini-action" href="${esc(humanLink(item))}">Open human review</a></div>`;
+  const status = item.state === "processing"
+    ? "Colab reviewing…"
+    : item.state === "queued"
+      ? "Queued for Colab"
+      : item.state === "reviewed"
+        ? "Latest Colab anomaly audit stored"
+        : item.state === "dismissed"
+          ? "Previously dismissed"
+          : "Detected anomaly";
+  return `<div class="document-actions"><span class="status ${esc(statusClass(item.state))}">${esc(status)}</span><a class="mini-action" href="${esc(humanLink(item))}">Open human review</a></div>`;
 }
 
 function renderItem(item) {
@@ -131,7 +130,7 @@ function renderSummary(data) {
   const note = $("ar-worker-note");
   if (!workers.enabled || !(workers.anomaly_workers || []).length) {
     note.hidden = false;
-    note.innerHTML = '<strong>No anomaly Colab worker is assigned.</strong><p>Open Review workers and assign at least one enabled Colab worker to Anomaly review before pressing Yes.</p><a class="mini-action" href="/review-workers">Open Review workers</a>';
+    note.innerHTML = '<strong>No anomaly Colab worker is assigned.</strong><p>Open Review workers and assign at least one enabled Colab worker to Anomaly review before running the global re-verification.</p><a class="mini-action" href="/review-workers">Open Review workers</a>';
   } else {
     note.hidden = true;
     note.innerHTML = "";
@@ -157,36 +156,38 @@ async function loadAnomalies() {
   }
 }
 
-async function runAction(button) {
-  const action = button.dataset.action;
-  const job = encodeURIComponent(button.dataset.job);
-  const entry = encodeURIComponent(button.dataset.entry);
-  const type = encodeURIComponent(button.dataset.type);
-  if (action === "queue" && !confirm("Re-verify this anomaly with an assigned Colab worker? The Colab result will be advisory and will not overwrite a human decision.")) return;
-  if (action === "dismiss" && !confirm("No Colab re-verification for the current evidence? This dismisses only this anomaly/evidence version and can be reopened later.")) return;
-
+async function reverifyAll() {
+  const button = $("ar-rerun-all");
+  if (!button || button.disabled) return;
+  const total = anomalyItems.length;
+  if (!total) {
+    feedback("There are no current anomalies to re-verify.", "warning");
+    return;
+  }
+  const accepted = confirm(`Re-verify ALL ${total.toLocaleString()} current anomalies with the assigned Colab anomaly workers?\n\nThis includes anomalies on already human-reviewed items. Colab results remain advisory and never overwrite a human decision automatically.\n\nOK = Yes, Cancel = No.`);
+  if (!accepted) {
+    feedback("No changes made. Bulk anomaly re-verification was cancelled.", "info");
+    return;
+  }
   const old = button.textContent;
   button.disabled = true;
-  button.textContent = action === "queue" ? "Queueing…" : "Saving…";
+  button.textContent = "Queueing all anomalies…";
   try {
-    const response = await fetch(`/api/anomaly-review/${job}/${entry}/${type}/${action}`, {method:"POST", cache:"no-store"});
+    const response = await fetch("/api/anomaly-review/reverify-all?confirm=true", {method:"POST", cache:"no-store"});
     let data = {};
     try { data = await response.json(); } catch (_) { data = {}; }
     if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
-    feedback(action === "queue" ? "Colab anomaly audit queued. Human authority is unchanged." : action === "dismiss" ? "Anomaly dismissed for the current evidence." : "Anomaly decision reopened.", "success");
+    feedback(`Queued ${Number(data.queued || 0).toLocaleString()} anomalies for Colab. ${Number(data.already_running || 0).toLocaleString()} were already queued/processing. Human authority is unchanged.`, "success");
     await loadAnomalies();
   } catch (error) {
-    feedback(error.message || "Could not update anomaly review.", "warning");
+    feedback(error.message || "Could not queue all anomaly reviews.", "warning");
   } finally {
     button.disabled = false;
     button.textContent = old;
   }
 }
 
-$("ar-results").addEventListener("click", event => {
-  const button = event.target.closest(".ar-action");
-  if (button) runAction(button);
-});
+$("ar-rerun-all").addEventListener("click", reverifyAll);
 $("ar-refresh").addEventListener("click", loadAnomalies);
 ["ar-book","ar-type","ar-state","ar-human-state","ar-anomaly"].forEach(id => $(id).addEventListener("change", applyFilters));
 $("ar-search").addEventListener("input", () => {
