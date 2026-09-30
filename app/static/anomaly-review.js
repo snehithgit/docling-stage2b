@@ -3,6 +3,9 @@ const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;"
 let loadId = 0;
 let searchTimer = null;
 let busy = false;
+let page = 1;
+let totalFiltered = 0;
+const PAGE_SIZE = 10;
 
 async function api(url, options={}) {
   const response = await fetch(url, {cache:"no-store", ...options});
@@ -147,14 +150,20 @@ function render(data) {
   $("ar-needs-human").textContent = Number(s.needs_human || 0).toLocaleString();
   $("ar-resolved").textContent = Number(s.resolved || 0).toLocaleString();
   $("ar-types").textContent = `${Number(s.text || 0).toLocaleString()} / ${Number(s.vision || 0).toLocaleString()}`;
-  $("ar-count").textContent = `${Number(data.total_filtered || 0).toLocaleString()} anomaly item${Number(data.total_filtered || 0) === 1 ? "" : "s"}`;
+  totalFiltered = Number(data.total_filtered || 0);
+  $("ar-count").textContent = `${totalFiltered.toLocaleString()} anomaly item${totalFiltered === 1 ? "" : "s"}`;
+  const pages = Math.max(1, Math.ceil(totalFiltered / PAGE_SIZE));
+  page = Math.min(Math.max(1, page), pages);
+  $("ar-page").textContent = totalFiltered ? `${page} of ${pages}` : "0 of 0";
+  $("ar-prev").disabled = page <= 1;
+  $("ar-next").disabled = page >= pages;
   fillFilters(data);
   const items = data.items || [];
   $("ar-results").innerHTML = items.length ? items.map(card).join("") : '<div class="panel empty-state">No anomaly items match these filters.</div>';
 }
 
 function params() {
-  const p = new URLSearchParams();
+  const p = new URLSearchParams({limit:String(PAGE_SIZE), offset:String((page - 1) * PAGE_SIZE)});
   if ($("ar-book").value) p.set("job_id", $("ar-book").value);
   if ($("ar-type").value !== "all") p.set("review_type", $("ar-type").value);
   if ($("ar-anomaly").value) p.set("anomaly_type", $("ar-anomaly").value);
@@ -223,10 +232,12 @@ $("ar-results").addEventListener("click", event => {
   if (decision) decide({job:decision.dataset.job, entry:decision.dataset.entry, decision:decision.dataset.decision});
 });
 
-function resetAndLoad() { load(true); }
+function resetAndLoad() { page = 1; load(true); }
 ["ar-book","ar-type","ar-anomaly","ar-state","ar-include-human"].forEach(id => $(id).addEventListener("change", resetAndLoad));
-$("ar-search").addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => load(true), 250); });
+$("ar-search").addEventListener("input", () => { clearTimeout(searchTimer); page = 1; searchTimer = setTimeout(() => load(true), 250); });
 $("ar-refresh").addEventListener("click", () => load(true));
+$("ar-prev").addEventListener("click", () => { if (page > 1) { page -= 1; load(true); } });
+$("ar-next").addEventListener("click", () => { if (page * PAGE_SIZE < totalFiltered) { page += 1; load(true); } });
 $("ar-clear").addEventListener("click", () => {
   $("ar-book").value = "";
   $("ar-type").value = "all";
@@ -234,6 +245,7 @@ $("ar-clear").addEventListener("click", () => {
   $("ar-state").value = "all";
   $("ar-include-human").checked = false;
   $("ar-search").value = "";
+  page = 1;
   load(true);
 });
 load(true);
