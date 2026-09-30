@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Review text correction · Docling Auto-Convert</title>
-  <link rel="stylesheet" href="/assets/styles.css?v=2026.09.30.40.11AH3">
-  <link rel="stylesheet" href="/assets/workflow.css?v=2026.09.30.40.11AH3">
-  <link rel="stylesheet" href="/assets/review.css?v=2026.09.30.40.11AH3">
+  <link rel="stylesheet" href="/assets/styles.css?v=2026.09.30.40.11AH4">
+  <link rel="stylesheet" href="/assets/workflow.css?v=2026.09.30.40.11AH4">
+  <link rel="stylesheet" href="/assets/review.css?v=2026.09.30.40.11AH4">
 </head>
 <body class="ui29">
 <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -104,6 +104,16 @@
           <p class="field-note"><strong>This is advisory only.</strong> It never records a human decision. Review the original PDF crop before accepting anything.</p>
         </section>
 
+        <section id="anomaly-review-card" class="pi5-suggestion-card ai-review-assistant-card" hidden>
+          <div class="text-panel-heading"><div><span class="eyebrow">ANOMALY REVIEW · COLAB</span><h2>Independent anomaly audit</h2></div><span class="status-pill suggestion-pill">Human authority preserved</span></div>
+          <div id="anomaly-review-meta" class="context-meta"></div>
+          <p id="anomaly-review-types" class="field-note"></p>
+          <p id="anomaly-review-reason" class="field-note"></p>
+          <pre id="anomaly-review-text" class="pi5-suggestion-text" hidden></pre>
+          <div class="inline-actions"><button id="use-anomaly-review" class="secondary-button" type="button" hidden>Use anomaly correction</button></div>
+          <p class="field-note"><strong>Third-pass audit.</strong> Colab re-reads the original crop. This result never overwrites a human decision automatically.</p>
+        </section>
+
         <section class="manual-edit-card">
           <div class="text-panel-heading"><div><span class="eyebrow">HUMAN DECISION</span><h2 id="edit-heading">Correction text</h2></div><span id="edit-status" class="status-pill status-after">Editable</span></div>
           <textarea id="correction" spellcheck="false" placeholder="Type only the corrected target text. Use [UNREADABLE] if it cannot be recovered safely."></textarea>
@@ -120,6 +130,7 @@
         <div class="review-actions">
           <button id="save" class="primary-button" type="button">Apply human correction</button>
           <button id="reject" class="secondary-button" type="button">Keep original</button>
+          <button id="anomaly-rereview" class="secondary-button" type="button">Re-review with Colab</button>
           <button id="rerun" class="secondary-button" type="button">Open verification</button>
         </div>
         <p class="hint">Keyboard: Ctrl+Enter applies the correction; Ctrl+Shift+Enter keeps the original; Alt+←/→ moves through the queue.</p>
@@ -128,7 +139,7 @@
     </section>
   </main>
 </div>
-<script src="/assets/nav.js?v=2026.09.30.40.11AH3"></script>
-<script src="/assets/review.js?v=2026.09.30.40.11AH3"></script>
+<script src="/assets/nav.js?v=2026.09.30.40.11AH4"></script>
+<script src="/assets/review.js?v=2026.09.30.40.11AH4"></script>
 </body>
 </html>

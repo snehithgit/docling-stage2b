@@ -20,6 +20,7 @@ function renderAssignments(){
     <div class="review-assignment-options">
       <label class="review-role-option"><input type="checkbox" data-role="text" value="${esc(w.id)}" ${settings.text_worker_ids?.includes(w.id)?'checked':''}/><span><strong>Text review</strong><small>Re-check uncertain OCR/text suggestions.</small></span></label>
       <label class="review-role-option"><input type="checkbox" data-role="vision" value="${esc(w.id)}" ${settings.vision_worker_ids?.includes(w.id)?'checked':''}/><span><strong>Vision review</strong><small>Re-check technical visual evidence.</small></span></label>
+      <label class="review-role-option"><input type="checkbox" data-role="anomaly" value="${esc(w.id)}" ${settings.anomaly_worker_ids?.includes(w.id)?'checked':''}/><span><strong>Anomaly review</strong><small>Third-pass audit of disagreements, truncation, low confidence and suspicious rewrites.</small></span></label>
     </div>
   </article>`).join('');
 }
@@ -49,11 +50,16 @@ async function loadStatus(){
     const c=st.counts||{};
     const blockers=Number(st.machine_blockers||0);
     $('review-machine-gate').textContent=st.machine_work_complete?'Primary machine workload complete · review workers may run.':`${blockers.toLocaleString()} primary job${blockers===1?'':'s'} still block this phase.`;
-    $('review-text-pending').textContent=c.text_pending||0;
-    $('review-vision-pending').textContent=c.vision_pending||0;
-    $('review-processing').textContent=(c.text_processing||0)+(c.vision_processing||0);
-    $('review-completed').textContent=(c.text_completed||0)+(c.vision_completed||0);
-    const rows=(st.jobs||[]).map(j=>`<tr><td data-label="Type">${esc(j.review_type)}</td><td data-label="Book">#${j.postprocess_job_id}</td><td data-label="Entry"><code>${esc(j.entry_id)}</code></td><td data-label="Status"><span class="status ${esc(j.status)}">${esc(j.status)}</span></td><td data-label="Worker">${esc(j.claimed_by||'—')}</td><td data-label="Time">${fmt(j.processing_seconds)}</td></tr>`).join('')||'<tr><td colspan="6" class="empty-state">No review-assistant jobs yet.</td></tr>';
+    const textRemaining=(c.text_pending||0)+(c.text_processing||0);
+    const visionRemaining=(c.vision_pending||0)+(c.vision_processing||0);
+    const anomalyPending=(c.anomaly_text_pending||0)+(c.anomaly_vision_pending||0);
+    const anomalyProcessing=(c.anomaly_text_processing||0)+(c.anomaly_vision_processing||0);
+    $('review-text-pending').textContent=textRemaining;
+    $('review-vision-pending').textContent=visionRemaining;
+    $('review-anomaly-pending').textContent=anomalyPending+anomalyProcessing;
+    $('review-processing').textContent=(c.text_processing||0)+(c.vision_processing||0)+anomalyProcessing;
+    $('review-completed').textContent=(c.text_completed||0)+(c.vision_completed||0)+(c.anomaly_text_completed||0)+(c.anomaly_vision_completed||0);
+    const rows=(st.jobs||[]).map(j=>`<tr><td data-label="Type">${esc(j.review_type)}</td><td data-label="Book">#${j.postprocess_job_id}</td><td data-label="Entry"><code>${esc(j.entry_id)}</code></td><td data-label="Status"><span class="status ${esc(j.status)}">${esc(j.status)}</span></td><td data-label="Worker">${esc(j.claimed_by||'—')}</td><td data-label="Attempt">${Number(j.attempt_count||0)}</td><td data-label="Last retry">${esc(j.error_message||j.error_type||'—')}</td><td data-label="Time">${fmt(j.processing_seconds)}</td></tr>`).join('')||'<tr><td colspan="8" class="empty-state">No review-assistant jobs yet.</td></tr>';
     const body=$('review-jobs');
     if(body.dataset.signature!==rows){body.innerHTML=rows;body.dataset.signature=rows;}
     $('review-worker-state').classList.add('ready');
@@ -65,7 +71,7 @@ async function refresh(){
   await Promise.all([loadSettings(false),loadStatus()]);
 }
 
-document.addEventListener('change',e=>{if(e.target.id==='review-enabled'||e.target.matches('[data-role="text"],[data-role="vision"]'))markDirty()});
+document.addEventListener('change',e=>{if(e.target.id==='review-enabled'||e.target.matches('[data-role="text"],[data-role="vision"],[data-role="anomaly"]'))markDirty()});
 $('save-review-settings').addEventListener('click',async()=>{
   const button=$('save-review-settings');
   const old=button.textContent;
@@ -73,7 +79,8 @@ $('save-review-settings').addEventListener('click',async()=>{
   try{
     const text=[...document.querySelectorAll('[data-role="text"]:checked')].map(x=>x.value);
     const vision=[...document.querySelectorAll('[data-role="vision"]:checked')].map(x=>x.value);
-    await api('/api/review-workers/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:$('review-enabled').checked,text_worker_ids:text,vision_worker_ids:vision})});
+    const anomaly=[...document.querySelectorAll('[data-role="anomaly"]:checked')].map(x=>x.value);
+    await api('/api/review-workers/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:$('review-enabled').checked,text_worker_ids:text,vision_worker_ids:vision,anomaly_worker_ids:anomaly})});
     clearDirty();
     feedback('Review worker settings saved.');
     await loadSettings(true);

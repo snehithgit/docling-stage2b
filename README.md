@@ -1,3 +1,18 @@
+## 2026.09.30.40.11AH4 — Colab anomaly review
+
+- Adds a separate **Anomaly review** stage after the normal AI Review Assistant, with independent Colab worker assignment.
+- Automatically audits suspicious Text/Vision cases: verifier↔reviewer disagreement, reviewer `NEEDS_HUMAN`, low review confidence, transcription truncation, large text expansion/contraction, reviewer edit suggestions, and missing technical visual evidence.
+- Anomaly workers receive the exact source crop/image plus Docling, primary verifier, AI-review and human-decision context; the source image remains ground truth.
+- Text anomaly audits can propose corrected text; Vision anomaly audits can propose corrected classification/evidence. Results are stored in `anomaly_review` with bounded `anomaly_review_history`.
+- Human-reviewed Text or Vision items can be explicitly **Re-reviewed with Colab** in one click. Existing human decisions are never overwritten automatically.
+- Late Colab results are discarded when the underlying ledger evidence changes during inference.
+- Automatic anomaly work waits until normal Text/Vision Review Assistant queues are clear, preserving the intended third-pass order.
+- Review Worker counters now show stable **remaining = pending + processing** totals and expose attempt count plus last retry reason.
+- Human Review and Vision Audit display anomaly results and preserve the existing human-authority model.
+- Version: `2026.09.30.40.11AH4`.
+- Validation: **667 passed**; Python compile and all frontend JavaScript syntax checks pass.
+- Full details: `RELEASE_VALIDATION_2026.09.30.40.11AH4.md`.
+
 ## 2026.09.30.40.11AH3 — Human Review AI-review filters
 
 - Human Text Review can now filter by AI-review state, Review Assistant recommendation, physical review worker, and attention state.

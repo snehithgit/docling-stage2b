@@ -79,6 +79,18 @@ function aiReviewAssistantBlock(downstream) {
   return `<section class="ai-review-assistant-inline"><div class="vision-audit-section-label">AI review assistant · advisory only</div><div class="vision-audit-kv"><span>Recommendation</span><strong>${esc(recommendation)}</strong><span>Confidence</span><strong>${esc(confidenceText)}</strong><span>Worker</span><strong>${esc(a.worker_name || a.worker_id || "Colab worker")}</strong></div>${a.reason ? `<p class="vision-audit-summary-text"><strong>Reason:</strong> ${esc(a.reason)}</p>` : ""}${a.corrected_summary ? `<p class="vision-audit-summary-text"><strong>Suggested summary:</strong> ${esc(a.corrected_summary)}</p>` : ""}${tagsText.length ? `<div class="vision-audit-section-label">Suggested visible text</div>${tagList(tagsText, "")}` : ""}${tagsObjects.length ? `<div class="vision-audit-section-label">Suggested objects</div>${tagList(tagsObjects, "")}` : ""}<p class="format-note"><strong>Human authority preserved.</strong> This recommendation cannot approve, exclude, or overwrite the visual by itself.</p></section>`;
 }
 
+function anomalyReviewBlock(downstream) {
+  const a = downstream?.anomaly_review;
+  if (!a || a.discarded || a.stored === false) return "";
+  const verdict = String(a.verdict || "NEEDS_HUMAN").replaceAll("_", " ");
+  const confidence = Number(a.confidence);
+  const confidenceText = Number.isFinite(confidence) ? `${Math.round(confidence * 100)}% confidence` : "confidence not reported";
+  const types = Array.isArray(a.anomaly_types_confirmed) && a.anomaly_types_confirmed.length
+    ? a.anomaly_types_confirmed
+    : (Array.isArray(a.anomaly_types) ? a.anomaly_types : []);
+  return `<section class="ai-review-assistant-inline"><div class="vision-audit-section-label">Anomaly review · Colab · advisory only</div><div class="vision-audit-kv"><span>Verdict</span><strong>${esc(verdict)}</strong><span>Confidence</span><strong>${esc(confidenceText)}</strong><span>Worker</span><strong>${esc(a.worker_name || a.worker_id || "Colab worker")}</strong></div>${types.length ? `<p class="format-note"><strong>Anomaly:</strong> ${esc(types.join(" · ").replaceAll("_", " "))}</p>` : ""}${a.reason ? `<p class="vision-audit-summary-text"><strong>Reason:</strong> ${esc(a.reason)}</p>` : ""}${a.corrected_summary ? `<p class="vision-audit-summary-text"><strong>Corrected summary proposal:</strong> ${esc(a.corrected_summary)}</p>` : ""}${Array.isArray(a.visible_text) && a.visible_text.length ? `<div class="vision-audit-section-label">Corrected visible text proposal</div>${tagList(a.visible_text.slice(0,12), "")}` : ""}${Array.isArray(a.visible_objects) && a.visible_objects.length ? `<div class="vision-audit-section-label">Corrected object proposal</div>${tagList(a.visible_objects.slice(0,12), "")}` : ""}<p class="format-note"><strong>Human authority preserved.</strong> This audit never replaces an existing human visual decision automatically.</p></section>`;
+}
+
 function visionAiReview(job) {
   const review = job?.downstream?.ai_review_assistant;
   return review && typeof review === "object" ? review : null;
@@ -173,7 +185,7 @@ function renderJob(job) {
         ${doclingReviewUrl(job) ? `<div class="document-actions"><a class="mini-action primary-mini" href="${esc(doclingReviewUrl(job))}">Open Docling PDF bbox</a></div>` : ""}
       </div>
       <div class="vision-audit-explanation vision-audit-summary-first">
-        ${failed ? `<section><div class="vision-audit-section-label">Verification failed</div><p class="queue-error">${esc(job.error_type || "Error")}: ${esc(job.error_message || "Vision verification failed")}</p></section>` : `<section><div class="vision-audit-section-label">Result</div><h3>${esc(humanVerdict(c.verdict || job.verdict))}</h3><p class="vision-audit-summary-text">${esc(effectiveSummary || "No short summary was produced.")}</p><div class="vision-audit-kv"><span>Category</span><strong>${esc(effectiveCategory)}</strong><span>Pipeline</span><strong>${esc(downstreamLabel)}</strong></div></section>${aiReviewAssistantBlock(downstream)}${decisionButtons}`}
+        ${failed ? `<section><div class="vision-audit-section-label">Verification failed</div><p class="queue-error">${esc(job.error_type || "Error")}: ${esc(job.error_message || "Vision verification failed")}</p></section>` : `<section><div class="vision-audit-section-label">Result</div><h3>${esc(humanVerdict(c.verdict || job.verdict))}</h3><p class="vision-audit-summary-text">${esc(effectiveSummary || "No short summary was produced.")}</p><div class="vision-audit-kv"><span>Category</span><strong>${esc(effectiveCategory)}</strong><span>Pipeline</span><strong>${esc(downstreamLabel)}</strong></div></section>${aiReviewAssistantBlock(downstream)}${anomalyReviewBlock(downstream)}<div class="document-actions"><button class="mini-action audit-anomaly-review" data-job="${job.postprocess_job_id}" data-entry="${entryId}">Re-review with Colab</button></div>${decisionButtons}`}
       </div>
     </div>
     ${!failed ? `<div class="vision-audit-evidence-counts">${effectiveText.length} important label${effectiveText.length === 1 ? "" : "s"} · ${effectiveObjects.length} object${effectiveObjects.length === 1 ? "" : "s"} · ${cropCount} crop${cropCount === 1 ? "" : "s"}</div><details class="vision-audit-details extracted-detail"><summary>Show extracted detail</summary><div class="vision-audit-detail-grid"><section><div class="vision-audit-section-label">Important visible text</div>${tagList(effectiveText, "No legible text reported")}</section><section><div class="vision-audit-section-label">Visible objects / structures</div>${tagList(effectiveObjects, "No objects reported")}</section></div><p class="format-note"><strong>Why it was checked:</strong> ${esc(job.reason || request.reason || "No route reason recorded")}${c.unresolved_reason ? ` · ${esc(c.unresolved_reason)}` : ""}</p></details>` : ""}
@@ -322,6 +334,30 @@ async function loadAudit() {
     button.disabled = false;
   }
 }
+
+document.addEventListener("click", async event => {
+  const button = event.target.closest(".audit-anomaly-review");
+  if (!button || decisionInFlight) return;
+  decisionInFlight = true;
+  const old = button.textContent;
+  button.disabled = true;
+  button.textContent = "Queueing Colab audit…";
+  try {
+    feedback("Queueing independent Colab anomaly review…");
+    const response = await fetch(`/api/postprocess/jobs/${encodeURIComponent(button.dataset.job)}/vision-audit/${encodeURIComponent(button.dataset.entry)}/anomaly-review`, {method:"POST", cache:"no-store"});
+    let data = {};
+    try { data = await response.json(); } catch (_) { data = {}; }
+    if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+    feedback("Colab anomaly re-review queued. Existing human decision remains authoritative.", "completed");
+  } catch (error) {
+    feedback(`Could not queue anomaly re-review: ${error.message}`, "warning");
+  } finally {
+    decisionInFlight = false;
+    button.disabled = false;
+    button.textContent = old;
+  }
+});
+
 
 document.addEventListener("click", async event => {
   const actionButton = event.target.closest(".audit-recovery, .audit-waive-recovery, .audit-undo");

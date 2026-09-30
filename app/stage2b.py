@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from .config import AppConfig
 
 from .archive import select_docling_document
+from .anomaly_review import anomaly_evidence_signature, anomaly_prompt_context, detect_anomaly_types
 from .artifact_sweep import build_artifact_sweep_plan
 from .book_lifecycle_lock import LifecycleLockGetter
 from .verifier_checkpoint import CheckpointVerifier
@@ -5542,6 +5543,241 @@ class Stage2BWorker:
                 )
             self._events.notify("review_assistant_completed")
             return suggestion
+        finally:
+            await self._release_provider(provider, owner)
+
+    async def run_anomaly_review_job(
+        self, *, worker_id: str, postprocess_job_id: int, entry_id: str,
+        review_type: str, manual_requested: bool = False,
+    ) -> dict[str, Any]:
+        """Run a third-pass Colab audit over a suspicious Text/Vision ledger entry.
+
+        The anomaly audit is always advisory. It may propose corrected text or
+        corrected visual evidence, including after an existing human decision,
+        but it never writes human_verified or human_visual_decision.
+        """
+        postprocess_job_id = int(postprocess_job_id)
+        if self._lifecycle_lock_getter is not None:
+            async with self._lifecycle_lock_getter(postprocess_job_id):
+                return await self._run_anomaly_review_job_locked(
+                    worker_id=worker_id, postprocess_job_id=postprocess_job_id,
+                    entry_id=entry_id, review_type=review_type,
+                    manual_requested=manual_requested,
+                )
+        return await self._run_anomaly_review_job_locked(
+            worker_id=worker_id, postprocess_job_id=postprocess_job_id,
+            entry_id=entry_id, review_type=review_type,
+            manual_requested=manual_requested,
+        )
+
+    async def _run_anomaly_review_job_locked(
+        self, *, worker_id: str, postprocess_job_id: int, entry_id: str,
+        review_type: str, manual_requested: bool,
+    ) -> dict[str, Any]:
+        if review_type not in {"text", "vision"}:
+            raise ValueError("Anomaly review type must be text or vision")
+        if self._worker_registry is None:
+            raise ValueError("Worker registry is unavailable")
+        worker = self._worker_registry.get_colab(worker_id)
+        if not worker or not worker.get("enabled") or worker.get("paused"):
+            raise ValueError("Selected Colab anomaly worker is disabled or stopped")
+        provider = self._colab_provider_key(worker_id)
+        if not self._worker_registry.read_api_key(worker_id) or not str(worker.get("url") or "").strip():
+            raise ValueError("Selected Colab anomaly worker is not configured")
+
+        owner = f"{provider}:anomaly:{postprocess_job_id}:{entry_id}"
+        if not await self._reserve_provider(provider, owner):
+            raise RuntimeError("Selected Colab anomaly worker is busy")
+        try:
+            post_job = await self._postprocess_store.get_job(postprocess_job_id)
+            if not post_job or not post_job.get("result_dir"):
+                raise ValueError("Post-process book is unavailable")
+            result_dir = Path(self._config_getter().processed_dir) / Path(str(post_job["result_dir"])).name
+            ledger_path = result_dir / "correction_ledger.json"
+            try:
+                ledger = json.loads(ledger_path.read_text(encoding="utf-8")) if ledger_path.is_file() else {}
+            except (OSError, json.JSONDecodeError, TypeError) as exc:
+                raise ValueError("Correction ledger is unavailable") from exc
+            entry = next(
+                (item for item in (ledger.get("entries") or [])
+                 if str(item.get("entry_id")) == str(entry_id) and item.get("status") != "superseded"),
+                None,
+            )
+            if not entry:
+                raise ValueError("Anomaly-review entry is no longer current")
+            expected_type = "text_correction" if review_type == "text" else "vision_enrichment"
+            if str(entry.get("entry_type")) != expected_type:
+                raise ValueError("Anomaly-review entry type no longer matches the queued job")
+
+            anomaly_types = detect_anomaly_types(entry, review_type)
+            if not anomaly_types and manual_requested:
+                anomaly_types = ["POST_HUMAN_REVIEW_RECHECK" if (
+                    entry.get("human_verified") or entry.get("human_visual_decision")
+                ) else "MANUAL_RECHECK"]
+            if not anomaly_types:
+                return {
+                    "schema": "marine-anomaly-review/v1",
+                    "review_type": review_type,
+                    "worker_id": worker_id,
+                    "discarded": True,
+                    "stored": False,
+                    "discard_reason": "No current anomaly remains to review",
+                    "human_authority_preserved": True,
+                    "created_at_epoch": time.time(),
+                }
+            expected_signature = anomaly_evidence_signature(entry, review_type)
+
+            config = self._config_getter()
+            conversion = await self._postprocess_store.get_conversion_job(
+                int(post_job.get("conversion_job_id") or 0)
+            )
+            source_filename = str((conversion or {}).get("filename") or post_job.get("source_filename") or "")
+            output_filename = str(post_job.get("output_filename") or (conversion or {}).get("output_filename") or "")
+            zip_path = Path(config.output_dir) / Path(output_filename).name
+            doc = await self._document_for(zip_path)
+            page = int(entry.get("page")) if entry.get("page") is not None else None
+            context = anomaly_prompt_context(entry, review_type, anomaly_types)
+
+            if review_type == "text":
+                source_type = str(entry.get("source_type") or "text")
+                if source_type == "table_cell":
+                    rendered = await asyncio.to_thread(
+                        _render_source_table_cell, config, source_filename, page, doc,
+                        int(entry.get("table_index")), int(entry.get("cell_index"))
+                    )
+                else:
+                    rendered = await asyncio.to_thread(
+                        _render_source_target, config, source_filename, page, doc,
+                        int(entry.get("source_index"))
+                    )
+                if not rendered:
+                    raise ValueError("Original source crop is unavailable for anomaly review")
+                image_bytes, mime, crop_meta = rendered
+                prompt = (
+                    "You are the independent anomaly auditor for a marine technical manual. "
+                    "The supplied SOURCE CROP is ground truth. Prior AI and human decisions are context, not truth. "
+                    "Re-read the crop character-by-character, with special care for part numbers, terminals, alarm codes, "
+                    "units, decimal points and look-alike glyphs (0/O, 1/I/l, 5/S, 8/B). "
+                    "Return ONE JSON object only with keys verdict, confidence, reason, anomaly_types_confirmed, corrected_text. "
+                    "verdict must be CONFIRM_CURRENT, KEEP_ORIGINAL, USE_PRIMARY_PROPOSAL, REPLACE_TEXT, or NEEDS_HUMAN. "
+                    "corrected_text must contain only text visible in this crop and is required only for REPLACE_TEXT. "
+                    "Never invent missing text. A previous HUMAN decision is authoritative unless the human explicitly chooses "
+                    "to replace it after reading this audit.\n\nAUDIT CONTEXT:\n"
+                    + json.dumps(context, ensure_ascii=False)[:12000]
+                )
+                source_meta = {"page": page, "crop": crop_meta}
+            else:
+                picture_index = entry.get("picture_index")
+                if picture_index is None:
+                    picture_index = entry.get("source_index")
+                if picture_index is None:
+                    raise ValueError("Vision anomaly entry has no picture index")
+                image_bytes, mime, member = await asyncio.to_thread(
+                    _read_picture, zip_path, doc, int(picture_index), entry.get("artifact")
+                )
+                prompt = (
+                    "You are the independent anomaly auditor for a marine technical manual. "
+                    "The supplied IMAGE is ground truth. Re-evaluate the existing visual classification/evidence and the prior "
+                    "AI/human decisions. Return ONE JSON object only with keys verdict, confidence, reason, "
+                    "anomaly_types_confirmed, corrected_summary, visible_text, visible_objects. "
+                    "verdict must be CONFIRM_CURRENT, TECHNICAL, DECORATIVE, USEFUL, NOT_USEFUL, REPLACE_EVIDENCE, or NEEDS_HUMAN. "
+                    "visible_text must contain only text actually readable in the image. Do not invent labels or components. "
+                    "A previous HUMAN decision is authoritative unless the human explicitly chooses to replace it after reading this audit. "
+                    "\n\nAUDIT CONTEXT:\n" + json.dumps(context, ensure_ascii=False)[:12000]
+                )
+                source_meta = {
+                    "page": page, "picture_index": int(picture_index), "artifact_member": member
+                }
+
+            endpoint = str(worker.get("url") or "").rstrip("/")
+            api_key = self._worker_registry.read_api_key(worker_id)
+            client = OpenAICompatibleVerifier(
+                endpoint, timeout_seconds=int(config.colab_timeout_seconds), api_key=api_key
+            )
+            self._ensure_provider_state(provider)
+            started = time.monotonic()
+            async with self._device_locks[provider]:
+                response = await client.inspect_image(
+                    image_bytes, prompt, mime_type=mime,
+                    model=str(worker.get("model") or "koboldcpp"), max_tokens=1024,
+                )
+            parsed = _json_from_model_response(response)
+            verdict = str(parsed.get("verdict") or "NEEDS_HUMAN").upper().strip()
+            allowed = (
+                {"CONFIRM_CURRENT", "KEEP_ORIGINAL", "USE_PRIMARY_PROPOSAL", "REPLACE_TEXT", "NEEDS_HUMAN"}
+                if review_type == "text"
+                else {"CONFIRM_CURRENT", "TECHNICAL", "DECORATIVE", "USEFUL", "NOT_USEFUL", "REPLACE_EVIDENCE", "NEEDS_HUMAN"}
+            )
+            if verdict not in allowed:
+                verdict = "NEEDS_HUMAN"
+            confirmed = parsed.get("anomaly_types_confirmed")
+            if not isinstance(confirmed, list):
+                confirmed = anomaly_types if verdict != "CONFIRM_CURRENT" else []
+
+            result = {
+                "schema": "marine-anomaly-review/v1",
+                "review_type": review_type,
+                "worker_id": worker_id,
+                "worker_name": worker.get("name") or worker_id,
+                "provider": provider,
+                "model": worker.get("model") or "koboldcpp",
+                "endpoint": endpoint,
+                "manual_requested": bool(manual_requested),
+                "anomaly_types": anomaly_types,
+                "anomaly_types_confirmed": [str(value)[:120] for value in confirmed[:32]],
+                "verdict": verdict,
+                "confidence": parsed.get("confidence"),
+                "reason": str(parsed.get("reason") or "")[:3000],
+                "corrected_text": (
+                    str(parsed.get("corrected_text") or "")[:12000] if review_type == "text" else None
+                ),
+                "corrected_summary": (
+                    str(parsed.get("corrected_summary") or "")[:5000] if review_type == "vision" else None
+                ),
+                "visible_text": (
+                    list(parsed.get("visible_text") or [])[:100] if review_type == "vision" else None
+                ),
+                "visible_objects": (
+                    list(parsed.get("visible_objects") or [])[:100] if review_type == "vision" else None
+                ),
+                "source": source_meta,
+                "processing_seconds": round(time.monotonic() - started, 3),
+                "created_at_epoch": time.time(),
+                "human_authority_preserved": True,
+            }
+
+            async with self._stage2c_ledger_lock:
+                try:
+                    current = json.loads(ledger_path.read_text(encoding="utf-8")) if ledger_path.is_file() else {}
+                except (OSError, json.JSONDecodeError, TypeError):
+                    current = {}
+                current_entry = next(
+                    (item for item in (current.get("entries") or [])
+                     if str(item.get("entry_id")) == str(entry_id) and item.get("status") != "superseded"),
+                    None,
+                )
+                if not current_entry:
+                    raise ValueError("Anomaly-review entry changed while Colab audit was running")
+                if anomaly_evidence_signature(current_entry, review_type) != expected_signature:
+                    result["stored"] = False
+                    result["discarded"] = True
+                    result["discard_reason"] = "Ledger evidence changed while anomaly review was running"
+                    self._events.notify("anomaly_review_stale_result_discarded")
+                    return result
+                previous = current_entry.get("anomaly_review")
+                history = current_entry.get("anomaly_review_history")
+                history = list(history) if isinstance(history, list) else []
+                if isinstance(previous, dict) and previous:
+                    history.append(previous)
+                    current_entry["anomaly_review_history"] = history[-10:]
+                result["stored"] = True
+                current_entry["anomaly_review"] = result
+                await asyncio.to_thread(
+                    upsert_ledger_entry, result_dir,
+                    str(current.get("source_zip_sha256") or ""), current_entry,
+                )
+            self._events.notify("anomaly_review_completed")
+            return result
         finally:
             await self._release_provider(provider, owner)
 

@@ -150,6 +150,34 @@ function renderAiReviewAssistant(entry) {
   useBtn.disabled = !suggested;
 }
 
+function renderAnomalyReview(entry) {
+  const card = $("anomaly-review-card");
+  if (!card) return;
+  const a = entry?.anomaly_review || null;
+  if (!a || a.discarded || a.stored === false) {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+  const verdict = String(a.verdict || "NEEDS_HUMAN").replaceAll("_", " ");
+  const confidence = Number(a.confidence);
+  const confidenceText = Number.isFinite(confidence) ? `${Math.round(confidence * 100)}% confidence` : "confidence not reported";
+  const worker = String(a.worker_name || a.worker_id || "Colab worker");
+  $("anomaly-review-meta").textContent = `${verdict} · ${confidenceText} · ${worker}`;
+  const types = Array.isArray(a.anomaly_types_confirmed) && a.anomaly_types_confirmed.length
+    ? a.anomaly_types_confirmed
+    : (Array.isArray(a.anomaly_types) ? a.anomaly_types : []);
+  $("anomaly-review-types").textContent = types.length ? `Anomaly: ${types.map(x => String(x).replaceAll("_", " ")).join(" · ")}` : "No anomaly confirmed.";
+  $("anomaly-review-reason").textContent = String(a.reason || "No reason supplied.");
+  const corrected = String(a.corrected_text || "").trim();
+  const textEl = $("anomaly-review-text");
+  const useBtn = $("use-anomaly-review");
+  textEl.hidden = !corrected;
+  textEl.textContent = corrected;
+  useBtn.hidden = !corrected;
+  useBtn.disabled = !corrected;
+}
+
 function friendlyReason(value) {
   const raw = String(value || "");
   const known = {
@@ -213,6 +241,7 @@ function setReviewUnavailable(text) {
   $("reset").disabled = true;
   $("use-pi5-suggestion").disabled = true;
   if ($("ai-review-assistant-card")) $("ai-review-assistant-card").hidden = true;
+  if ($("anomaly-review-card")) $("anomaly-review-card").hidden = true;
   $("edit-heading").textContent = "Review record unavailable";
   $("edit-status").textContent = "Not ready";
   $("edit-note").textContent = "The verifier result is preserved. Editing is disabled until its review record is available.";
@@ -309,6 +338,7 @@ async function loadDoclingContext() {
   renderAppliedState(currentEntry, rawTarget);
   renderPi5Suggestion(currentEntry, rawTarget);
   renderAiReviewAssistant(currentEntry);
+  renderAnomalyReview(currentEntry);
   const targetBits = isTable
     ? [`Table ${data.table_index}`, `cell ${data.cell_index}`, `rows ${data.row_start}–${Math.max(data.row_start, Number(data.row_end || data.row_start + 1) - 1)}`, `cols ${data.col_start}–${Math.max(data.col_start, Number(data.col_end || data.col_start + 1) - 1)}`]
     : [`Docling text #${data.source_index}`];
@@ -598,6 +628,37 @@ document.addEventListener("keydown", event => {
   }
   if (!editing && event.key === "]") navigateQueue(1);
   if (!editing && event.key === "[") navigateQueue(-1);
+});
+
+$("anomaly-rereview").addEventListener("click", async () => {
+  if (!job || !entryId) return;
+  const button = $("anomaly-rereview");
+  const old = button.textContent;
+  button.disabled = true;
+  button.textContent = "Queueing Colab audit…";
+  try {
+    const response = await fetch(`/api/postprocess/jobs/${encodeURIComponent(job)}/corrections/${encodeURIComponent(entryId)}/anomaly-review`, {
+      method: "POST", cache: "no-store"
+    });
+    let data = {};
+    try { data = await response.json(); } catch (_) { data = {}; }
+    if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+    message("Colab anomaly re-review queued. Your current human decision remains authoritative.", "success");
+  } catch (error) {
+    message(error.message || "Could not queue anomaly re-review.", "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = old;
+  }
+});
+
+$("use-anomaly-review").addEventListener("click", () => {
+  const suggestion = String(currentEntry?.anomaly_review?.corrected_text || "").trim();
+  if (!suggestion) return;
+  $("correction").value = suggestion;
+  renderDiff();
+  $("correction").focus();
+  message("Anomaly correction copied into the editor. It becomes authoritative only after you save it.", "info");
 });
 
 $("use-ai-review-assistant").addEventListener("click", () => {

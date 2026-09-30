@@ -756,6 +756,34 @@ def test_ah3_human_review_exposes_ai_reviewer_filters_without_granting_ai_author
     assert "human_visual_decision" in vision_js
 
 
+def test_ah4_anomaly_review_is_separate_advisory_layer_with_one_click_rereview():
+    review_html = read("review.html")
+    review_js = read("review.js")
+    vision_js = read("vision-audit.js")
+    workers_html = read("review-workers.html")
+    workers_js = read("review-workers.js")
+
+    assert 'id="anomaly-review-card"' in review_html
+    assert 'id="anomaly-rereview"' in review_html
+    assert "Re-review with Colab" in review_html
+    assert "/anomaly-review" in review_js
+    assert "Use anomaly correction" in review_html
+    assert "human decision remains authoritative" in review_js.lower()
+
+    assert "anomalyReviewBlock" in vision_js
+    assert "audit-anomaly-review" in vision_js
+    assert "/anomaly-review" in vision_js
+    assert "never replaces an existing human visual decision automatically" in vision_js
+
+    assert "Anomaly review" in workers_js
+    assert 'data-role="anomaly"' in workers_js
+    assert 'id="review-anomaly-pending"' in workers_html
+    assert "textRemaining" in workers_js
+    assert "visionRemaining" in workers_js
+    assert "attempt_count" in workers_js
+    assert "error_message" in workers_js
+
+
 def test_4011c_shared_attention_terminology_and_polling_feedback_are_consistent():
     nav = read("nav.js")
     verification = read("verification.js")

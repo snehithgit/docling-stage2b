@@ -57,9 +57,11 @@ def test_worker_registry_supports_independent_local_and_multiple_colab_controls(
         enabled=True,
         text_worker_ids=[first["id"], second["id"]],
         vision_worker_ids=[first["id"]],
+        anomaly_worker_ids=[second["id"]],
     )
     assert review["text_worker_ids"] == ["colab-1", "colab-2"]
     assert review["vision_worker_ids"] == ["colab-1"]
+    assert review["anomaly_worker_ids"] == ["colab-2"]
     assert review["require_machine_complete"] is True
 
     registry.update_colab(first["id"], {"paused": True})
@@ -71,6 +73,7 @@ def test_worker_registry_supports_independent_local_and_multiple_colab_controls(
     assert [w["id"] for w in snap["colab_workers"]] == ["colab-2"]
     assert snap["review"]["text_worker_ids"] == ["colab-2"]
     assert snap["review"]["vision_worker_ids"] == []
+    assert snap["review"]["anomaly_worker_ids"] == ["colab-2"]
 
 
 def test_stage2b_worker_uses_registry_artifact_participation_and_multiple_colab_pool(tmp_path: Path):
@@ -150,7 +153,10 @@ def test_review_assistant_waits_until_text_vision_and_artifact_machine_jobs_fini
         w = registry.add_colab(name="Reviewer")
         registry.update_colab(w["id"], {"enabled": True, "url": "https://review.trycloudflare.com"})
         registry.write_api_key(w["id"], "r" * 32)
-        registry.update_review(enabled=True, text_worker_ids=[w["id"]], vision_worker_ids=[w["id"]])
+        registry.update_review(
+            enabled=True, text_worker_ids=[w["id"]], vision_worker_ids=[w["id"]],
+            anomaly_worker_ids=[w["id"]],
+        )
 
         blocked = {
             "postprocess_job_id": 7, "result_dir": "book__job7",
@@ -232,6 +238,7 @@ def test_busy_colab_removal_drains_and_is_finalized_when_reservation_releases(tm
             enabled=True,
             text_worker_ids=[item["id"]],
             vision_worker_ids=[item["id"]],
+            anomaly_worker_ids=[item["id"]],
         )
 
         events = SimpleNamespace(notify=lambda *args, **kwargs: None)
@@ -249,6 +256,7 @@ def test_busy_colab_removal_drains_and_is_finalized_when_reservation_releases(tm
         snap = registry.snapshot(cfg)
         assert snap["review"]["text_worker_ids"] == []
         assert snap["review"]["vision_worker_ids"] == []
+        assert snap["review"]["anomaly_worker_ids"] == []
 
         await worker._release_provider(provider, "test-owner")
         assert registry.get_colab(item["id"]) is None
@@ -384,3 +392,77 @@ def test_review_assistant_pending_predicate_rejects_human_resolved_entries(tmp_p
     assert worker._review_entry_still_needs_assistance(vision, "v1", "vision") is True
     vision["entries"][0]["human_visual_decision"] = "technical"
     assert worker._review_entry_still_needs_assistance(vision, "v1", "vision") is False
+
+
+def test_manual_anomaly_job_survives_automatic_candidate_retirement(tmp_path: Path):
+    async def run():
+        cfg = _config(tmp_path)
+        store = ReviewAssistantStore(cfg.database_path)
+        await store.initialize()
+        entry = {
+            "entry_id": "g:text:R9", "entry_type": "text_correction",
+            "verification_verdict": "UNCERTAIN", "original_text": "PUMP PRESURE",
+            "proposed_text": "PUMP PRESSURE", "human_verified": True,
+        }
+        queued = await store.queue_manual_anomaly(
+            9, "book__job9", entry, "anomaly_text"
+        )
+        assert queued["status"] == "pending"
+        await store.retire_missing(set())
+        jobs = await store.list_jobs()
+        assert len(jobs) == 1
+        assert jobs[0]["review_type"] == "anomaly_text"
+        assert jobs[0]["status"] == "pending"
+        assert str(jobs[0]["entry_signature"]).startswith("manual:")
+
+    asyncio.run(run())
+
+
+def test_automatic_anomaly_job_is_third_pass_after_normal_review(tmp_path: Path):
+    async def run():
+        cfg = _config(tmp_path)
+        Path(cfg.processed_dir).mkdir(parents=True)
+        result_dir = Path(cfg.processed_dir) / "book__job11"
+        result_dir.mkdir()
+        ledger = {
+            "entries": [{
+                "entry_id": "g:text:R1", "entry_type": "text_correction",
+                "status": "pending", "human_verified": False,
+                "verification_verdict": "LIKELY_CORRUPT", "page": 2,
+                "source_index": 4, "source_type": "text",
+                "original_text": "PUMP PRESURE", "proposed_text": "PUMP PRESSURE",
+                "ai_review_assistant": {
+                    "recommendation": "KEEP_ORIGINAL", "confidence": 0.99,
+                },
+            }]
+        }
+        (result_dir / "correction_ledger.json").write_text(json.dumps(ledger), encoding="utf-8")
+
+        registry = WorkerRegistry(cfg.database_path)
+        w = registry.add_colab(name="Anomaly GPU")
+        registry.update_colab(w["id"], {"enabled": True, "url": "https://review.trycloudflare.com"})
+        registry.write_api_key(w["id"], "a" * 32)
+        registry.update_review(
+            enabled=True, text_worker_ids=[w["id"]], vision_worker_ids=[],
+            anomaly_worker_ids=[w["id"]],
+        )
+        ready = {
+            "postprocess_job_id": 11, "result_dir": "book__job11",
+            "text_pending": 0, "text_processing": 0, "text_failed": 0,
+            "vision_pending": 0, "vision_processing": 0, "vision_failed": 0,
+            "artifact_pending": 0, "artifact_processing": 0, "artifact_failed": 0,
+        }
+        store = ReviewAssistantStore(cfg.database_path)
+        await store.initialize()
+        service = ReviewAssistantService(
+            lambda: cfg, registry, store, _Books([ready]),
+            _UnusedPostprocess(), _UnusedWorker(), _Events(),
+        )
+        assert await service._sync_candidates() is True
+        jobs = await store.list_jobs()
+        assert {j["review_type"] for j in jobs} == {"text", "anomaly_text"}
+        counts = await store.counts()
+        assert counts["text_pending"] == 1
+        assert counts["anomaly_text_pending"] == 1
+
+    asyncio.run(run())
