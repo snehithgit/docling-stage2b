@@ -4567,6 +4567,7 @@ async def anomaly_review_queue(
                 anomaly_types_seen.update(types)
 
                 decision_current = _anomaly_human_decision_current(entry, review or {})
+                anomaly_decision = entry.get("anomaly_human_decision") if decision_current else {}
                 qstatus = str((queue_job or {}).get("status") or "")
                 if qstatus == "processing":
                     item_state = "processing"
@@ -4575,9 +4576,11 @@ async def anomaly_review_queue(
                 elif qstatus == "failed":
                     item_state = "failed"
                 elif review:
-                    if decision_current:
+                    if decision_current and bool((anomaly_decision or {}).get("resolved")):
                         item_state = "resolved"
-                    elif str(review.get("verdict") or "").upper() == "NEEDS_HUMAN":
+                    elif str(review.get("verdict") or "").upper() == "NEEDS_HUMAN" or (
+                        decision_current and (anomaly_decision or {}).get("resolved") is False
+                    ):
                         item_state = "needs_human"
                     else:
                         item_state = "needs_decision"
