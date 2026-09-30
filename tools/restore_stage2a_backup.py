@@ -18,13 +18,20 @@ def main():
             print(f"ERROR: backup is incomplete: {p}",file=sys.stderr); return 2
     if not ns.apply:
         print(f"Would restore {backup} into {project}. Re-run with --apply."); return 0
-    subprocess.run(["docker","compose","stop",SERVICE],cwd=project,check=True)
+    compose_file=project/"docker-compose.yml"
+    if compose_file.is_file():
+        subprocess.run(["docker","compose","stop",SERVICE],cwd=project,check=True)
+    else:
+        subprocess.run(["docker","stop",SERVICE],cwd=project,check=True)
     for name in ("data","processed"):
         dst=project/name
         if dst.exists(): shutil.rmtree(dst)
         shutil.copytree(backup/name,dst)
     shutil.copy2(backup/"config.yaml",project/"config.yaml")
-    subprocess.run(["docker","compose","up","-d",SERVICE],cwd=project,check=True)
+    if compose_file.is_file():
+        subprocess.run(["docker","compose","up","-d",SERVICE],cwd=project,check=True)
+    else:
+        subprocess.run(["docker","start",SERVICE],cwd=project,check=True)
     print("Backup restored and app restarted.")
     return 0
 

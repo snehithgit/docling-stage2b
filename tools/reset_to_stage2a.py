@@ -30,9 +30,23 @@ def die(message: str, code: int = 2) -> None:
     raise SystemExit(code)
 
 
-def compose(project: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+def docker_control(project: Path, action: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    """Stop/start the deployed app with or without a compose file.
+
+    ZimaOS deployments may expose only the bind-mounted app-data directory
+    (config/data/converted/processed) and keep docker-compose.yml elsewhere.
+    In that layout, operate on the already-created container directly.
+    """
+    compose_file = project / "docker-compose.yml"
+    if compose_file.is_file():
+        cmd = ["docker", "compose", action if action == "stop" else "up"]
+        if action == "start":
+            cmd += ["-d"]
+        cmd += [SERVICE]
+    else:
+        cmd = ["docker", "stop" if action == "stop" else "start", SERVICE]
     return subprocess.run(
-        ["docker", "compose", *args], cwd=project, check=check,
+        cmd, cwd=project, check=check,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
     )
 
@@ -188,7 +202,7 @@ def main() -> int:
     db_path = data_dir / "jobs.db"
 
     for path, label in (
-        (compose_file, "docker-compose.yml"), (data_dir, "data/"),
+        (data_dir, "data/"),
         (processed_dir, "processed/"), (converted_dir, "converted/"),
         (config_path, "config.yaml"), (db_path, "data/jobs.db"),
     ):
@@ -226,7 +240,7 @@ def main() -> int:
     processed_moved = False
     try:
         print(f"\nStopping {SERVICE}...")
-        result = compose(project, "stop", SERVICE, check=False)
+        result = docker_control(project, "stop", check=False)
         print(result.stdout.strip())
         if result.returncode != 0:
             raise RuntimeError("docker compose stop failed")
@@ -236,7 +250,8 @@ def main() -> int:
         # not copied, so reset is fast and rollback remains lossless.
         shutil.copytree(data_dir, backup_root / "data")
         shutil.copy2(config_path, backup_root / "config.yaml")
-        shutil.copy2(compose_file, backup_root / "docker-compose.yml")
+        if compose_file.is_file():
+            shutil.copy2(compose_file, backup_root / "docker-compose.yml")
         manifest = {
             "schema": "marine-stage2a-reset-backup/v1",
             "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -274,7 +289,7 @@ def main() -> int:
 
         if not args.no_restart:
             print(f"Starting {SERVICE}...")
-            result = compose(project, "up", "-d", SERVICE, check=False)
+            result = docker_control(project, "start", check=False)
             print(result.stdout.strip())
             if result.returncode != 0:
                 raise RuntimeError("Reset succeeded but docker compose start failed; backup is intact")
