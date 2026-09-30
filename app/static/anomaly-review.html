@@ -29,18 +29,18 @@
       <div>
         <p class="eyebrow">Third-pass quality gate</p>
         <h1>Anomaly Review</h1>
-        <p class="subtle">Inspect suspicious Text/Vision ledger states and decide whether an assigned Colab worker should independently re-read the original source evidence.</p>
+        <p class="subtle">Inspect suspicious Text/Vision ledger states. When ready, one global action can send the full current anomaly set to the assigned Colab anomaly workers.</p>
       </div>
-      <button class="secondary-button" id="ar-refresh" type="button">Refresh</button>
+      <div class="document-actions"><button class="primary-button" id="ar-rerun-all" type="button">Re-verify all anomalies with Colab</button><button class="secondary-button" id="ar-refresh" type="button">Refresh</button></div>
     </header>
 
     <section class="crossover-explainer vision-audit-notice">
-      <strong>You decide before Colab runs.</strong>
-      <p><b>Yes</b> queues a fresh source-evidence audit. <b>No</b> dismisses the anomaly for the current evidence signature. Colab never overwrites an existing human decision automatically.</p>
+      <strong>One confirmation for the whole anomaly set.</strong>
+      <p>Press <b>Re-verify all anomalies with Colab</b> once. Choose <b>Yes</b> to queue every current Text/Vision anomaly, including anomalies on already human-reviewed items. Choose <b>No</b> to cancel with no changes. Colab never overwrites an existing human decision automatically.</p>
     </section>
 
     <section class="vision-audit-summary" aria-label="Anomaly review totals">
-      <div class="vision-audit-stat"><span>Needs decision</span><strong id="ar-needs">0</strong></div>
+      <div class="vision-audit-stat"><span>Detected anomalies</span><strong id="ar-needs">0</strong></div>
       <div class="vision-audit-stat"><span>Queued / processing</span><strong id="ar-running">0 / 0</strong></div>
       <div class="vision-audit-stat"><span>Reviewed by Colab</span><strong id="ar-reviewed">0</strong></div>
       <div class="vision-audit-stat"><span>Dismissed</span><strong id="ar-dismissed">0</strong></div>
@@ -51,7 +51,7 @@
       <div class="vision-audit-filters">
         <label>Book<select id="ar-book"><option value="">All books</option></select></label>
         <label>Type<select id="ar-type"><option value="">Text + Vision</option><option value="text">Text</option><option value="vision">Vision</option></select></label>
-        <label>State<select id="ar-state"><option value="">All states</option><option value="needs_decision">Needs decision</option><option value="queued">Queued</option><option value="processing">Processing</option><option value="reviewed">Reviewed by Colab</option><option value="dismissed">Dismissed</option></select></label>
+        <label>State<select id="ar-state"><option value="">All states</option><option value="needs_decision">Detected / not queued</option><option value="queued">Queued</option><option value="processing">Processing</option><option value="reviewed">Reviewed by Colab</option><option value="dismissed">Dismissed</option></select></label>
         <label>Human state<select id="ar-human-state"><option value="">All</option><option value="reviewed">Human reviewed</option><option value="unreviewed">Not human reviewed</option></select></label>
         <label>Anomaly<select id="ar-anomaly"><option value="">All anomaly types</option></select></label>
         <label>Search<input id="ar-search" type="search" placeholder="book, route, text, anomaly…" /></label>
