@@ -1,4 +1,10 @@
-from app.anomaly_review import anomaly_evidence_signature, anomaly_prompt_context, detect_anomaly_types
+from app.anomaly_review import (
+    anomaly_evidence_signature,
+    anomaly_prompt_context,
+    detect_anomaly_types,
+    text_anomaly_acceptance_plan,
+    vision_anomaly_acceptance_plan,
+)
 
 
 def test_text_anomaly_detector_catches_disagreement_truncation_and_large_expansion():
@@ -86,3 +92,36 @@ def test_prompt_context_includes_human_state_without_granting_model_authority():
     assert context["human_verified"] is True
     assert context["human_visual_decision"] == "technical"
     assert context["anomaly_types"] == ["POST_HUMAN_REVIEW_RECHECK"]
+
+
+
+def test_text_anomaly_acceptance_requires_explicit_human_plan():
+    entry = {
+        "entry_type": "text_correction",
+        "original_text": "PUMP PRESURE",
+        "proposed_text": "PUMP PRESSURE",
+        "human_verified": True,
+    }
+    assert text_anomaly_acceptance_plan(entry, {"verdict": "KEEP_ORIGINAL"}) == {
+        "mode": "human_text", "action": "reject", "text": "PUMP PRESURE", "resolved": True
+    }
+    replacement = text_anomaly_acceptance_plan(
+        entry, {"verdict": "REPLACE_TEXT", "corrected_text": "PUMP PRESSURE"}
+    )
+    assert replacement["mode"] == "human_text"
+    assert replacement["action"] == "apply"
+    assert replacement["text"] == "PUMP PRESSURE"
+    assert text_anomaly_acceptance_plan(entry, {"verdict": "NEEDS_HUMAN"})["resolved"] is False
+
+
+def test_vision_anomaly_acceptance_never_invents_missing_evidence():
+    entry = {
+        "entry_type": "vision_enrichment",
+        "verification_verdict": "TECHNICAL_USEFUL",
+        "artifact_sweep": False,
+    }
+    plan = vision_anomaly_acceptance_plan(entry, {"verdict": "CONFIRM_CURRENT"})
+    assert plan == {"mode": "human_visual", "decision": "useful", "resolved": True}
+    empty = vision_anomaly_acceptance_plan(entry, {"verdict": "REPLACE_EVIDENCE"})
+    assert empty["mode"] == "acknowledge"
+    assert empty["resolved"] is False
