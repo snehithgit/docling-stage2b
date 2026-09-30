@@ -123,6 +123,23 @@ class ReviewAssistantStore:
         if not entry_id:
             return
         with self._conn() as conn:
+            if str(review_type).startswith("anomaly_"):
+                base_type = "text" if str(review_type).endswith("text") else "vision"
+                evidence_sig = anomaly_evidence_signature(entry, base_type)
+                manual = conn.execute(
+                    """SELECT entry_signature FROM review_assistant_jobs
+                       WHERE postprocess_job_id=? AND entry_id=? AND review_type=?
+                         AND is_current=1 AND entry_signature LIKE 'manual:%'
+                       ORDER BY id DESC LIMIT 1""",
+                    (postprocess_job_id, entry_id, review_type),
+                ).fetchone()
+                if manual is not None:
+                    manual_sig = str(manual["entry_signature"] or "")
+                    if manual_sig.startswith(f"manual:{evidence_sig}:"):
+                        # A user-requested batch/single re-review is the newest
+                        # authority for this same evidence version. Do not let
+                        # background candidate sync retire it before Colab runs.
+                        return
             conn.execute("""UPDATE review_assistant_jobs SET is_current=0
                          WHERE postprocess_job_id=? AND entry_id=? AND review_type=? AND entry_signature<>? AND is_current=1""",
                          (postprocess_job_id, entry_id, review_type, sig))
