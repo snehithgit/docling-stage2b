@@ -59,7 +59,7 @@ async function loadStatus(){
     $('review-anomaly-pending').textContent=anomalyPending+anomalyProcessing;
     $('review-processing').textContent=(c.text_processing||0)+(c.vision_processing||0)+anomalyProcessing;
     $('review-completed').textContent=(c.text_completed||0)+(c.vision_completed||0)+(c.anomaly_text_completed||0)+(c.anomaly_vision_completed||0);
-    const rows=(st.jobs||[]).map(j=>`<tr><td data-label="Type">${esc(j.review_type)}</td><td data-label="Book">#${j.postprocess_job_id}</td><td data-label="Entry"><code>${esc(j.entry_id)}</code></td><td data-label="Status"><span class="status ${esc(j.status)}">${esc(j.status)}</span></td><td data-label="Worker">${esc(j.claimed_by||'—')}</td><td data-label="Time">${fmt(j.processing_seconds)}</td></tr>`).join('')||'<tr><td colspan="6" class="empty-state">No review-assistant jobs yet.</td></tr>';
+    const rows=(st.jobs||[]).map(j=>`<tr><td data-label="Type">${esc(j.review_type)}</td><td data-label="Book">#${j.postprocess_job_id}</td><td data-label="Entry"><code>${esc(j.entry_id)}</code></td><td data-label="Status"><span class="status ${esc(j.status)}">${esc(j.status)}</span></td><td data-label="Worker">${esc(j.claimed_by||'—')}</td><td data-label="Attempt">${Number(j.attempt_count||0)}</td><td data-label="Last retry">${esc(j.error_message||j.error_type||'—')}</td><td data-label="Time">${fmt(j.processing_seconds)}</td></tr>`).join('')||'<tr><td colspan="8" class="empty-state">No review-assistant jobs yet.</td></tr>';
     const body=$('review-jobs');
     if(body.dataset.signature!==rows){body.innerHTML=rows;body.dataset.signature=rows;}
     $('review-worker-state').classList.add('ready');
