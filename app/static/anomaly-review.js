@@ -169,7 +169,7 @@ async function reverifyAll() {
   no.disabled = true;
   status.textContent = `Queueing all ${total.toLocaleString()} current anomalies for Colab…`;
   try {
-    const response = await fetch("/api/anomaly-review/reverify-all", {method:"POST", cache:"no-store"});
+    const response = await fetch("/api/anomaly-review/reverify-all?confirm=true", {method:"POST", cache:"no-store"});
     let data = {};
     try { data = await response.json(); } catch (_) { data = {}; }
     if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
@@ -182,7 +182,7 @@ async function reverifyAll() {
     feedback(error.message || "Could not queue all anomaly reviews.", "warning");
   } finally {
     no.disabled = false;
-    if (!yes.disabled) yes.disabled = false;
+    yes.disabled = false;
   }
 }
 
