@@ -17,7 +17,6 @@ function feedback(message, kind="") {
 function statusClass(state) {
   if (state === "reviewed") return "completed";
   if (state === "processing" || state === "queued") return "pending";
-  if (state === "dismissed") return "paused";
   return "warning";
 }
 
@@ -55,9 +54,7 @@ function actionBlock(item) {
       ? "Queued for Colab"
       : item.state === "reviewed"
         ? "Latest Colab anomaly audit stored"
-        : item.state === "dismissed"
-          ? "Previously dismissed"
-          : "Detected anomaly";
+        : "Detected anomaly";
   return `<div class="document-actions"><span class="status ${esc(statusClass(item.state))}">${esc(status)}</span><a class="mini-action" href="${esc(humanLink(item))}">Open human review</a></div>`;
 }
 
