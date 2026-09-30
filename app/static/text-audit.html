@@ -66,6 +66,10 @@
       <div class="vision-audit-filters">
         <label>Book<select id="ta-book"><option value="">All books</option></select></label>
         <label>Decision<select id="ta-outcome"><option value="">All decisions</option><option value="human_review">Human review</option><option value="human_reviewed">Human reviewed</option><option value="applied">Applied correction</option><option value="verified_original">Original kept</option><option value="pending">Original preserved / unresolved</option><option value="failed">Failed</option></select></label>
+        <label>AI review<select id="ta-ai-review"><option value="all">All AI review states</option><option value="reviewed">AI reviewed</option><option value="unreviewed">Not AI reviewed</option></select></label>
+        <label>AI recommendation<select id="ta-ai-recommendation"><option value="">All recommendations</option></select></label>
+        <label>Review worker<select id="ta-review-worker"><option value="">All review workers</option></select></label>
+        <label>Attention<select id="ta-attention"><option value="all">All attention states</option><option value="needs_attention">Needs my attention</option><option value="needs_human">AI says needs human</option><option value="disagreement">Verifier ↔ reviewer disagreement</option></select></label>
         <label>Search<input id="ta-search" type="search" placeholder="route, page, reason, target text…" /></label>
       </div>
       <div class="vision-audit-filter-footer"><span id="ta-count">0 results</span><button class="mini-action" id="ta-clear" type="button">Clear filters</button></div>
