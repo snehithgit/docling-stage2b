@@ -164,8 +164,8 @@ function params() {
   return p;
 }
 
-async function load() {
-  if (busy || window.DoclingUI?.shouldDeferRefresh?.()) return;
+async function load(force=false) {
+  if (busy || (!force && window.DoclingUI?.shouldDeferRefresh?.())) return;
   const id = ++loadId;
   try {
     const data = await api(`/api/anomaly-review?${params()}`);
@@ -189,7 +189,7 @@ async function queue(item) {
     feedback(error.message || "Could not queue Colab anomaly review.", "warning");
   } finally {
     busy = false;
-    await load();
+    await load(true);
   }
 }
 
@@ -209,7 +209,7 @@ async function decide(item) {
     feedback(error.message || "Could not save anomaly decision.", "warning");
   } finally {
     busy = false;
-    await load();
+    await load(true);
   }
 }
 
@@ -223,10 +223,10 @@ $("ar-results").addEventListener("click", event => {
   if (decision) decide({job:decision.dataset.job, entry:decision.dataset.entry, decision:decision.dataset.decision});
 });
 
-function resetAndLoad() { load(); }
+function resetAndLoad() { load(true); }
 ["ar-book","ar-type","ar-anomaly","ar-state","ar-include-human"].forEach(id => $(id).addEventListener("change", resetAndLoad));
-$("ar-search").addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(load, 250); });
-$("ar-refresh").addEventListener("click", load);
+$("ar-search").addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => load(true), 250); });
+$("ar-refresh").addEventListener("click", () => load(true));
 $("ar-clear").addEventListener("click", () => {
   $("ar-book").value = "";
   $("ar-type").value = "all";
@@ -234,7 +234,7 @@ $("ar-clear").addEventListener("click", () => {
   $("ar-state").value = "all";
   $("ar-include-human").checked = false;
   $("ar-search").value = "";
-  load();
+  load(true);
 });
-load();
+load(true);
 setInterval(() => { if (document.visibilityState === "visible" && !busy && !window.DoclingUI?.shouldDeferRefresh?.()) load(); }, 5000);
