@@ -429,7 +429,7 @@ function fillReviewFilters(data) {
   const attention = q.get("filter_attention") || "all";
   if ($("review-filter-type") && !$("review-filter-type").value && type) $("review-filter-type").value = type;
   if ($("review-filter-state") && state) $("review-filter-state").value = state;
-  if ($("review-filter-ai") && !$("review-filter-ai").value && aiReview) $("review-filter-ai").value = aiReview;
+  if ($("review-filter-ai") && aiReview) $("review-filter-ai").value = aiReview;
   if ($("review-filter-attention") && attention) $("review-filter-attention").value = attention;
 
   const counts = facets.ai_review_counts || {};
