@@ -171,7 +171,7 @@ async function reverifyAll() {
   button.textContent = "Queueing all anomalies…";
   $("ar-batch-status").textContent = `Queueing ${total.toLocaleString()} current anomalies for Colab…`;
   try {
-    const response = await fetch("/api/anomaly-review/reverify-all?confirm=true", {method:"POST", cache:"no-store"});
+    const response = await fetch("/api/anomaly-review/reverify-all", {method:"POST", cache:"no-store"});
     let data = {};
     try { data = await response.json(); } catch (_) { data = {}; }
     if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
