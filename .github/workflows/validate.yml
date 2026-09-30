@@ -30,6 +30,11 @@ jobs:
       - name: Python syntax
         run: python -m compileall -q app tests
 
+      - name: Prepare container-style test paths
+        run: |
+          sudo mkdir -p /data/db /data/input /data/output /data/converted /data/processed
+          sudo chown -R "$USER":"$USER" /data
+
       - name: Test suite
         run: PYTHONPATH=. pytest -q
 
