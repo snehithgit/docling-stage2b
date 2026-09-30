@@ -165,3 +165,71 @@ def anomaly_prompt_context(entry: dict[str, Any], review_type: str, anomaly_type
             "human_visual_decision": entry.get("human_visual_decision"),
         })
     return base
+
+
+def text_anomaly_acceptance_plan(entry: dict[str, Any], review: dict[str, Any]) -> dict[str, Any]:
+    """Translate an explicitly accepted Colab anomaly verdict into a safe human action.
+
+    The caller still records the human Yes/No decision. This helper never mutates
+    ledger state and never grants the model authority on its own.
+    """
+    verdict = str((review or {}).get("verdict") or "NEEDS_HUMAN").upper().strip()
+    original = str(entry.get("original_text") or "")
+    proposed = str(entry.get("proposed_text") or "").strip()
+    corrected = str((review or {}).get("corrected_text") or "").strip()
+
+    if verdict == "KEEP_ORIGINAL":
+        return {"mode": "human_text", "action": "reject", "text": original, "resolved": True}
+    if verdict == "USE_PRIMARY_PROPOSAL":
+        if proposed:
+            return {"mode": "human_text", "action": "apply", "text": proposed, "resolved": True}
+        return {"mode": "acknowledge", "resolved": False, "reason": "Primary proposal is empty"}
+    if verdict == "REPLACE_TEXT":
+        if corrected:
+            return {"mode": "human_text", "action": "apply", "text": corrected, "resolved": True}
+        return {"mode": "acknowledge", "resolved": False, "reason": "Colab replacement text is empty"}
+    if verdict == "CONFIRM_CURRENT":
+        if entry.get("human_verified"):
+            return {"mode": "confirm_current", "resolved": True}
+        status = str(entry.get("status") or "").lower()
+        if status == "applied" and proposed:
+            return {"mode": "human_text", "action": "apply", "text": proposed, "resolved": True}
+        if status == "rejected":
+            return {"mode": "human_text", "action": "reject", "text": original, "resolved": True}
+        return {"mode": "acknowledge", "resolved": False, "reason": "Current automatic text state is not a final human decision"}
+    return {"mode": "acknowledge", "resolved": False, "reason": "Colab requested human review"}
+
+
+def vision_anomaly_acceptance_plan(entry: dict[str, Any], review: dict[str, Any]) -> dict[str, Any]:
+    """Translate an explicitly accepted visual anomaly verdict into a safe plan."""
+    verdict = str((review or {}).get("verdict") or "NEEDS_HUMAN").upper().strip()
+    if verdict == "TECHNICAL":
+        return {"mode": "human_visual", "decision": "technical", "resolved": True}
+    if verdict == "DECORATIVE":
+        return {"mode": "human_visual", "decision": "decorative", "resolved": True}
+    if verdict == "USEFUL":
+        return {"mode": "human_visual", "decision": "useful", "resolved": True}
+    if verdict == "NOT_USEFUL":
+        return {"mode": "human_visual", "decision": "not_useful", "resolved": True}
+    if verdict == "REPLACE_EVIDENCE":
+        has_evidence = bool(
+            str((review or {}).get("corrected_summary") or "").strip()
+            or list((review or {}).get("visible_text") or [])
+            or list((review or {}).get("visible_objects") or [])
+        )
+        return {
+            "mode": "replace_evidence" if has_evidence else "acknowledge",
+            "resolved": bool(entry.get("human_visual_decision")) and has_evidence,
+            "reason": None if has_evidence else "Colab replacement evidence is empty",
+        }
+    if verdict == "CONFIRM_CURRENT":
+        if entry.get("human_visual_decision"):
+            return {"mode": "confirm_current", "resolved": True}
+        primary = str(entry.get("verification_verdict") or "").upper()
+        artifact = bool(entry.get("artifact_sweep")) or str(entry.get("route_id") or "").upper().startswith("AV")
+        if primary == "TECHNICAL_USEFUL":
+            return {"mode": "human_visual", "decision": "technical" if artifact else "useful", "resolved": True}
+        if primary == "DECORATIVE_OR_LOW_VALUE":
+            return {"mode": "human_visual", "decision": "decorative" if artifact else "not_useful", "resolved": True}
+        return {"mode": "acknowledge", "resolved": False, "reason": "Current visual state is still uncertain"}
+    return {"mode": "acknowledge", "resolved": False, "reason": "Colab requested human review"}
