@@ -723,6 +723,39 @@ def test_4011b_review_queue_is_global_filterable_and_audits_are_one_by_one():
     assert "await loadAudit()" in text_js  # inline text decisions advance the filtered queue
 
 
+def test_ah3_human_review_exposes_ai_reviewer_filters_without_granting_ai_authority():
+    review_html = read("review.html")
+    review_js = read("review.js")
+    vision_html = read("vision-audit.html")
+    vision_js = read("vision-audit.js")
+
+    for control in [
+        "review-filter-ai",
+        "review-filter-recommendation",
+        "review-filter-worker",
+        "review-filter-attention",
+    ]:
+        assert f'id="{control}"' in review_html
+    assert "Needs my attention" in review_html
+    assert "Verifier ↔ reviewer disagreement" in review_html
+    assert 'params.set("ai_review", aiReview)' in review_js
+    assert 'params.set("recommendation", recommendation)' in review_js
+    assert 'params.set("review_worker", worker)' in review_js
+    assert 'params.set("attention", attention)' in review_js
+    assert "filter_attention" in review_js
+    assert "AI reviewed" in review_js
+    assert "Disagreements" in review_js
+    assert "human_verified" not in review_js[review_js.index("function fillReviewFilters"):review_js.index("async function loadQueue")]
+
+    for control in ["va-ai-review", "va-ai-recommendation", "va-review-worker", "va-attention"]:
+        assert f'id="{control}"' in vision_html
+    assert "visionReviewerDisagreement" in vision_js
+    assert "visionAiNeedsAttention" in vision_js
+    assert 'verdict === "UNCERTAIN"' not in vision_js[vision_js.index("function visionReviewerDisagreement"):vision_js.index("function visionAiNeedsAttention")]
+    assert "/api/review-workers/settings" in vision_js
+    assert "human_visual_decision" in vision_js
+
+
 def test_4011c_shared_attention_terminology_and_polling_feedback_are_consistent():
     nav = read("nav.js")
     verification = read("verification.js")
