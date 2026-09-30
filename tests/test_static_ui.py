@@ -979,3 +979,47 @@ def test_queue_event_refresh_is_debounced_non_overlapping_and_interaction_safe()
     assert "scheduleEventRefresh" in js
     assert "shouldDeferRefresh" in js
     assert "setDashboardHtml" in js
+
+
+
+def test_ah5_text_audit_has_same_ai_review_filters_as_vision():
+    html = read("text-audit.html")
+    js = read("text-audit.js")
+    for control in ("ta-ai-review", "ta-ai-recommendation", "ta-review-worker", "ta-attention"):
+        assert f'id="{control}"' in html
+    assert "Needs my attention" in html
+    assert "Verifier ↔ reviewer disagreement" in html
+    assert 'params.set("ai_review", aiReview)' in js
+    assert 'params.set("review_worker", reviewWorker)' in js
+    assert "AI review assistant · advisory only" in js
+    assert "Anomaly review · Colab" in js
+
+
+def test_ah5_dedicated_anomaly_review_page_has_colab_rereview_and_explicit_yes_no():
+    html = read("anomaly-review.html")
+    js = read("anomaly-review.js")
+    nav = read("nav.js")
+    main_py = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+
+    assert "<h1>Anomaly Review</h1>" in html
+    assert "Include all human-reviewed" in html
+    assert "Re-verify with Colab" in html
+    assert "Yes</strong> explicitly accepts" in html
+    assert "No</strong> keeps the current state" in html
+    assert "Yes · accept Colab" in js
+    assert "No · keep current" in js
+    assert "/api/anomaly-review" in js
+    assert "/anomaly-review" in nav
+    assert "Anomaly review" in nav
+    assert '@app.get("/anomaly-review")' in main_py
+    assert '@app.get("/api/anomaly-review")' in main_py
+    assert '@app.post("/api/anomaly-review/{job_id}/{entry_id}/decision")' in main_py
+    assert "human_authority_preserved" in main_py
+
+
+def test_ah5_anomaly_page_defers_background_polling_but_forces_user_actions():
+    js = read("anomaly-review.js")
+    assert "async function load(force=false)" in js
+    assert "!force && window.DoclingUI?.shouldDeferRefresh?.()" in js
+    assert "load(true)" in js
+    assert "document.visibilityState === \"visible\"" in js
