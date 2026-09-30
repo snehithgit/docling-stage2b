@@ -31,12 +31,12 @@
         <h1>Anomaly Review</h1>
         <p class="subtle">Inspect suspicious Text/Vision ledger states. When ready, one global action can send the full current anomaly set to the assigned Colab anomaly workers.</p>
       </div>
-      <div class="document-actions"><button class="primary-button" id="ar-rerun-all" type="button">Re-verify all anomalies with Colab</button><button class="secondary-button" id="ar-refresh" type="button">Refresh</button></div>
+      <button class="secondary-button" id="ar-refresh" type="button">Refresh</button>
     </header>
 
     <section class="crossover-explainer vision-audit-notice">
-      <strong>One confirmation for the whole anomaly set.</strong>
-      <p>Press <b>Re-verify all anomalies with Colab</b> once. Choose <b>Yes</b> to queue every current Text/Vision anomaly, including anomalies on already human-reviewed items. Choose <b>No</b> to cancel with no changes. Colab never overwrites an existing human decision automatically.</p>
+      <strong>One Yes / No choice for the whole anomaly set.</strong>
+      <p>Inspect the anomaly rows below. The batch choice applies to all current Text/Vision anomalies; there are no per-row Yes / No controls. Colab never overwrites an existing human decision automatically.</p>
     </section>
 
     <section class="vision-audit-summary" aria-label="Anomaly review totals">
@@ -44,6 +44,19 @@
       <div class="vision-audit-stat"><span>Queued / processing</span><strong id="ar-running">0 / 0</strong></div>
       <div class="vision-audit-stat"><span>Reviewed by Colab</span><strong id="ar-reviewed">0</strong></div>
       <div class="vision-audit-stat"><span>Human-reviewed</span><strong id="ar-human">0</strong></div>
+    </section>
+
+    <section class="panel">
+      <div class="text-panel-heading">
+        <div><span class="eyebrow">BATCH ANOMALY AUDIT</span><h2>Re-verify all current anomalies with Colab?</h2></div>
+        <span class="status-pill suggestion-pill">Human authority preserved</span>
+      </div>
+      <p class="field-note">This decision applies to the <strong>whole current anomaly set</strong>, not individual rows. <strong>Yes</strong> queues every detected Text + Vision anomaly, including anomalies on already human-reviewed entries. <strong>No</strong> queues nothing.</p>
+      <div class="review-actions">
+        <button id="ar-batch-yes" class="primary-button" type="button">Yes · re-verify all anomalies</button>
+        <button id="ar-batch-no" class="secondary-button" type="button">No · do not queue</button>
+      </div>
+      <p id="ar-batch-status" class="field-note" aria-live="polite"></p>
     </section>
 
     <section class="panel vision-audit-filter-panel">
