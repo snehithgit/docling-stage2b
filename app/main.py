@@ -4445,13 +4445,25 @@ async def _queue_manual_anomaly_review(job_id: int, entry_id: str, review_type: 
             detail="Assign at least one enabled Colab worker to Anomaly review on the Review workers page first.",
         )
     if isinstance(entry.get("anomaly_review_decision"), dict):
-        await _set_anomaly_review_decision(int(job_id), str(entry_id), review_type, None)
-        ledger = await asyncio.to_thread(_load_json_file, result_dir / "correction_ledger.json")
-        entry = next(
-            (item for item in (ledger.get("entries") or [])
-             if str(item.get("entry_id") or "") == str(entry_id) and item.get("status") != "superseded"),
-            entry,
-        )
+        # Compatibility with an earlier AH5 draft that allowed per-item No.
+        # A new batch Yes supersedes only that anomaly-page choice; it never
+        # changes human_verified or human_visual_decision.
+        async with runtime.book_lifecycle_locks.get(int(job_id)):
+            async with runtime.stage2b_worker._stage2c_ledger_lock:
+                ledger = await asyncio.to_thread(_load_json_file, result_dir / "correction_ledger.json")
+                current_entry = next(
+                    (item for item in (ledger.get("entries") or [])
+                     if str(item.get("entry_id") or "") == str(entry_id) and item.get("status") != "superseded"),
+                    None,
+                )
+                if not isinstance(current_entry, dict):
+                    raise HTTPException(status_code=404, detail="Current review ledger entry was not found.")
+                current_entry.pop("anomaly_review_decision", None)
+                await asyncio.to_thread(
+                    upsert_ledger_entry, result_dir,
+                    str(ledger.get("source_zip_sha256") or ""), current_entry,
+                )
+                entry = current_entry
     queued = await runtime.review_assistant_store.queue_manual_anomaly(
         int(job_id), result_dir_name, entry,
         "anomaly_text" if review_type == "text" else "anomaly_vision",
