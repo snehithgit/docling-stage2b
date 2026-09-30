@@ -418,7 +418,7 @@ def test_manual_anomaly_job_survives_automatic_candidate_retirement(tmp_path: Pa
     asyncio.run(run())
 
 
-def test_anomaly_job_is_automatic_third_pass_after_normal_review(tmp_path: Path):
+def test_anomaly_job_requires_explicit_operator_queue_after_normal_review(tmp_path: Path):
     async def run():
         cfg = _config(tmp_path)
         Path(cfg.processed_dir).mkdir(parents=True)
@@ -459,6 +459,15 @@ def test_anomaly_job_is_automatic_third_pass_after_normal_review(tmp_path: Path)
             _UnusedPostprocess(), _UnusedWorker(), _Events(),
         )
         assert await service._sync_candidates() is True
+        jobs = await store.list_jobs()
+        # Normal Review Assistant work is prepared automatically, but anomaly
+        # work must wait for the operator's single bulk Yes/No decision.
+        assert {j["review_type"] for j in jobs} == {"text"}
+
+        queued = await store.queue_manual_anomaly(
+            11, "book__job11", entry, "anomaly_text"
+        )
+        assert queued["status"] == "pending"
         jobs = await store.list_jobs()
         assert {j["review_type"] for j in jobs} == {"text", "anomaly_text"}
 
