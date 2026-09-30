@@ -302,7 +302,6 @@ $("ta-results").addEventListener("click", async event => {
   }
   const anomaly = event.target.closest(".text-anomaly-review");
   if (!anomaly) return;
-  if (!confirm("Re-verify this Text item with an assigned Colab anomaly worker? The result is advisory and will not overwrite a human decision.")) return;
   const old = anomaly.textContent;
   anomaly.disabled = true;
   anomaly.textContent = "Queueing…";
