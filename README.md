@@ -1,3 +1,18 @@
+## 2026.09.30.40.11AH5 — Dedicated anomaly review workspace
+
+- Adds a dedicated **Anomaly Review** page for Text + Vision ledger anomalies instead of hiding anomaly controls inside the normal review pages.
+- Detects verifier↔reviewer disagreement, Review Worker `NEEDS_HUMAN`, low review confidence, transcription truncation, large text expansion/contraction, reviewer edit suggestions, and missing technical visual evidence.
+- Each anomaly can be sent to the assigned Colab anomaly worker with one click. Already human-reviewed items can also be explicitly re-reviewed with Colab.
+- After Colab returns, the operator gets explicit **Yes · accept Colab** / **No · keep current** controls. No Colab result overwrites an existing human decision without that explicit Yes.
+- Text acceptance can keep the immutable Docling text, accept the primary proposal, or apply Colab's source-grounded replacement. Vision acceptance can update classification/evidence only according to the returned anomaly verdict.
+- `NEEDS_HUMAN` remains unresolved even when acknowledged; the anomaly worker is never allowed to invent a correction.
+- Adds anomaly decision/history provenance to the existing correction ledger while retaining the prior anomaly-review history.
+- **Text Audit now exposes the same AI Review state, recommendation, Review Worker and attention/disagreement filters as Vision Audit**, and preserves those filters when opening the full Human Review editor.
+- Adds **Anomaly review** to the normalized sidebar navigation.
+- Adds a source-validation GitHub Actions workflow for branch pushes/PRs: Python compile, full pytest suite, and JavaScript syntax checks.
+- Version: `2026.09.30.40.11AH5`.
+- Full details: `RELEASE_VALIDATION_2026.09.30.40.11AH5.md`.
+
 ## 2026.09.30.40.11AH4 — Colab anomaly review
 
 - Adds a separate **Anomaly review** stage after the normal AI Review Assistant, with independent Colab worker assignment.
