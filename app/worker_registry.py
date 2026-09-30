@@ -42,6 +42,7 @@ class WorkerRegistry:
                 "enabled": False,
                 "text_worker_ids": [],
                 "vision_worker_ids": [],
+                "anomaly_worker_ids": [],
                 "require_machine_complete": True,
             },
             "updated_at_epoch": time.time(),
@@ -91,6 +92,7 @@ class WorkerRegistry:
             "enabled": bool(review.get("enabled", False)),
             "text_worker_ids": [str(x) for x in (review.get("text_worker_ids") or []) if str(x) in valid_ids],
             "vision_worker_ids": [str(x) for x in (review.get("vision_worker_ids") or []) if str(x) in valid_ids],
+            "anomaly_worker_ids": [str(x) for x in (review.get("anomaly_worker_ids") or []) if str(x) in valid_ids],
             "require_machine_complete": True,
         }
         base["updated_at_epoch"] = float(data.get("updated_at_epoch") or time.time())
@@ -312,6 +314,7 @@ class WorkerRegistry:
             review = data["review"]
             review["text_worker_ids"] = [x for x in review.get("text_worker_ids", []) if x != worker_id]
             review["vision_worker_ids"] = [x for x in review.get("vision_worker_ids", []) if x != worker_id]
+            review["anomaly_worker_ids"] = [x for x in review.get("anomaly_worker_ids", []) if x != worker_id]
             self._write_unlocked(data)
             return dict(found)
 
@@ -325,6 +328,7 @@ class WorkerRegistry:
             review = data["review"]
             review["text_worker_ids"] = [x for x in review.get("text_worker_ids", []) if x != worker_id]
             review["vision_worker_ids"] = [x for x in review.get("vision_worker_ids", []) if x != worker_id]
+            review["anomaly_worker_ids"] = [x for x in review.get("anomaly_worker_ids", []) if x != worker_id]
             self._write_unlocked(data)
         try:
             self.secret_path(worker_id).unlink()
@@ -332,16 +336,21 @@ class WorkerRegistry:
             pass
         return True
 
-    def update_review(self, *, enabled: bool, text_worker_ids: list[str], vision_worker_ids: list[str]) -> dict[str, Any]:
+    def update_review(
+        self, *, enabled: bool, text_worker_ids: list[str], vision_worker_ids: list[str],
+        anomaly_worker_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
         with self._lock:
             data = self._read_unlocked()
             valid = {item["id"] for item in data["colab_workers"] if item.get("enabled") and not item.get("remove_requested")}
             text_ids = [x for x in dict.fromkeys(str(v) for v in text_worker_ids) if x in valid]
             vision_ids = [x for x in dict.fromkeys(str(v) for v in vision_worker_ids) if x in valid]
+            anomaly_ids = [x for x in dict.fromkeys(str(v) for v in (anomaly_worker_ids or [])) if x in valid]
             data["review"] = {
                 "enabled": bool(enabled),
                 "text_worker_ids": text_ids,
                 "vision_worker_ids": vision_ids,
+                "anomaly_worker_ids": anomaly_ids,
                 "require_machine_complete": True,
             }
             self._write_unlocked(data)
