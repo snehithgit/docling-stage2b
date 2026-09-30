@@ -322,10 +322,28 @@ class ReviewAssistantService:
                 if _vision_requires_human(entry):
                     key=(jid,str(entry.get("entry_id")),"vision"); valid.add(key); await self._store.sync_candidate(jid,result_dir_name,entry,"vision")
 
-            # AH5: anomaly candidates are exposed on the dedicated Anomaly
-            # Review page but never queued automatically. Only an explicit
-            # Yes action creates a manual anomaly_* job. Manual jobs use a
-            # "manual:" signature and therefore survive retire_missing().
+            # Anomaly review is the third automatic pass after normal
+            # Text/Vision Review Assistant work. It audits only deterministic
+            # anomaly candidates. Existing human decisions are not overwritten.
+            for entry in ledger.get("entries") or []:
+                if entry.get("status")=="superseded" or entry.get("human_verified"):
+                    continue
+                if not isinstance(entry.get("ai_review_assistant"), dict):
+                    continue
+                if entry.get("entry_type") in {"text_correction","table_cell_correction"}:
+                    anomaly_types=detect_anomaly_types(entry,"text")
+                    if anomaly_types:
+                        key=(jid,str(entry.get("entry_id")),"anomaly_text"); valid.add(key)
+                        await self._store.sync_candidate(jid,result_dir_name,entry,"anomaly_text")
+            for entry in _authoritative_visual_subjects(vision):
+                if entry.get("human_visual_decision") or entry.get("human_verified"):
+                    continue
+                if not isinstance(entry.get("ai_review_assistant"), dict):
+                    continue
+                anomaly_types=detect_anomaly_types(entry,"vision")
+                if anomaly_types:
+                    key=(jid,str(entry.get("entry_id")),"anomaly_vision"); valid.add(key)
+                    await self._store.sync_candidate(jid,result_dir_name,entry,"anomaly_vision")
         await self._store.retire_missing(valid)
         return True
 
