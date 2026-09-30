@@ -157,7 +157,7 @@
     '/verification': ['Stage 2B verification', 'Run and retry verification here. Physical worker configuration and Artifact participation live on the Workers page.', 'Clear pending and failed checks'],
     '/workers': ['Inference workers', 'Stop/resume each physical device independently, manage multiple Colab workers, and choose Artifact sweep participants.', 'Configure worker participation'],
     '/review-workers': ['AI review workers', 'After Text, Vision, and Artifact machine work finishes, assigned Colab workers can prepare second-opinion suggestions for the human review queue. Human decisions remain authoritative.', 'Assign review workers'],
-    '/anomaly-review': ['Anomaly review', 'Inspect suspicious verifier/reviewer states and explicitly choose Yes or No before a third-pass Colab source-evidence audit runs. Colab never overwrites a human decision.', 'Decide which anomalies need Colab'],
+    '/anomaly-review': ['Anomaly review', 'Inspect the automatic third-pass Colab audit of suspicious Text/Vision states. Use the single global re-review action only when you want every current anomaly checked again.', 'Inspect anomaly results'],
     '/artifact-audit': ['Technical visual audit', 'Inspect technical pictures produced by verification. Rerunning a visual verification makes downstream Stage 2C/Stage 3/machine embeddings stale.', 'Resolve visual evidence'],
     '/text-audit': ['Text verification audit', 'Inspect verifier decisions and source-image transcription. Human corrections take precedence and trigger downstream rebuilding.', 'Resolve questionable text'],
     '/vision-audit': ['Vision evidence audit', 'Review what the vision verifier extracted before it becomes RAG visual evidence.', 'Confirm evidence quality'],
