@@ -4512,6 +4512,8 @@ async def anomaly_review_queue(
     state: str = "all",
     include_human_reviewed: bool = False,
     query: str = "",
+    limit: int = 20,
+    offset: int = 0,
 ) -> dict:
     """Dedicated Text/Vision anomaly workspace over current correction ledgers."""
     wanted_type = str(review_type or "all").strip().lower()
@@ -4656,11 +4658,15 @@ async def anomaly_review_queue(
     state_order = {"needs_human": 0, "needs_decision": 1, "failed": 2, "processing": 3, "queued": 4, "detected": 5, "human_reviewed": 6, "resolved": 7}
     filtered.sort(key=lambda i: (state_order.get(i["state"], 9), str(i.get("book") or "").lower(), int(i.get("page") or 0)))
     books_unique = {int(b["postprocess_job_id"]): b for b in books}
+    offset = max(0, int(offset))
+    page_limit = max(1, min(int(limit), 100))
     return {
         "schema": "marine-anomaly-review-queue/v1",
         "summary": summary,
         "total_filtered": len(filtered),
-        "items": filtered,
+        "offset": offset,
+        "limit": page_limit,
+        "items": filtered[offset:offset + page_limit],
         "facets": {
             "books": sorted(books_unique.values(), key=lambda b: str(b.get("book") or "").lower()),
             "anomaly_types": sorted(anomaly_types_seen),
