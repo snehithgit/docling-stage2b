@@ -10,6 +10,8 @@
 - Review Worker counters now show stable **remaining = pending + processing** totals and expose attempt count plus last retry reason.
 - Human Review and Vision Audit display anomaly results and preserve the existing human-authority model.
 - Version: `2026.09.30.40.11AH4`.
+- Validation: **667 passed**; Python compile and all frontend JavaScript syntax checks pass.
+- Full details: `RELEASE_VALIDATION_2026.09.30.40.11AH4.md`.
 
 ## 2026.09.30.40.11AH3 — Human Review AI-review filters
 
