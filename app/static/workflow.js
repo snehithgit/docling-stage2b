@@ -108,7 +108,7 @@
   $('book-search').addEventListener('input', render);
   $('book-filter').addEventListener('change', render);
   refresh();
-  setInterval(refresh, 4000);
+  setInterval(() => { if (!window.DoclingUI?.shouldDeferRefresh?.()) refresh(); }, 8000);
 })();
 
   document.querySelectorAll('[data-summary-filter]').forEach(card => card.addEventListener('click', () => {

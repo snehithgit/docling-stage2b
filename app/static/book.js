@@ -3,7 +3,7 @@
   const jobId = Number(q.get('job'));
   const $ = id => document.getElementById(id);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  let book = null, review = null, auditGate = null, suggestions = null, stage2bStatus = null, loading = false, busy = false;
+  let book = null, review = null, auditGate = null, suggestions = null, stage2bStatus = null, loading = false, busy = false, lastRenderSignature = '';
 
   async function api(path, method='GET', body=null) {
     const options = {method, cache:'no-store', signal:AbortSignal.timeout(20000)};
@@ -247,10 +247,14 @@
       if (!book) throw new Error('Book not found. Return to My books.');
       try { review = await api(`/api/postprocess/jobs/${jobId}/human-review`); } catch (_) { review = {review_required:0,human_reviewed:0,entries:[]}; }
       try { auditGate = {...await api(`/api/postprocess/jobs/${jobId}/verifier-audit`), available:true}; } catch (_) { auditGate = {available:false, review_required:0, blocking_review_required:0, bypassed_for_testing:false}; }
-      render();
+      const renderSignature = JSON.stringify({book, review, auditGate, stage2bStatus});
+      if (force || renderSignature !== lastRenderSignature) {
+        render();
+        lastRenderSignature = renderSignature;
+      }
     } catch(e) { feedback(e.message,true); }
     finally { loading=false; }
   }
   if (!jobId) { const box = $('book-feedback'); box.hidden = false; box.className = 'status-message page-feedback error'; box.innerHTML = 'Missing book id. <a href="/">Return to My books</a>.'; return; }
-  refresh(); setInterval(refresh,3500);
+  refresh(); setInterval(() => { if (!window.DoclingUI?.shouldDeferRefresh?.()) refresh(); },7000);
 })();

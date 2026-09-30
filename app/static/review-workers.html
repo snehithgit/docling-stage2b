@@ -1,7 +1,76 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Review workers · Docling Auto-Convert</title><link rel="stylesheet" href="/assets/styles.css?v=2026.09.30.40.11AF"/><link rel="stylesheet" href="/assets/workflow.css?v=2026.09.30.40.11AF"/></head>
-<body class="ui29"><a class="skip-link" href="#main-content">Skip to main content</a><header class="mobile-topbar"><button class="hamburger" id="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">☰</button><a class="brand" href="/"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a></header><div id="nav-backdrop" hidden></div>
-<div class="app-shell"><aside class="sidebar" id="sidebar"><button class="sidebar-close" id="sidebar-close" type="button" aria-label="Close navigation">×</button><a class="brand" href="/"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a><div class="sidebar-label">Workspace</div><nav class="nav"><a href="/"><span class="nav-item-label">Books</span></a><a href="/queue"><span class="nav-item-label">Convert</span></a><a href="/verification"><span class="nav-item-label">Verification</span></a><a href="/workers"><span class="nav-item-label">Workers</span></a><a class="active" aria-current="page" href="/review-workers"><span class="nav-item-label">Review workers</span></a><a href="/artifact-audit"><span class="nav-item-label">Artifact audit</span></a><a href="/text-audit"><span class="nav-item-label">Verifier audit</span></a><a href="/retrieval"><span class="nav-item-label">RAG</span></a></nav><div class="sidebar-footer"><span class="footer-dot"></span><span><strong>Local pipeline</strong><br><a href="/errors">Errors & diagnostics</a></span></div></aside>
-<main class="main-content" id="main-content"><header class="page-header"><div><p class="eyebrow">Post-verification review</p><h1>AI review workers</h1><p class="subtle">Optional Colab VL second-opinion workers for pending Text and Vision human-review items.</p></div><div class="connection-chip" id="review-worker-state"><span class="indicator"></span><span>Loading</span></div></header><div id="review-feedback" class="status-message page-feedback" hidden></div>
-<section class="panel ui29-primary-panel"><div class="panel-heading"><div><h2>Scheduling rule</h2><p class="format-note"><strong>All Text + Vision + Artifact machine jobs across the library must finish first.</strong> These workers then prepare an AI recommendation for the human review queue. They never set <code>human_verified</code> or a human visual decision.</p></div></div><label class="checkbox-row"><input type="checkbox" id="review-enabled"/> Enable AI review-assistant phase</label><div class="review-worker-assignment" id="review-worker-assignment"></div><div class="document-actions"><button class="primary-button" id="save-review-settings" type="button">Save review worker settings</button><a class="secondary-button" href="/workers">Manage Colab workers</a></div></section>
-<section class="panel"><div class="panel-heading"><div><p class="eyebrow">Queue</p><h2>Review-assistant jobs</h2><p id="review-machine-gate" class="format-note">Checking primary machine workload…</p></div></div><div class="stage-summary-grid"><div><span>Text pending</span><strong id="review-text-pending">0</strong></div><div><span>Vision pending</span><strong id="review-vision-pending">0</strong></div><div><span>Processing</span><strong id="review-processing">0</strong></div><div><span>Completed</span><strong id="review-completed">0</strong></div></div><div class="table-scroll"><table><thead><tr><th>Type</th><th>Book</th><th>Entry</th><th>Status</th><th>Worker</th><th>Time</th></tr></thead><tbody id="review-jobs"></tbody></table></div></section>
-</main></div><script src="/assets/nav.js?v=2026.09.30.40.11AF"></script><script src="/assets/review-workers.js?v=2026.09.30.40.11AF"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Review workers · Docling Auto-Convert</title>
+  <link rel="stylesheet" href="/assets/styles.css?v=2026.09.30.40.11AG"/>
+  <link rel="stylesheet" href="/assets/workflow.css?v=2026.09.30.40.11AG"/>
+</head>
+<body class="ui29 review-workers-page">
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<header class="mobile-topbar">
+  <button class="hamburger" id="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  <a class="brand" href="/"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a>
+</header>
+<div id="nav-backdrop" hidden></div>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <button class="sidebar-close" id="sidebar-close" type="button" aria-label="Close navigation">×</button>
+    <a class="brand" href="/"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a>
+    <div class="sidebar-label">Workspace</div>
+    <nav class="nav" aria-label="Primary navigation"></nav>
+    <a class="settings-trigger nav-settings" href="/queue#settings"><span class="nav-item-label">Settings</span></a>
+    <div class="sidebar-footer"><span class="footer-dot"></span><span><strong>Local pipeline</strong><br><a href="/errors">Errors &amp; diagnostics</a></span></div>
+  </aside>
+
+  <main class="main-content review-workers-main" id="main-content">
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">Post-verification review</p>
+        <h1>AI review workers</h1>
+        <p class="subtle">Assign optional Colab VL workers to prepare second-opinion suggestions for Text and Vision human review. Human decisions remain authoritative.</p>
+      </div>
+      <div class="connection-chip" id="review-worker-state"><span class="indicator"></span><span>Loading</span></div>
+    </header>
+    <div id="review-feedback" class="status-message page-feedback" role="status" aria-live="polite" hidden></div>
+
+    <section class="review-overview-grid" aria-label="Review phase status">
+      <article class="review-overview-card review-gate-card">
+        <div class="review-overview-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5z"/><path d="M8 9h8M8 13h5"/></svg></div>
+        <div><span class="review-card-kicker">Primary workload gate</span><strong id="review-machine-gate">Checking Text, Vision and Artifact workload…</strong><small><strong>All Text + Vision + Artifact machine jobs across the library must finish first.</strong> Review workers start only after that gate is clear.</small></div>
+      </article>
+      <article class="review-overview-card review-toggle-card">
+        <div><span class="review-card-kicker">Review assistant phase</span><strong>Enable assigned review workers</strong><small>This phase creates suggestions only. They never set <code>human_verified</code> or a human visual decision.</small></div>
+        <label class="review-master-toggle"><input type="checkbox" id="review-enabled"/><span>Enabled</span></label>
+      </article>
+    </section>
+
+    <section class="panel review-config-panel">
+      <div class="panel-heading review-panel-heading">
+        <div><p class="eyebrow">Assignments</p><h2>Colab review workers</h2><p class="format-note">Choose independently which workers may review Text and Vision items. Configuration changes stay on screen until you save them.</p></div>
+        <a class="secondary-button" href="/workers">Manage Colab workers</a>
+      </div>
+      <div class="review-worker-assignment" id="review-worker-assignment"></div>
+      <div class="review-save-bar">
+        <span id="review-unsaved" class="review-unsaved" hidden>Unsaved changes</span>
+        <button class="primary-button" id="save-review-settings" type="button">Save review settings</button>
+      </div>
+    </section>
+
+    <section class="panel review-queue-panel">
+      <div class="panel-heading"><div><p class="eyebrow">Queue</p><h2>Review-assistant jobs</h2><p class="format-note">Live queue status. Refreshing this status does not rebuild the assignment controls above.</p></div></div>
+      <div class="stage-summary-grid review-summary-grid">
+        <div><span>Text pending</span><strong id="review-text-pending">0</strong></div>
+        <div><span>Vision pending</span><strong id="review-vision-pending">0</strong></div>
+        <div><span>Processing</span><strong id="review-processing">0</strong></div>
+        <div><span>Completed</span><strong id="review-completed">0</strong></div>
+      </div>
+      <div class="table-scroll review-jobs-table"><table><thead><tr><th>Type</th><th>Book</th><th>Entry</th><th>Status</th><th>Worker</th><th>Time</th></tr></thead><tbody id="review-jobs"></tbody></table></div>
+    </section>
+  </main>
+</div>
+<script src="/assets/nav.js?v=2026.09.30.40.11AG"></script>
+<script src="/assets/review-workers.js?v=2026.09.30.40.11AG"></script>
+</body>
+</html>

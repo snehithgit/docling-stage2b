@@ -1,3 +1,20 @@
+(() => {
+  let interactionUntil = 0;
+  const interactiveSelector = 'button, a[href], input, select, textarea, summary, [role="button"], [contenteditable="true"]';
+  document.addEventListener('pointerdown', event => {
+    if (event.target.closest(interactiveSelector)) interactionUntil = Date.now() + 1200;
+  }, true);
+  document.addEventListener('keydown', event => {
+    if ((event.key === 'Enter' || event.key === ' ') && event.target.closest(interactiveSelector)) interactionUntil = Date.now() + 1200;
+  }, true);
+  window.DoclingUI = window.DoclingUI || {};
+  window.DoclingUI.shouldDeferRefresh = () => {
+    const active = document.activeElement;
+    const editing = active && active.matches && active.matches('input, select, textarea, [contenteditable="true"]');
+    return editing || Date.now() < interactionUntil;
+  };
+})();
+
 (function () {
   var sidebar = document.querySelector(".sidebar");
   var backdrop = document.getElementById("nav-backdrop");
@@ -36,8 +53,8 @@
   });
   if (closeBtn) closeBtn.addEventListener("click", function () { setOpen(false); });
   if (backdrop) backdrop.addEventListener("click", function () { setOpen(false); });
-  sidebar.querySelectorAll("a").forEach(function (link) {
-    link.addEventListener("click", function () { setOpen(false, false); });
+  sidebar.addEventListener("click", function (event) {
+    if (event.target.closest("a[href]")) setOpen(false, false);
   });
   window.addEventListener("keydown", function (event) {
     if (!sidebar.classList.contains("open") || !isMobile()) return;
@@ -55,7 +72,7 @@
 })();
 
 (() => {
-  const version = "2026.09.30.40.11AF";
+  const version = "2026.09.30.40.11AG";
   const sidebar = document.querySelector('.sidebar');
   if (!sidebar) return;
   const badge = document.createElement('div');
@@ -80,67 +97,55 @@
 
 (() => {
   const nav = document.querySelector('.nav');
-  if (nav) {
-    const queue = [...nav.querySelectorAll('a')].find(link => link.getAttribute('href') === '/queue');
-    if (queue) {
-      const label = queue.querySelector('.nav-item-label');
-      if (label) {
-        const svg = label.querySelector('svg');
-        label.innerHTML = '';
-        if (svg) label.appendChild(svg);
-        label.appendChild(document.createTextNode('Queue'));
-      }
-      if (![...nav.querySelectorAll('a')].some(link => link.getAttribute('href') === '/add-book')) {
-        const add = document.createElement('a');
-        add.href = '/add-book';
-        add.innerHTML = '<span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11m0-11 4 4m-4-4L8 7"/><path d="M5 14v4a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-4"/></svg>Add book</span>';
-        queue.insertAdjacentElement('beforebegin', add);
-      }
-    }
-    const verification = [...nav.querySelectorAll('a')].find(link => link.getAttribute('href') === '/verification');
-    if (verification) {
-      if (![...nav.querySelectorAll('a')].some(link => link.getAttribute('href') === '/workers')) {
-        const workers = document.createElement('a');
-        workers.href = '/workers';
-        workers.innerHTML = '<span class="nav-item-label">Workers</span>';
-        verification.insertAdjacentElement('afterend', workers);
-      }
-      const workersLink = [...nav.querySelectorAll('a')].find(link => link.getAttribute('href') === '/workers');
-      if (workersLink && ![...nav.querySelectorAll('a')].some(link => link.getAttribute('href') === '/review-workers')) {
-        const reviewWorkers = document.createElement('a');
-        reviewWorkers.href = '/review-workers';
-        reviewWorkers.innerHTML = '<span class="nav-item-label">Review workers</span>';
-        workersLink.insertAdjacentElement('afterend', reviewWorkers);
-      }
-    }
-    const rag = [...nav.querySelectorAll('a')].find(link => link.getAttribute('href') === '/retrieval');
-    if (rag) {
-      const label = rag.querySelector('.nav-item-label');
-      if (label) {
-        const svg = label.querySelector('svg');
-        label.innerHTML = '';
-        if (svg) label.appendChild(svg);
-        label.appendChild(document.createTextNode('RAG'));
-      }
-      if (![...nav.querySelectorAll('a')].some(link => link.getAttribute('href') === '/chunks')) {
-        const chunks = document.createElement('a');
-        chunks.href = '/chunks';
-        chunks.innerHTML = '<span class="nav-item-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>Chunk Viewer</span>';
-        rag.insertAdjacentElement('afterend', chunks);
-      }
-    }
-  }
-
   const path = window.location.pathname;
+  const icons = {
+    books: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M8 4v16M11 8h5M11 12h5"/></svg>',
+    add: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v11m0-11 4 4m-4-4L8 7"/><path d="M5 14v4a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-4"/></svg>',
+    verify: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M4 12h7M4 17h5"/><path d="m15 15 2 2 4-5"/></svg>',
+    workers: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="11" rx="2"/><path d="M7 20h10M9 16v4M15 16v4M7.5 9h3M13.5 9h3M7.5 12h9"/></svg>',
+    reviewWorkers: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5z"/><path d="m8 9 1.5 1.5L12 8M13.5 10H16M8 15h8"/></svg>',
+    artifact: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 10h8M8 14h5"/></svg>',
+    audit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z"/><circle cx="12" cy="12" r="2.5"/></svg>',
+    rag: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 5 5M8 8.5h5M8 11.5h3"/></svg>',
+    chunks: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>',
+    phone: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M10 5h4M11 18.5h2"/></svg>'
+  };
+  const items = [
+    ['/', 'Books', icons.books],
+    ['/add-book', 'Add book', icons.add],
+    ['/queue', 'Convert', icons.add],
+    ['/verification', 'Verification', icons.verify],
+    ['/workers', 'Workers', icons.workers],
+    ['/review-workers', 'Review workers', icons.reviewWorkers],
+    ['/artifact-audit', 'Artifact audit', icons.artifact],
+    ['/text-audit', 'Verifier audit', icons.audit],
+    ['/retrieval', 'RAG', icons.rag],
+    ['/chunks', 'Chunk Viewer', icons.chunks],
+    ['/oneplus', 'OnePlus', icons.phone],
+  ];
 
   if (nav) {
-    [...nav.querySelectorAll('a')].forEach(link => {
-      const href = link.getAttribute('href');
-      const active = href === path || (path === '/queue' && href === '/queue') || (path === '/add-book' && href === '/add-book');
-      if (active) { link.classList.add('active'); link.setAttribute('aria-current','page'); }
-      else if (href === '/queue' && path !== '/queue') { link.classList.remove('active'); link.removeAttribute('aria-current'); }
+    const existing = new Map([...nav.querySelectorAll('a[href]')].map(link => [link.getAttribute('href'), link]));
+    const fragment = document.createDocumentFragment();
+    items.forEach(([href, label, icon]) => {
+      const link = existing.get(href) || document.createElement('a');
+      link.href = href;
+      link.innerHTML = `<span class="nav-item-label">${icon}${label}</span>`;
+      const active = href === path;
+      link.classList.toggle('active', active);
+      if (active) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current');
+      fragment.appendChild(link);
     });
+    nav.replaceChildren(fragment);
   }
+
+  const settings = document.querySelector('.settings-trigger.nav-settings');
+  if (settings) {
+    const icon = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.5 1a7 7 0 0 0-1.7-1L14.4 3h-4.8l-.4 3.1a7 7 0 0 0-1.7 1l-2.5-1-2 3.4L5 11a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.5-1a7 7 0 0 0 1.7 1l.4 3.1h4.8l.4-3.1a7 7 0 0 0 1.7-1l2.5 1 2-3.4L18.9 13a7 7 0 0 0 .1-1Z"/></svg>';
+    const label = settings.querySelector('.nav-item-label');
+    if (label) label.innerHTML = `${icon}Settings`;
+  }
+
   const guides = {
     '/': ['Library overview', 'Open a book to see the next valid stage. Stages only advance when the previous stage is complete and current.', 'Open a book'],
     '/add-book': ['Add a book', 'Upload a document or give a public URL. The source is stored in the managed input folder and registered with the normal conversion pipeline automatically.', 'Add one book'],
@@ -171,7 +176,6 @@
     if (header) header.insertAdjacentElement('afterend', block); else main.insertBefore(block, main.firstChild);
   }
 })();
-
 
 (() => {
   const path = window.location.pathname;

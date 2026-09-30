@@ -1,9 +1,85 @@
-const $=id=>document.getElementById(id); const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(url,opt={}){const r=await fetch(url,{cache:'no-store',...opt});const t=await r.text();let d={};try{d=t?JSON.parse(t):{}}catch{d={detail:t}}if(!r.ok)throw new Error(d.detail||`HTTP ${r.status}`);return d}
-function feedback(m,k='success'){const e=$('review-feedback');e.hidden=false;e.className=`status-message page-feedback ${k==='error'?'error':''}`;e.textContent=m;clearTimeout(feedback.t);feedback.t=setTimeout(()=>e.hidden=true,5000)}
-let workers=[]; let settings={};
-function renderAssignments(){ const box=$('review-worker-assignment'); if(!workers.length){box.innerHTML='<p class="subtle">No enabled Colab workers. Add/configure one on the Workers page.</p>';return;} box.innerHTML=workers.map(w=>`<article class="review-assignment-row"><div><strong>${esc(w.name||w.id)}</strong><small>${esc(w.id)} · ${w.connection_configured?'configured':'needs setup'}${w.paused?' · stopped':''}</small></div><label class="checkbox-row"><input type="checkbox" data-role="text" value="${esc(w.id)}" ${settings.text_worker_ids?.includes(w.id)?'checked':''}/> Text review</label><label class="checkbox-row"><input type="checkbox" data-role="vision" value="${esc(w.id)}" ${settings.vision_worker_ids?.includes(w.id)?'checked':''}/> Vision review</label></article>`).join(''); }
-function fmt(sec){ if(sec==null)return'—'; const n=Number(sec); return n<60?`${n.toFixed(1)}s`:`${Math.floor(n/60)}m ${Math.round(n%60)}s`; }
-async function load(){ try{const cfg=await api('/api/review-workers/settings'); settings=cfg.settings||{}; workers=(cfg.workers||[]).filter(w=>w.enabled); $('review-enabled').checked=!!settings.enabled; renderAssignments(); const st=await api('/api/review-workers/status'); const c=st.counts||{}; const blockers=Number(st.machine_blockers||0); $('review-machine-gate').textContent=st.machine_work_complete?'Primary Text/Vision/Artifact workload is complete · review workers may run.':`${blockers.toLocaleString()} primary Text/Vision/Artifact job(s) still block this phase.`; $('review-text-pending').textContent=c.text_pending||0; $('review-vision-pending').textContent=c.vision_pending||0; $('review-processing').textContent=(c.text_processing||0)+(c.vision_processing||0); $('review-completed').textContent=(c.text_completed||0)+(c.vision_completed||0); $('review-jobs').innerHTML=(st.jobs||[]).map(j=>`<tr><td>${esc(j.review_type)}</td><td>#${j.postprocess_job_id}</td><td><code>${esc(j.entry_id)}</code></td><td>${esc(j.status)}</td><td>${esc(j.claimed_by||'—')}</td><td>${fmt(j.processing_seconds)}</td></tr>`).join('')||'<tr><td colspan="6">No review-assistant jobs yet.</td></tr>'; $('review-worker-state').innerHTML='<span class="indicator online"></span><span>Review scheduler ready</span>';}catch(e){feedback(e.message,'error')}}
-$('save-review-settings').addEventListener('click',async()=>{try{const text=[...document.querySelectorAll('[data-role="text"]:checked')].map(x=>x.value);const vision=[...document.querySelectorAll('[data-role="vision"]:checked')].map(x=>x.value); await api('/api/review-workers/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:$('review-enabled').checked,text_worker_ids:text,vision_worker_ids:vision})});feedback('Review worker settings saved.');await load();}catch(e){feedback(e.message,'error')}});
-load(); setInterval(()=>{if(document.visibilityState==='visible')load()},4000);
+function feedback(m,k='success'){const e=$('review-feedback');e.hidden=false;e.className=`status-message page-feedback ${k==='error'?'error':'success'}`;e.textContent=m;clearTimeout(feedback.t);feedback.t=setTimeout(()=>e.hidden=true,5000)}
+let workers=[];
+let settings={};
+let settingsDirty=false;
+let settingsSignature='';
+let statusInFlight=false;
+let settingsInFlight=false;
+
+function markDirty(){settingsDirty=true;$('review-unsaved').hidden=false;}
+function clearDirty(){settingsDirty=false;$('review-unsaved').hidden=true;}
+function workerState(w){return w.paused?'Stopped':w.connection_configured?'Configured':'Needs setup';}
+function renderAssignments(){
+  const box=$('review-worker-assignment');
+  if(!workers.length){box.innerHTML='<div class="review-empty-state"><strong>No enabled Colab workers</strong><span>Add and configure a Colab worker on the Workers page, then return here.</span></div>';return;}
+  box.innerHTML=workers.map(w=>`<article class="review-assignment-card">
+    <div class="review-assignment-head"><div><strong>${esc(w.name||w.id)}</strong><small>${esc(w.id)}</small></div><span class="mode-badge ${w.paused?'paused':w.connection_configured?'auto':'paused'}">${esc(workerState(w))}</span></div>
+    <div class="review-assignment-options">
+      <label class="review-role-option"><input type="checkbox" data-role="text" value="${esc(w.id)}" ${settings.text_worker_ids?.includes(w.id)?'checked':''}/><span><strong>Text review</strong><small>Re-check uncertain OCR/text suggestions.</small></span></label>
+      <label class="review-role-option"><input type="checkbox" data-role="vision" value="${esc(w.id)}" ${settings.vision_worker_ids?.includes(w.id)?'checked':''}/><span><strong>Vision review</strong><small>Re-check technical visual evidence.</small></span></label>
+    </div>
+  </article>`).join('');
+}
+function fmt(sec){if(sec==null)return'—';const n=Number(sec);return n<60?`${n.toFixed(1)}s`:`${Math.floor(n/60)}m ${Math.round(n%60)}s`}
+function cfgSignature(cfg){return JSON.stringify({settings:cfg.settings||{},workers:(cfg.workers||[]).map(w=>({id:w.id,name:w.name,enabled:w.enabled,paused:w.paused,connection_configured:w.connection_configured}))})}
+async function loadSettings(force=false){
+  if(settingsInFlight||(!force&&settingsDirty))return;
+  settingsInFlight=true;
+  try{
+    const cfg=await api('/api/review-workers/settings');
+    const sig=cfgSignature(cfg);
+    if(force||sig!==settingsSignature){
+      settings=cfg.settings||{};
+      workers=(cfg.workers||[]).filter(w=>w.enabled);
+      $('review-enabled').checked=!!settings.enabled;
+      renderAssignments();
+      settingsSignature=sig;
+      clearDirty();
+    }
+  }finally{settingsInFlight=false}
+}
+async function loadStatus(){
+  if(statusInFlight)return;
+  statusInFlight=true;
+  try{
+    const st=await api('/api/review-workers/status');
+    const c=st.counts||{};
+    const blockers=Number(st.machine_blockers||0);
+    $('review-machine-gate').textContent=st.machine_work_complete?'Primary machine workload complete · review workers may run.':`${blockers.toLocaleString()} primary job${blockers===1?'':'s'} still block this phase.`;
+    $('review-text-pending').textContent=c.text_pending||0;
+    $('review-vision-pending').textContent=c.vision_pending||0;
+    $('review-processing').textContent=(c.text_processing||0)+(c.vision_processing||0);
+    $('review-completed').textContent=(c.text_completed||0)+(c.vision_completed||0);
+    const rows=(st.jobs||[]).map(j=>`<tr><td data-label="Type">${esc(j.review_type)}</td><td data-label="Book">#${j.postprocess_job_id}</td><td data-label="Entry"><code>${esc(j.entry_id)}</code></td><td data-label="Status"><span class="status ${esc(j.status)}">${esc(j.status)}</span></td><td data-label="Worker">${esc(j.claimed_by||'—')}</td><td data-label="Time">${fmt(j.processing_seconds)}</td></tr>`).join('')||'<tr><td colspan="6" class="empty-state">No review-assistant jobs yet.</td></tr>';
+    const body=$('review-jobs');
+    if(body.dataset.signature!==rows){body.innerHTML=rows;body.dataset.signature=rows;}
+    $('review-worker-state').classList.add('ready');
+    $('review-worker-state').innerHTML='<span class="indicator"></span><span>Review scheduler ready</span>';
+  }catch(e){feedback(e.message,'error')}
+  finally{statusInFlight=false}
+}
+async function refresh(){
+  await Promise.all([loadSettings(false),loadStatus()]);
+}
+
+document.addEventListener('change',e=>{if(e.target.id==='review-enabled'||e.target.matches('[data-role="text"],[data-role="vision"]'))markDirty()});
+$('save-review-settings').addEventListener('click',async()=>{
+  const button=$('save-review-settings');
+  const old=button.textContent;
+  button.disabled=true;button.textContent='Saving…';
+  try{
+    const text=[...document.querySelectorAll('[data-role="text"]:checked')].map(x=>x.value);
+    const vision=[...document.querySelectorAll('[data-role="vision"]:checked')].map(x=>x.value);
+    await api('/api/review-workers/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:$('review-enabled').checked,text_worker_ids:text,vision_worker_ids:vision})});
+    clearDirty();
+    feedback('Review worker settings saved.');
+    await loadSettings(true);
+    await loadStatus();
+  }catch(e){feedback(e.message,'error')}
+  finally{button.disabled=false;button.textContent=old}
+});
+refresh();
+setInterval(()=>{if(document.visibilityState==='visible' && !window.DoclingUI?.shouldDeferRefresh?.())refresh()},5000);

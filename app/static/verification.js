@@ -1,6 +1,9 @@
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[ch]));
 const selectedBookId = Number(new URLSearchParams(location.search).get("job") || 0);
 let lastStatus = {};
+let colabSettingsDirty = false;
+let detailRefreshAt = 0;
+const DETAIL_REFRESH_MS = 15000;
 function verifierProviderName(provider, fallback) {
   const raw = String(provider || fallback || "");
   const value = raw.toLowerCase();
@@ -69,7 +72,7 @@ async function changeProvider(kind, select) {
   try {
     const data = await api(`/api/stage2b/providers/${kind}`, {method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify({provider})});
     feedback(`${kind === "text" ? "Text" : "Vision"} verifier set to ${data.label}. No automatic fallback is enabled.`, "success");
-    await load();
+    await load(true);
   } catch (error) {
     select.value = previous;
     feedback(error.message);
@@ -91,8 +94,9 @@ async function saveColabProvider(button) {
     };
     const data = await api("/api/stage2b/colab", {method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload)});
     const keyInput = document.getElementById("colab-api-key"); if (keyInput) keyInput.value = "";
+    colabSettingsDirty = false;
     feedback(`Colab worker saved · ${data.api_key_configured ? "API key configured" : "API key missing"}.`, "success");
-    await load();
+    await load(true);
   } catch (error) { feedback(error.message); }
   finally { if (button) { button.disabled = false; button.textContent = original; } }
 }
@@ -106,7 +110,7 @@ async function testColabProvider(button) {
     await saveColabProvider(document.getElementById("colab-save"));
     const data = await api("/api/stage2b/colab/test", {method:"POST"});
     feedback(`Colab connected · ${data.model || "KoboldCpp"} · ${data.detail || "ready"}.`, "success");
-    await load();
+    await load(true);
   } catch (error) { feedback(error.message); }
   finally { if (button) { button.disabled = false; button.textContent = original; } }
 }
@@ -127,7 +131,7 @@ async function setInterlockMode(mode, button) {
       const normal = Number(data.text_authorized || 0) + Number(data.vision_authorized || 0);
       feedback(`Interlock started · ${normal} normal route(s) authorized · ${Number(data.artifact_released || 0)} artifact route(s) ready.`, "success");
     }
-    await load();
+    await load(true);
   } catch (error) { feedback(error.message); }
   finally { if (button) { button.disabled = false; button.textContent = original; } }
 }
@@ -139,7 +143,7 @@ async function toggleAutoAll(button) {
   try {
     await api("/api/stage2b/auto-run-all", {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify({enabled})});
     feedback(`Automatic verification ${enabled ? "enabled" : "disabled"} for Text and Vision routes.`, "success");
-    await load();
+    await load(true);
   } catch (error) { feedback(error.message); }
   finally { button.disabled = false; }
 }
@@ -151,7 +155,7 @@ async function toggleDeviceAuto(target, button) {
   try {
     await api(`/api/stage2b/${target}/auto-run`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify({enabled})});
     feedback(`${target === "pi5" ? textVerifierName() : visionVerifierName()} Auto Run ${enabled ? "enabled" : "disabled"}.`, "success");
-    await load();
+    await load(true);
   } catch (error) { feedback(error.message); }
   finally { button.disabled = false; }
 }
@@ -165,7 +169,7 @@ async function startVerifier(target, button) {
     const name = target === "pi5" ? textVerifierName() : visionVerifierName();
     const count = Number(data.authorized_jobs || 0);
     feedback(count ? `${name} verifier started · ${count} route(s) authorized.` : `${name} verifier is ready · no pending manual routes.`, "success");
-    await load();
+    await load(true);
   } catch (error) { feedback(error.message); }
   finally { button.disabled = false; button.textContent = label; }
 }
@@ -177,7 +181,7 @@ async function stopVerifier(target, button) {
   try {
     const data = await api(`/api/stage2b/${target}/stop`, {method: "POST"});
     feedback(`${target === "pi5" ? textVerifierName() : visionVerifierName()} verifier paused.${data.active_job_finishing ? " Current request will finish first." : ""}`, "success");
-    await load();
+    await load(true);
   } catch (error) { feedback(error.message); }
   finally { button.disabled = false; button.textContent = label; }
 }
@@ -189,7 +193,7 @@ async function verifyBook(id, button) {
   try {
     const data = await api(`/api/stage2b/books/${id}/start`, {method: "POST"});
     feedback(`${data.authorized_jobs || 0} normal Text/Vision route(s) queued. Artifact sweep is armed and starts automatically after normal verification completes.`, "success");
-    await load();
+    await load(true);
   } catch (error) { feedback(error.message); }
   finally { button.disabled = false; button.textContent = label; }
 }
@@ -198,7 +202,7 @@ window.verifyBook = verifyBook;
 async function retryJob(id, button) {
   const label = button?.textContent || "Retry";
   if (button) { button.disabled = true; button.textContent = "Queuing…"; }
-  try { await api(`/api/stage2b/jobs/${id}/retry`, {method: "POST"}); feedback("Verification retry queued.", "success"); await load(); }
+  try { await api(`/api/stage2b/jobs/${id}/retry`, {method: "POST"}); feedback("Verification retry queued.", "success"); await load(true); }
   catch (error) { feedback(error.message); }
   finally { if (button) { button.disabled = false; button.textContent = label; } }
 }
@@ -212,7 +216,7 @@ async function retryAllFailed(button) {
     const counts = data.retried || {};
     if (!data.accepted) feedback("There are no failed verifier routes to retry.", "success");
     else feedback(`Retry queued · ${Number(counts.pi5 || 0)} Text · ${Number(counts.oneplus || 0)} Vision.`, "success");
-    await load();
+    await load(true);
   } catch (error) { feedback(error.message); }
   finally { if (button) { button.disabled = false; button.textContent = label; } }
 }
@@ -221,7 +225,7 @@ window.retryAllFailed = retryAllFailed;
 async function rerunJob(id, button) {
   const label = button?.textContent || "Rerun";
   if (button) { button.disabled = true; button.textContent = "Queuing…"; }
-  try { await api(`/api/stage2b/jobs/${id}/rerun`, {method: "POST"}); feedback("Verification rerun queued.", "success"); await load(); }
+  try { await api(`/api/stage2b/jobs/${id}/rerun`, {method: "POST"}); feedback("Verification rerun queued.", "success"); await load(true); }
   catch (error) { feedback(error.message); }
   finally { if (button) { button.disabled = false; button.textContent = label; } }
 }
@@ -233,7 +237,7 @@ async function manualCrosscheck(jobId, button) {
   try {
     const data = await api(`/api/stage2b/jobs/${jobId}/crosscheck`, {method:"POST"});
     feedback(data.crosscheck_target === "oneplus" ? `${visionVerifierName()} source transcription queued; readable target text will be applied directly.` : `${textVerifierName()} text check queued.`, "success");
-    await load();
+    await load(true);
   } catch (error) { feedback(error.message); }
   finally { button.disabled = false; button.textContent = label; }
 }
@@ -252,10 +256,12 @@ function renderModes(status) {
   const visionSelect = document.getElementById("vision-provider-select"); if (visionSelect && document.activeElement !== visionSelect) visionSelect.value = status?.vision_provider?.provider || "oneplus";
   const phoneLink = document.getElementById("oneplus-server-link"); if (phoneLink) phoneLink.hidden = !(status?.text_provider?.provider === "oneplus" || status?.vision_provider?.provider === "oneplus");
   const colab = status?.colab || {};
-  const colabUrl = document.getElementById("colab-url"); if (colabUrl && document.activeElement !== colabUrl) colabUrl.value = colab.url || "";
-  const colabModel = document.getElementById("colab-model"); if (colabModel && document.activeElement !== colabModel) colabModel.value = colab.model || "koboldcpp";
-  const colabEnabled = document.getElementById("colab-enabled"); if (colabEnabled && document.activeElement !== colabEnabled) colabEnabled.checked = colab.enabled === true;
-  const colabArtifact = document.getElementById("colab-artifact-enabled"); if (colabArtifact && document.activeElement !== colabArtifact) colabArtifact.checked = colab.artifact_enabled === true;
+  if (!colabSettingsDirty) {
+    const colabUrl = document.getElementById("colab-url"); if (colabUrl) colabUrl.value = colab.url || "";
+    const colabModel = document.getElementById("colab-model"); if (colabModel) colabModel.value = colab.model || "koboldcpp";
+    const colabEnabled = document.getElementById("colab-enabled"); if (colabEnabled) colabEnabled.checked = colab.enabled === true;
+    const colabArtifact = document.getElementById("colab-artifact-enabled"); if (colabArtifact) colabArtifact.checked = colab.artifact_enabled === true;
+  }
   const colabMode = document.getElementById("colab-mode");
   if (colabMode) {
     const active = Boolean(status?.interlock?.provider_reservations?.colab);
@@ -377,6 +383,13 @@ function renderHealth(postprocess, status) {
 }
 
 
+function setStableHtml(element, html) {
+  if (!element) return;
+  if (element.dataset.renderSignature === html) return;
+  element.innerHTML = html;
+  element.dataset.renderSignature = html;
+}
+
 function verificationStageCell(label, completed, pending, processing, failed, total) {
   const parts = [];
   if (pending) parts.push(`${pending} pending`);
@@ -389,9 +402,9 @@ function verificationStageCell(label, completed, pending, processing, failed, to
 function renderBooks(data, status) {
   const body = document.getElementById("verification-books");
   const books = (data.books || []).filter(book => !selectedBookId || Number(book.postprocess_job_id) === selectedBookId);
-  if (!books.length) { body.innerHTML = `<tr class="empty-row"><td colspan="6" class="empty-state">No books currently have verification routes.</td></tr>`; return; }
+  if (!books.length) { setStableHtml(body, `<tr class="empty-row"><td colspan="6" class="empty-state">No books currently have verification routes.</td></tr>`); return; }
   const anyAuto = status.modes?.pi5?.auto_run === true || status.modes?.oneplus?.auto_run === true;
-  body.innerHTML = books.map(book => {
+  const html = books.map(book => {
     // New API fields split logical work from historical worker lanes. Fall back
     // to the old fields so the page remains usable during a rolling upgrade.
     const text = {
@@ -431,6 +444,7 @@ function renderBooks(data, status) {
     if (!overallParts.length) overallParts.push(total ? "complete" : "not required");
     return `<tr><td data-label="Book"><span class="file-name">${esc(book.output_filename || book.result_dir)}</span><span class="file-subtitle">${esc(book.result_dir || "")}</span></td>${verificationStageCell("Text", text.completed, text.pending, text.processing, text.failed, text.total)}${verificationStageCell("Vision", vision.completed, vision.pending, vision.processing, vision.failed, vision.total)}${verificationStageCell("Artifact sweep", artifact.completed, artifact.pending, artifact.processing, artifact.failed, artifact.total)}<td data-label="Overall"><strong>${completed}/${total}</strong><span class="file-subtitle">${esc(overallParts.join(" · "))}</span></td><td data-label="Action" class="align-right">${action}</td></tr>`;
   }).join("");
+  setStableHtml(body, html);
 }
 
 function secondsText(value) {
@@ -446,9 +460,9 @@ function renderResults(target, data) {
   const completed = jobs.filter(j => j.status === "completed").length;
   document.getElementById(`${target}-results-note`).textContent = `${completed} completed · ${failed} failed`;
   const body = document.getElementById(`${target}-results`);
-  if (!jobs.length) { body.innerHTML = `<tr class="empty-row"><td colspan="6" class="empty-state">No ${target === "pi5" ? textVerifierName() : visionVerifierName()} results for this book yet.</td></tr>`; return; }
+  if (!jobs.length) { setStableHtml(body, `<tr class="empty-row"><td colspan="6" class="empty-state">No ${target === "pi5" ? textVerifierName() : visionVerifierName()} results for this book yet.</td></tr>`); return; }
   const crossStates = lastStatus.manual_crosschecks || {};
-  body.innerHTML = jobs.map(job => {
+  const html = jobs.map(job => {
     const source = job.source || {}, book = job.output_filename || job.result_dir || "—";
     const error = job.error_message ? `<span class="queue-error" title="${esc(job.error_message)}">${esc(job.error_type || "Error")}</span>` : "";
     let action = "";
@@ -481,6 +495,7 @@ function renderResults(target, data) {
     const executedBy = job.execution_provider ? verifierProviderName(job.execution_provider, job.target) : "Legacy / unknown";
     return `<tr><td data-label="Route"><span class="file-name">${esc(book)}</span><span class="file-subtitle">${esc(job.route_id)} · ${esc(job.code || "review")} · priority ${esc(job.priority || "normal")}${job.priority_score != null ? ` (${esc(job.priority_score)}/100)` : ""}</span>${error}</td><td data-label="Page">${esc(source.page ?? "—")}</td><td data-label="Status">${statusPill(job.status)}</td><td data-label="Provider">${esc(executedBy)}</td><td data-label="Verdict">${esc(job.verdict || "—")}</td><td data-label="Time">${esc(secondsText(job.processing_seconds))}</td><td data-label="Actions" class="align-right"><div class="document-actions verification-result-actions">${action}</div></td></tr>`;
   }).join("");
+  setStableHtml(body, html);
 }
 
 function renderUsage(data, status) {
@@ -500,8 +515,8 @@ function renderUsage(data, status) {
   document.getElementById("groq-cost").textContent = `$${Number(data.estimated_paid_equivalent_cost_usd || 0).toFixed(4)}`;
   const state = document.getElementById("groq-usage-state"); state.textContent = anyCloud ? "Cloud selected" : "Cloud not selected"; state.className = `status ${anyCloud ? "completed" : "pending"}`;
   const rows = document.getElementById("groq-usage-rows"), calls = data.recent_calls || [];
-  if (!calls.length) { rows.innerHTML = `<tr class="empty-row"><td colspan="8" class="empty-state">No Groq calls recorded by this app yet.</td></tr>`; return; }
-  rows.innerHTML = calls.map(item => {
+  if (!calls.length) { setStableHtml(rows, `<tr class="empty-row"><td colspan="8" class="empty-state">No Groq calls recorded by this app yet.</td></tr>`); return; }
+  const html = calls.map(item => {
     const time = item.at ? new Date(Number(item.at)*1000).toLocaleString() : "—";
     const book = item.book || "—", route = item.route_id || "—";
     const code = Number(item.status || 0);
@@ -509,6 +524,7 @@ function renderUsage(data, status) {
     const req = item.request_id ? esc(item.request_id) : "—";
     return `<tr><td>${esc(time)}</td><td><span class="usage-model">${esc(item.kind || "unknown")} · ${esc(item.model || "unknown")}</span><span class="usage-sub">${esc(item.purpose || "")}</span></td><td><span class="usage-model">${esc(book)}</span><span class="usage-sub">${esc(route)}</span></td><td>${statusPill(code >= 200 && code < 300 ? "completed" : "failed")}<span class="usage-sub">HTTP ${esc(code || "—")}</span></td><td>${Number(item.input_tokens || 0).toLocaleString()}</td><td>${Number(item.output_tokens || 0).toLocaleString()}</td><td>${secondsText(item.latency_seconds)}</td><td><span class="usage-model">${req}</span><span class="usage-sub">${error}</span></td></tr>`;
   }).join("");
+  setStableHtml(rows, html);
 }
 
 
@@ -547,20 +563,35 @@ async function loadSafetyRefreshStatus() {
 }
 
 let refreshInFlight = false, refreshTimer = null;
-async function load() {
-  if (refreshInFlight) return; refreshInFlight = true;
+async function load(forceDetails = false) {
+  if (refreshInFlight) return;
+  refreshInFlight = true;
   try {
-    const [status, books, piResults, oneResults, postprocess, main, usage] = await Promise.all([
-      api("/api/stage2b/status"), api("/api/stage2b/books"), api("/api/stage2b/results/pi5"), api("/api/stage2b/results/oneplus"), api("/api/postprocess/status"), api("/api/status"), api("/api/groq/usage?limit=50"),
+    const [status, books, postprocess, main] = await Promise.all([
+      api("/api/stage2b/status"), api("/api/stage2b/books"), api("/api/postprocess/status"), api("/api/status"),
     ]);
-    lastStatus = status; renderModes(status); renderCloudQuota(status); renderHealth(postprocess, status); renderUsage(usage, status); renderBooks(books, status); renderResults("pi5", piResults); renderResults("oneplus", oneResults);
+    lastStatus = status;
+    renderModes(status);
+    renderCloudQuota(status);
+    renderHealth(postprocess, status);
+    renderBooks(books, status);
     const failedNav = document.getElementById("failed-nav"); if (failedNav) failedNav.textContent = main.counts?.failed || 0;
+    const now = Date.now();
+    if (forceDetails || now >= detailRefreshAt) {
+      const [piResults, oneResults, usage] = await Promise.all([
+        api("/api/stage2b/results/pi5"), api("/api/stage2b/results/oneplus"), api("/api/groq/usage?limit=50"),
+      ]);
+      renderUsage(usage, status);
+      renderResults("pi5", piResults);
+      renderResults("oneplus", oneResults);
+      detailRefreshAt = now + DETAIL_REFRESH_MS;
+    }
     await loadSafetyRefreshStatus();
   } finally { refreshInFlight = false; }
 }
 async function pollVerification() {
   try {
-    if (document.visibilityState === "visible") await load();
+    if (document.visibilityState === "visible" && !window.DoclingUI?.shouldDeferRefresh?.()) await load(false);
   } catch (error) {
     feedback(error.message);
   } finally {
@@ -572,6 +603,11 @@ document.addEventListener("visibilitychange", () => {
   if (refreshTimer) window.clearTimeout(refreshTimer);
   refreshTimer = window.setTimeout(pollVerification, 0);
 });
+for (const id of ["colab-url", "colab-model", "colab-api-key", "colab-enabled", "colab-artifact-enabled"]) {
+  const input = document.getElementById(id);
+  if (!input) continue;
+  input.addEventListener(input.type === "checkbox" ? "change" : "input", () => { colabSettingsDirty = true; });
+}
 const retryAllFailedButton = document.getElementById("retry-all-failed"); if (retryAllFailedButton) retryAllFailedButton.addEventListener("click", () => retryAllFailed(retryAllFailedButton));
 const revalidateAllButton = document.getElementById("revalidate-all-books"); if (revalidateAllButton) revalidateAllButton.addEventListener("click", startSafetyRefreshAll);
 pollVerification();

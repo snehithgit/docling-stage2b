@@ -139,14 +139,21 @@ function resultActions(job) {
   return parts.length ? `<div class="document-actions align-actions-right">${parts.join("")}</div>` : "—";
 }
 
+function setDashboardHtml(element, html) {
+  if (!element || element.dataset.renderSignature === html) return false;
+  element.innerHTML = html;
+  element.dataset.renderSignature = html;
+  return true;
+}
+
 function renderJobs(jobs) {
   const body = $("#jobs-body");
   if (!body) return;
   if (!jobs.length) {
-    body.innerHTML = '<tr class="empty-row"><td colspan="5" class="empty-state">No documents have been detected yet. Add a supported file to the input folder to begin.</td></tr>';
+    setDashboardHtml(body, '<tr class="empty-row"><td colspan="5" class="empty-state">No documents have been detected yet. Add a supported file to the input folder to begin.</td></tr>');
     return;
   }
-  body.innerHTML = jobs.map((job) => `
+  const html = jobs.map((job) => `
     <tr>
       <td data-label="Document">
         <span class="file-name">${escapeHtml(job.filename)}</span>
@@ -161,6 +168,7 @@ function renderJobs(jobs) {
       <td data-label="Result" class="align-right">${resultActions(job)}</td>
     </tr>
   `).join("");
+  if (!setDashboardHtml(body, html)) return;
   body.querySelectorAll(".queue-delete").forEach(button => {
     button.addEventListener("click", () => deleteQueueItem(button));
   });
@@ -170,10 +178,10 @@ function renderDocumentLibrary(documents = [], stage2bStatus = null) {
   const body = $("#documents-body");
   if (!body) return;
   if (!documents.length) {
-    body.innerHTML = '<tr class="empty-row"><td colspan="6" class="empty-state">No processed documents yet.</td></tr>';
+    setDashboardHtml(body, '<tr class="empty-row"><td colspan="6" class="empty-state">No processed documents yet.</td></tr>');
     return;
   }
-  body.innerHTML = documents.map((doc) => {
+  const html = documents.map((doc) => {
     const source = doc.source_kind === "converted_folder"
       ? '<span class="source-chip">Imported ZIP</span>'
       : '<span class="source-chip source-watcher">Watcher</span>';
@@ -205,6 +213,7 @@ function renderDocumentLibrary(documents = [], stage2bStatus = null) {
       <td data-label="Actions" class="align-right"><div class="document-actions align-actions-right">${actions}</div></td>
     </tr>`;
   }).join("");
+  setDashboardHtml(body, html);
 }
 
 function renderConnection(docling) {
@@ -323,25 +332,32 @@ function renderDashboardCloudQuota(stage2bStatus) {
   box.hidden = false;
 }
 
+let refreshInFlight = false;
 async function refresh() {
-  const [response, stage2bResponse] = await Promise.all([
-    fetch("/api/status", { cache: "no-store" }),
-    fetch("/api/stage2b/status", { cache: "no-store" }),
-  ]);
-  if (!response.ok || !stage2bResponse.ok) throw new Error("Could not load the queue.");
-  const data = await response.json();
-  const stage2bStatus = await stage2bResponse.json();
-  ["pending", "processing", "completed", "failed"].forEach((key) => {
-    $(`#${key}-count`).textContent = data.counts[key] || 0;
-  });
-  const failedNav = document.getElementById("failed-nav");
-  if (failedNav) failedNav.textContent = data.counts.failed || 0;
-  renderWatcher(data.watcher || {}, data.counts || {});
-  const labels = data.settings.output_format_labels || [data.settings.output_format_label];
-  $("#format-note").textContent = `Outputs: ${labels.join(" + ")} · ${data.settings.target_type === "zip" ? "ZIP package" : "direct file"}`;
-  renderJobs(data.jobs);
-  renderConnection(data.docling);
-  renderDashboardCloudQuota(stage2bStatus);
+  if (refreshInFlight) return;
+  refreshInFlight = true;
+  try {
+    const [response, stage2bResponse] = await Promise.all([
+      fetch("/api/status", { cache: "no-store" }),
+      fetch("/api/stage2b/status", { cache: "no-store" }),
+    ]);
+    if (!response.ok || !stage2bResponse.ok) throw new Error("Could not load the queue.");
+    const data = await response.json();
+    const stage2bStatus = await stage2bResponse.json();
+    ["pending", "processing", "completed", "failed"].forEach((key) => {
+      $(`#${key}-count`).textContent = data.counts[key] || 0;
+    });
+    const failedNav = document.getElementById("failed-nav");
+    if (failedNav) failedNav.textContent = data.counts.failed || 0;
+    renderWatcher(data.watcher || {}, data.counts || {});
+    const labels = data.settings.output_format_labels || [data.settings.output_format_label];
+    $("#format-note").textContent = `Outputs: ${labels.join(" + ")} · ${data.settings.target_type === "zip" ? "ZIP package" : "direct file"}`;
+    renderJobs(data.jobs);
+    renderConnection(data.docling);
+    renderDashboardCloudQuota(stage2bStatus);
+  } finally {
+    refreshInFlight = false;
+  }
 }
 
 function showDrawer(show) {
@@ -425,6 +441,14 @@ refresh().catch((error) => {
 });
 
 const events = new EventSource("/events");
-events.addEventListener("refresh", () => refresh().catch((error) => showDashboardFeedback(`Queue refresh failed: ${error.message}`)));
+let eventRefreshTimer = null;
+function scheduleEventRefresh(delay = 650) {
+  if (eventRefreshTimer) window.clearTimeout(eventRefreshTimer);
+  eventRefreshTimer = window.setTimeout(() => {
+    if (window.DoclingUI?.shouldDeferRefresh?.()) { scheduleEventRefresh(1000); return; }
+    refresh().catch((error) => showDashboardFeedback(`Queue refresh failed: ${error.message}`));
+  }, delay);
+}
+events.addEventListener("refresh", () => scheduleEventRefresh());
 
 if (location.hash === "#settings") document.getElementById("open-settings")?.click();

@@ -857,3 +857,64 @@ def test_verification_results_show_execution_provider_and_truthful_legacy_timing
     assert "Legacy / unknown" in js
     assert "Not recorded" in js
     assert "Existing completed rows keep their original execution provider" in js
+
+
+def test_sidebar_navigation_is_normalized_with_worker_review_and_chunk_icons():
+    js = read("nav.js")
+    for href, label in [
+        ("/workers", "Workers"),
+        ("/review-workers", "Review workers"),
+        ("/chunks", "Chunk Viewer"),
+    ]:
+        assert href in js
+        assert label in js
+    assert "icons.workers" in js
+    assert "icons.reviewWorkers" in js
+    assert "icons.chunks" in js
+    assert "nav.replaceChildren(fragment)" in js
+
+
+def test_sidebar_keeps_version_and_diagnostics_visible_with_scrollable_nav():
+    css = read("styles.css")
+    assert "flex: 1 1 auto" in css
+    assert "overflow-y: auto" in css
+    assert "Keep version + diagnostics visible while only the navigation list scrolls" in css
+    assert ".ui29 .sidebar-footer { margin:8px 10px 0; flex:none; }" in css
+
+
+def test_worker_forms_preserve_unsaved_edits_during_status_polling():
+    workers = read("workers.js")
+    review = read("review-workers.js")
+    assert "dirtyWorkers = new Set()" in workers
+    assert "!dirtyWorkers.size" in workers
+    assert "settingsDirty" in review
+    assert "if(settingsInFlight||(!force&&settingsDirty))return" in review
+    assert "loadStatus()" in review
+
+
+def test_review_workers_page_uses_structured_responsive_assignment_layout():
+    html = read("review-workers.html")
+    css = read("styles.css")
+    assert 'class="review-overview-grid"' in html
+    assert 'id="review-worker-assignment"' in html
+    assert 'id="review-unsaved"' in html
+    assert ".review-assignment-card" in css
+    assert ".review-assignment-options" in css
+    assert "grid-template-columns:repeat(auto-fit,minmax(300px,1fr))" in css
+
+
+def test_verification_separates_fast_status_from_heavy_result_refresh():
+    js = read("verification.js")
+    assert "DETAIL_REFRESH_MS = 15000" in js
+    assert "async function load(forceDetails = false)" in js
+    assert "if (forceDetails || now >= detailRefreshAt)" in js
+    assert "setStableHtml" in js
+    assert "shouldDeferRefresh" in js
+
+
+def test_queue_event_refresh_is_debounced_non_overlapping_and_interaction_safe():
+    js = read("dashboard.js")
+    assert "let refreshInFlight = false" in js
+    assert "scheduleEventRefresh" in js
+    assert "shouldDeferRefresh" in js
+    assert "setDashboardHtml" in js

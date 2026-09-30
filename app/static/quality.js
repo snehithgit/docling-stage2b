@@ -17,6 +17,12 @@ function statusPill(status) {
 const coverageLabels = {ok: "Good", limited: "Needs more checking", warning: "Needs attention"};
 const integrityLabels = {ok: "All files present", warning: "Some files missing"};
 
+function setQualityHtml(element, html) {
+  if (!element || element.dataset.renderSignature === html) return;
+  element.innerHTML = html;
+  element.dataset.renderSignature = html;
+}
+
 function qualityBadge(status, displayLabel, kind = "coverage") {
   if (!status) return `<span class="quality-muted">—</span>`;
   const fallback = kind === "integrity" ? integrityLabels[status] : coverageLabels[status];
@@ -78,10 +84,10 @@ async function load() {
   const body = document.getElementById("quality-jobs");
   const jobs = data.jobs || [];
   if (!jobs.length) {
-    body.innerHTML = `<tr class="empty-row"><td colspan="6" class="empty-state">No completed Docling ZIP has entered quality analysis yet.</td></tr>`;
+    setQualityHtml(body, `<tr class="empty-row"><td colspan="6" class="empty-state">No completed Docling ZIP has entered quality analysis yet.</td></tr>`);
     return;
   }
-  body.innerHTML = jobs.map(job => {
+  const html = jobs.map(job => {
     const source = job.source_kind === "converted_folder"
       ? `<span class="source-chip">Imported ZIP</span>`
       : `<span class="source-chip source-watcher">Watcher</span>`;
@@ -105,7 +111,8 @@ async function load() {
       : `${esc(routeCreated)} / ${esc(routeCandidates)}`;
     return `<tr><td data-label="Document"><span class="file-name">${esc(job.source_filename)}</span><span class="file-subtitle">${esc(job.output_filename)}</span>${source}</td><td data-label="Pipeline">${statusPill(job.status)}</td><td data-label="Quality">${quality}</td><td data-label="Profile">${esc(job.profile_kind || "—")}</td><td data-label="Routes">${routeDisplay}</td><td data-label="Actions" class="align-right">${links}</td></tr>`;
   }).join("");
+  setQualityHtml(body, html);
 }
 
 load().catch(error => showQualityFeedback(error.message));
-setInterval(() => load().catch(error => showQualityFeedback(`Quality status refresh failed: ${error.message}`)), 5000);
+setInterval(() => { if (!window.DoclingUI?.shouldDeferRefresh?.()) load().catch(error => showQualityFeedback(`Quality status refresh failed: ${error.message}`)); }, 10000);
