@@ -4579,6 +4579,30 @@ async def stage2b_retry_all_failed() -> dict:
     }
 
 
+@app.post("/api/stage2b/retry-failed/{role}")
+async def stage2b_retry_failed_role(role: str) -> dict:
+    """Retry only failed Text or only failed Vision routes."""
+    if not runtime.config.stage2b_enabled:
+        raise HTTPException(status_code=409, detail="Stage 2B verification is disabled.")
+    mapping = {"text": "pi5", "vision": "oneplus"}
+    target = mapping.get(str(role or "").lower())
+    if target is None:
+        raise HTTPException(status_code=404, detail="Retry role must be text or vision.")
+    count = await runtime.stage2b_store.retry_failed_target(target)
+    if count:
+        await runtime.set_stage2b_paused(target, False)
+        runtime.events.notify(f"stage2b_retry_failed_{role.lower()}")
+    return {
+        "accepted": bool(count),
+        "role": role.lower(),
+        "target": target,
+        "retried": int(count),
+        "other_role_untouched": True,
+        "successful_jobs_untouched": True,
+        "pending_jobs_untouched": True,
+    }
+
+
 @app.post("/api/stage2b/jobs/{job_id}/retry")
 async def stage2b_retry(job_id: int) -> dict:
     if not await runtime.stage2b_store.retry(job_id):

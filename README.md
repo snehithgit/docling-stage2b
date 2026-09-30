@@ -1,3 +1,12 @@
+## 2026.09.30.40.11AH2 — Colab verifier correctness + richer GPU prompts
+
+- Reclassifies legacy Colab HTTP/protocol false-success Text rows as failed so they can be retried in-app.
+- Prevents future HTTP 530 responses from becoming `UNCERTAIN / completed`.
+- Adds richer Colab-only Text/Vision prompts and larger GPU completion budgets while keeping Pi5/OnePlus compact.
+- Re-gates pending Artifact work behind failed Text routes, adds Text-only/Vision-only retry buttons, and improves Colab health/UI truthfulness.
+- Full validation: 657 passed, 1 skipped.
+- Full details: `RELEASE_VALIDATION_2026.09.30.40.11AH2.md`.
+
 ## 2026.09.30.40.11AF — worker-race hardening + hot-path performance completion
 
 - Colab/local worker administration is serialized with scheduler dispatch; stale selected workers cannot be claimed after Stop/Remove, and admin Test holds a real provider reservation.

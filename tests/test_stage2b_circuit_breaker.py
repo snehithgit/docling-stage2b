@@ -189,3 +189,64 @@ def test_dynamic_colab_artifact_auth_failure_opens_worker_specific_circuit(tmp_p
         assert worker._endpoint_circuit["colab"]["open"] is False
 
     asyncio.run(run())
+
+
+def test_false_completed_colab_http_text_is_reclassified_failed_and_artifact_regated(tmp_path: Path):
+    async def run():
+        store = Stage2BStore(str(tmp_path / "jobs.db"))
+        await store.initialize()
+        await store.sync_routes(42, 9, "g", [
+            {"route_id": "T1", "target": "pi5", "code": "OCR_GARBLE", "source": {"type": "text", "index": 1}},
+        ], "book__job9__run2", "book.zip")
+        await store.start_manual_book(42)
+        row = await store.next_runnable("pi5", False)
+        assert row is not None
+        await store.mark_processing(row["id"], "manual", "colab:colab-1")
+        result = {
+            "text_provider": "colab:colab-1",
+            "source_reconstruction": {
+                "provider": "colab:colab-1",
+                "status": "UNREADABLE",
+                "error_type": "HTTPStatusError",
+                "error_message": "Server error '530' for url https://worker.trycloudflare.com/v1/chat/completions",
+            },
+        }
+        await store.mark_completed(
+            row["id"], 1.2, "koboldcpp", "https://worker.trycloudflare.com", "UNCERTAIN",
+            {"provider": "colab:colab-1"}, result, "old-false-result.json",
+        )
+        await store.create_artifact_sweep_jobs(
+            42, 9, "g", "book__job9__run2", "book.zip",
+            [{"route_id": "AV1", "target": "oneplus", "code": "FULL_TECHNICAL_VISUAL", "source": {"type": "picture", "index": 3}}],
+        )
+        with store._connection() as conn:
+            conn.execute(
+                "UPDATE verification_jobs SET authorized=1, run_mode='artifact_ready' WHERE postprocess_job_id=42 AND code='FULL_TECHNICAL_VISUAL'"
+            )
+
+        changed = await store.reclassify_completed_colab_transport_failures()
+        assert changed == {"failed_text": 1, "artifact_regated": 1, "books": 1}
+        rows = await store.list_book_jobs_raw(42)
+        text_row = next(item for item in rows if item["route_id"] == "T1")
+        artifact = next(item for item in rows if item["route_id"] == "AV1")
+        assert text_row["status"] == "failed"
+        assert text_row["error_type"] == "HTTPStatusError"
+        assert text_row["verdict"] is None
+        assert artifact["status"] == "pending"
+        assert artifact["authorized"] == 0
+        assert artifact["run_mode"] == "awaiting_normal"
+
+        counts = await store.retry_all_failed()
+        assert counts["pi5"] == 1
+        retried = next(item for item in await store.list_book_jobs_raw(42) if item["route_id"] == "T1")
+        assert retried["status"] == "pending"
+        assert retried["authorized"] == 1
+        assert retried["claimed_by"] is None
+        assert retried["execution_provider"] is None
+
+        # Migration is idempotent and must not keep rewriting history.
+        assert await store.reclassify_completed_colab_transport_failures() == {
+            "failed_text": 0, "artifact_regated": 0, "books": 0,
+        }
+
+    asyncio.run(run())

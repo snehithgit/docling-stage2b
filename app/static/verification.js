@@ -222,6 +222,20 @@ async function retryAllFailed(button) {
 }
 window.retryAllFailed = retryAllFailed;
 
+async function retryFailedRole(role, button) {
+  const pretty = role === "text" ? "Text" : "Vision";
+  const label = button?.textContent || `Retry failed ${pretty}`;
+  if (button) { button.disabled = true; button.textContent = `Queuing ${pretty}…`; }
+  try {
+    const data = await api(`/api/stage2b/retry-failed/${role}`, {method:"POST"});
+    if (!data.accepted) feedback(`There are no failed ${pretty} routes to retry.`, "success");
+    else feedback(`Retry queued · ${Number(data.retried || 0).toLocaleString()} ${pretty} route(s).`, "success");
+    await load(true);
+  } catch (error) { feedback(error.message); }
+  finally { if (button) { button.disabled = false; button.textContent = label; } }
+}
+window.retryFailedRole = retryFailedRole;
+
 async function rerunJob(id, button) {
   const label = button?.textContent || "Rerun";
   if (button) { button.disabled = true; button.textContent = "Queuing…"; }
@@ -362,11 +376,19 @@ function renderModes(status) {
     artifactStage.textContent = artifactProviders.length ? `Running on ${artifactProviders.join(" + ")}` : interlockMode === "stopped" ? "Stopped — pending work preserved" : ready ? `${ready} ready · waiting for an idle verifier worker` : waiting ? `${waiting} waiting for normal Text/Vision routes` : "No eligible artifact work";
   }
   const failedTotal = Number(status.workloads?.text?.failed || 0) + Number(status.workloads?.vision?.failed || 0);
+  const failedText = Number(status.workloads?.text?.failed || 0);
+  const failedVision = Number(status.workloads?.vision?.failed || 0);
   const failedStrip = document.getElementById("retry-failed-strip");
   const failedCount = document.getElementById("retry-failed-count");
+  const failedBreakdown = document.getElementById("retry-failed-breakdown");
+  const retryText = document.getElementById("retry-failed-text");
+  const retryVision = document.getElementById("retry-failed-vision");
   const retryAll = document.getElementById("retry-all-failed");
   if (failedStrip) failedStrip.hidden = failedTotal === 0;
   if (failedCount) failedCount.textContent = failedTotal.toLocaleString();
+  if (failedBreakdown) failedBreakdown.textContent = `Text ${failedText.toLocaleString()} · Vision ${failedVision.toLocaleString()}`;
+  if (retryText) retryText.disabled = failedText === 0;
+  if (retryVision) retryVision.disabled = failedVision === 0;
   if (retryAll) retryAll.disabled = failedTotal === 0;
   document.querySelector("#verification-state span:last-child").textContent = status.enabled ? "Verification enabled" : "Verification disabled";
 }
@@ -376,9 +398,19 @@ function renderHealth(postprocess, status) {
   for (const [target, key] of [["pi5", "pi5"], ["oneplus", "oneplus"]]) {
     const item = postprocess.verifiers?.[key];
     const selectedCloud = target === "pi5" ? status?.text_provider?.mode === "cloud" : status?.vision_provider?.mode === "cloud";
-    const label = item?.reachable === true ? (selectedCloud ? "Ready" : "Alive") : item?.reachable === false ? "Offline" : "Checking";
+    const selectedProvider = target === "pi5" ? status?.text_provider?.provider : status?.vision_provider?.provider;
+    const worker = status?.workers?.[target] || {};
+    const lastSuccess = Number(worker.last_completed_epoch || 0);
+    const recentInference = selectedProvider === "colab" && lastSuccess > 0 && ((Date.now()/1000) - lastSuccess) < 180;
+    const label = recentInference && item?.reachable === false
+      ? "Working · probe degraded"
+      : item?.reachable === true ? (selectedCloud ? "Ready" : "Alive") : item?.reachable === false ? "Offline" : "Checking";
+    const stateClass = recentInference && item?.reachable === false ? "pending" : item?.reachable === true ? "completed" : item?.reachable === false ? "failed" : "pending";
     const model = item?.model || (target === "pi5" ? status?.text_provider?.primary_model : status?.vision_provider?.primary_model) || "Model unknown";
-    document.getElementById(`${target}-health`).innerHTML = `<span class="status ${item?.reachable === true ? "completed" : item?.reachable === false ? "failed" : "pending"}">${label}</span><span class="device-model" title="${esc(model)}">${esc(model)}</span><small>${esc(item?.detail || "")}</small>`;
+    const detail = recentInference && item?.reachable === false
+      ? `Inference completed recently; control-plane probe reports: ${item?.detail || "unavailable"}`
+      : (item?.detail || "");
+    document.getElementById(`${target}-health`).innerHTML = `<span class="status ${stateClass}">${label}</span><span class="device-model" title="${esc(model)}">${esc(model)}</span><small>${esc(detail)}</small>`;
   }
 }
 
@@ -609,6 +641,8 @@ for (const id of ["colab-url", "colab-model", "colab-api-key", "colab-enabled", 
   input.addEventListener(input.type === "checkbox" ? "change" : "input", () => { colabSettingsDirty = true; });
 }
 const retryAllFailedButton = document.getElementById("retry-all-failed"); if (retryAllFailedButton) retryAllFailedButton.addEventListener("click", () => retryAllFailed(retryAllFailedButton));
+const retryFailedTextButton = document.getElementById("retry-failed-text"); if (retryFailedTextButton) retryFailedTextButton.addEventListener("click", () => retryFailedRole("text", retryFailedTextButton));
+const retryFailedVisionButton = document.getElementById("retry-failed-vision"); if (retryFailedVisionButton) retryFailedVisionButton.addEventListener("click", () => retryFailedRole("vision", retryFailedVisionButton));
 const revalidateAllButton = document.getElementById("revalidate-all-books"); if (revalidateAllButton) revalidateAllButton.addEventListener("click", startSafetyRefreshAll);
 pollVerification();
 

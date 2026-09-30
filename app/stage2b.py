@@ -505,7 +505,7 @@ def _neighbor_gap_crop_rect(
     return clip
 
 
-def _source_transcription_token_budget(original: str) -> int:
+def _source_transcription_token_budget(original: str, provider: str = "") -> int:
     """Give direct source transcription enough room to finish without bloat.
 
     Direct transcription must be complete; unlike classification JSON, a
@@ -513,6 +513,14 @@ def _source_transcription_token_budget(original: str) -> int:
     keeps short labels cheap while allowing long technical paragraphs to end.
     """
     chars = len(str(original or ""))
+    provider = str(provider or "").lower()
+    # Colab GPU workers can afford a larger completion ceiling.  This is not
+    # permission to elaborate: the prompt still requires source-faithful plain
+    # transcription only.  The extra headroom prevents long paragraphs/tables
+    # from being falsely marked unreadable merely because a phone/Pi-oriented
+    # token ceiling was reached.
+    if provider == "colab" or provider.startswith("colab:"):
+        return max(768, min(2048, int(chars / 1.5) + 384))
     return max(512, min(1024, int(chars / 2.0) + 256))
 
 
@@ -1247,11 +1255,14 @@ async def _oneplus_text_crosscheck(
     provider = str(getattr(client, "provider", "oneplus") or "oneplus").lower()
     before = [str(x).strip() for x in (before_anchors or []) if str(x).strip()]
     after = [str(x).strip() for x in (after_anchors or []) if str(x).strip()]
-    # The crop is the primary locator. Give the model only the nearest
-    # boundary snippets so small local models do not waste completion tokens
-    # echoing long Docling context blocks.
-    nearest_before = before[-1][-320:] if before else ""
-    nearest_after = after[0][:320] if after else ""
+    # The crop is the primary locator.  Pi5/OnePlus get very short boundary
+    # snippets to conserve their prompt budget.  Colab has ample prompt/image
+    # throughput, so it can use a little more boundary context to avoid pulling
+    # text from a neighboring bbox while still never seeing the Docling target
+    # itself (which would bias the transcription).
+    anchor_chars = 640 if (provider == "colab" or provider.startswith("colab:")) else 320
+    nearest_before = before[-1][-anchor_chars:] if before else ""
+    nearest_after = after[0][:anchor_chars] if after else ""
     before_text = nearest_before or "[NO BEFORE ANCHOR]"
     after_text = nearest_after or "[NO AFTER ANCHOR]"
 
@@ -1272,6 +1283,25 @@ async def _oneplus_text_crosscheck(
             f"BEFORE CONTEXT:\n{before_text[:1800]}\n\n"
             f"AFTER CONTEXT:\n{after_text[:1800]}"
         )
+    elif provider == "colab" or provider.startswith("colab:"):
+        target_kind = "one table cell" if str(source_type or "text") == "table_cell" else "one text region"
+        prompt = (
+            "You are the high-accuracy SOURCE TRANSCRIPTION pass for a technical manual. "
+            f"The attached image is already cropped to exactly {target_kind}; the pixels are the only authority. "
+            "Transcribe the complete visible target, line by line, from first character to last. "
+            "Preserve capitalization, line breaks, punctuation, decimal separators, signs and technical symbols "
+            "such as ±, ≤, ≥, °, Ø, µ/μ, ×, arrows and brackets when they are actually visible. "
+            "Preserve numbers, units, model/part numbers, wire/terminal tags, alarm codes and abbreviations exactly; "
+            "never autocorrect a technical identifier because another spelling looks more likely. "
+            "Resolve look-alike glyphs (0/O, 1/I/l, 5/S, 8/B) only from the image, never from engineering expectation. "
+            "Do not summarize, translate, normalize spacing, improve grammar, infer missing characters, or describe "
+            "pictures/diagrams. BEFORE and AFTER are imperfect OCR boundary hints only: use them to recognize accidental "
+            "neighbor text, but NEVER copy either hint into the answer. If the entire target cannot be transcribed "
+            "reliably, return exactly [UNREADABLE] rather than guessing. "
+            "Return ONLY the target transcription as plain text. No JSON, labels, markdown, reasoning or commentary.\n\n"
+            f"BEFORE CONTEXT (boundary hint only):\n{before_text[:2400]}\n\n"
+            f"AFTER CONTEXT (boundary hint only):\n{after_text[:2400]}"
+        )
     else:
         prompt = (
             rules + " Return ONLY the target transcription as plain text, with no JSON, label, explanation, "
@@ -1288,15 +1318,18 @@ async def _oneplus_text_crosscheck(
             prompt,
             mime_type=mime,
             model=model,
-            max_tokens=_source_transcription_token_budget(original_for_scope),
+            max_tokens=_source_transcription_token_budget(original_for_scope, provider),
             first_token_timeout_seconds=int(first_token_timeout_seconds),
             idle_timeout_seconds=int(idle_timeout_seconds),
             schema_mode="direct_transcription",
         )
-    except (httpx.TransportError, TimeoutError, ConnectionError):
+    except (httpx.HTTPError, TimeoutError, ConnectionError, UnicodeError):
         # Transport/liveness failures are not evidence about the source image.
-        # Propagate them so _run_job can defer the route, open the endpoint
-        # circuit breaker, and retry without manufacturing an UNREADABLE result.
+        # HTTPStatusError was historically missed here because it is an
+        # HTTPError but not a TransportError.  That converted Cloudflare 530s
+        # into fake UNREADABLE/UNCERTAIN completions.  Propagate every HTTP
+        # protocol/status failure (plus header Unicode failures) so _run_job
+        # owns retry/failure accounting and never manufactures source evidence.
         raise
     except Exception as exc:
         return {
@@ -1498,7 +1531,28 @@ def _pi5_prompt_payload(job: dict[str, Any], suspect: str, context: str, structu
 VISION_CATEGORIES_TEXT = ", ".join(sorted(ALL_DIAGRAM_CATEGORIES))
 
 
-def _vision_prompt(job: dict[str, Any], region: str = "full image") -> str:
+def _vision_prompt(job: dict[str, Any], region: str = "full image", provider: str = "") -> str:
+    provider = str(provider or "").lower()
+    if provider == "colab" or provider.startswith("colab:"):
+        return (
+            "Inspect only visible evidence in this technical-manual image; do not use outside engineering knowledge. "
+            "Classify from the image structure itself: connection/flow lines and symbols favor schematics; terminal/wire "
+            "labels favor wiring/terminal diagrams; dimensioned cutaways favor mechanical_section; separated numbered "
+            "parts favor exploded_view; axes/curves favor graph_or_plot; dense rows/columns favor table_or_schedule; "
+            "equipment photographs remain technical_photo unless the page is primarily cover/promotional artwork. "
+            "A schematic, wiring diagram, hydraulic/pneumatic diagram, block/control/terminal diagram, mechanical section, "
+            "exploded view, installation layout or relationship diagram is TECHNICAL_USEFUL even if some labels are unreadable. "
+            "A manual cover/title/publisher/promotional page is cover_art and DECORATIVE_OR_LOW_VALUE even when it contains equipment. "
+            "visible_text must contain only exact strings actually legible in the pixels; prioritize identifiers, ratings, "
+            "terminal/wire labels, component tags and alarm codes. Never place inferred object names in visible_text. "
+            "visible_objects may describe only structures visibly present. Mark unresolved when important technical detail is "
+            "unreadable or omitted; do not downgrade an otherwise obvious technical diagram solely because labels are small. "
+            "Return ONE JSON object only, no markdown/reasoning, with: verdict (TECHNICAL_USEFUL, DECORATIVE_OR_LOW_VALUE, or UNCERTAIN), "
+            "confidence (0..1), visible_text (array, up to 12 exact short strings), visible_objects (array, up to 8 short descriptions), "
+            f"diagram_category (exactly one of: {VISION_CATEGORIES_TEXT}), summary (max 40 words, visible facts only), "
+            "unresolved (true/false), unresolved_reason (CLASSIFICATION, UNREADABLE_DETAILS, OMITTED_DETAILS, or empty). "
+            f"Region: {region}. Stage-2 route reason: {job.get('reason') or 'visual ambiguity'}."
+        )
     return (
         "Inspect only what is visibly present in this technical-manual image. "
         "Do not infer hidden wiring, hydraulic function, object identity, or symbol meaning from outside knowledge. "
@@ -1519,11 +1573,18 @@ def _vision_prompt(job: dict[str, Any], region: str = "full image") -> str:
 
 
 
-def _vision_evidence_prompt(job: dict[str, Any], region: str, *, human_accepted: bool = False) -> str:
+def _vision_evidence_prompt(job: dict[str, Any], region: str, *, human_accepted: bool = False, provider: str = "") -> str:
     authority = (
         "A human reviewer has already confirmed that this image is technically useful. Do not reclassify it as decorative. "
         if human_accepted else
         "The image has already been selected for technical evidence extraction. "
+    )
+    provider = str(provider or "").lower()
+    detail = (
+        " Read the region systematically and retain up to 12 exact technical strings and up to 8 visible structures; "
+        "prioritize identifiers, ratings, wire/terminal/component labels and values. Do not guess uncertain characters. "
+        "summary may use up to 40 words."
+        if provider == "colab" or provider.startswith("colab:") else ""
     )
     return (
         authority
@@ -1535,6 +1596,7 @@ def _vision_evidence_prompt(job: dict[str, Any], region: str, *, human_accepted:
         "summary: at most 25 words describing visible technical structure. "
         "unresolved must be true only when important technical detail in this region remains unreadable or omitted; unresolved_reason must be CLASSIFICATION, UNREADABLE_DETAILS, OMITTED_DETAILS, or empty. "
         f"Region: {region}. Stage-2 route reason: {job.get('reason') or 'visual ambiguity'}."
+        + detail
     )
 
 
@@ -2566,11 +2628,12 @@ class Stage2BWorker:
         self._tasks: list[asyncio.Task[Any]] = []
         self._colab_artifact_tasks: dict[str, asyncio.Task[Any]] = {}
         self.worker_state: dict[str, dict[str, Any]] = {
-            "pi5": {"active_job_id": None, "active_stage": None, "last_completed_job_id": None},
+            "pi5": {"active_job_id": None, "active_stage": None, "last_completed_job_id": None, "last_completed_epoch": None},
             "oneplus": {
                 "active_job_id": None,
                 "active_stage": None,
                 "last_completed_job_id": None,
+                "last_completed_epoch": None,
                 "active_started_epoch": None,
                 "stream_phase": None,
                 "stream_chunk_count": 0,
@@ -2585,6 +2648,7 @@ class Stage2BWorker:
                 "active_job_id": None,
                 "active_stage": None,
                 "last_completed_job_id": None,
+                "last_completed_epoch": None,
                 "artifact_jobs_completed": 0,
                 "artifact_cooldown_until_epoch": None,
             },
@@ -2806,6 +2870,7 @@ class Stage2BWorker:
             "active_job_id": None,
             "active_stage": None,
             "last_completed_job_id": None,
+            "last_completed_epoch": None,
             "artifact_jobs_completed": 0,
             "artifact_cooldown_until_epoch": None,
             "endpoint_circuit": dict(self._endpoint_circuit[provider]),
@@ -2940,6 +3005,13 @@ class Stage2BWorker:
     async def start(self) -> None:
         await self._store.initialize()
         await self._store.recover_interrupted()
+        reconciled = await self._store.reclassify_completed_colab_transport_failures()
+        if reconciled.get("failed_text"):
+            logger.warning(
+                "Reclassified %s false-completed Colab text route(s) as failed across %s book(s); re-gated %s pending artifact route(s)",
+                reconciled.get("failed_text"), reconciled.get("books"), reconciled.get("artifact_regated"),
+            )
+            self._events.notify("stage2b_colab_false_completions_reclassified")
         recovered_outages = await self._store.requeue_endpoint_outage_failures()
         if recovered_outages:
             logger.warning("Requeued %s Stage 2B job(s) failed by older endpoint-outage retry handling", recovered_outages)
@@ -4585,7 +4657,11 @@ class Stage2BWorker:
         is_artifact_sweep = self._is_artifact_sweep_job(job)
         is_human_recovery = self._is_human_visual_recovery_job(job)
         artifact_worker = str(job.get("_artifact_worker") or target).lower() if is_artifact_sweep else ""
-        dispatch_provider = artifact_worker or self._selected_provider(target)
+        # Normal Colab pool dispatch resolves to a concrete worker in
+        # _device_loop and stores it on the job.  Preserve that physical
+        # provider through claim/error accounting; using only the logical
+        # selector ("colab") loses which tunnel actually failed.
+        dispatch_provider = artifact_worker or str(job.get("_dispatch_provider") or "") or self._selected_provider(target)
         run_mode = run_mode_override or ("auto" if self._auto_run(target) else "manual")
         started = time.monotonic()
         claimed_here = bool(preclaimed)
@@ -4693,6 +4769,7 @@ class Stage2BWorker:
             except OSError:
                 logger.exception("Could not remove completed inference checkpoint")
             self.worker_state[state_key]["last_completed_job_id"] = int(job["id"])
+            self.worker_state[state_key]["last_completed_epoch"] = time.time()
             self._events.notify(f"stage2b_{state_key}_completed")
             # The verification result is already durably completed above.
             # Housekeeping is isolated so its failures cannot fall through to
@@ -5243,7 +5320,7 @@ class Stage2BWorker:
                 endpoint, timeout_seconds=int(config.colab_timeout_seconds), api_key=api_key
             )
             timeout = int(config.colab_timeout_seconds) + 30
-            identity = f"colab-koboldcpp-vision:{provider}:{role_target}:{model_override}:{endpoint}:{job.get('generation', '')}:source-reconstruct-v2"
+            identity = f"colab-koboldcpp-vision:{provider}:{role_target}:{model_override}:{endpoint}:{job.get('generation', '')}:source-reconstruct-v3"
         else:
             raw_client = OpenAICompatibleVerifier(endpoint, timeout_seconds=config.stage2b_request_timeout_seconds)
             # Local llama.cpp vision can spend a long time in prompt/image eval;
@@ -5814,9 +5891,13 @@ class Stage2BWorker:
             _read_picture, zip_path, doc, picture_index, source.get("artifact")
         )
         client = self._vision_client_for_role("oneplus", job)
+        provider = str(getattr(client, "provider", self._selected_provider("oneplus")) or self._selected_provider("oneplus")).lower()
         endpoint = str(getattr(client, "endpoint", self._endpoint_for_provider(self._selected_provider("oneplus"))))
         model = await self._model_for(f"vision:{getattr(client, 'provider', 'oneplus')}", endpoint, client)
-        full_prompt = _vision_prompt(job, "full image")
+        full_prompt = _vision_prompt(job, "full image", provider=provider)
+        vision_max_tokens = int(config.stage2b_oneplus_max_tokens)
+        if provider == "colab" or provider.startswith("colab:"):
+            vision_max_tokens = max(768, vision_max_tokens)
         job["_active_stage"] = "full_image"
         full_progress = self._prepare_oneplus_stream_region("full image", target=role_target)
         full, full_raw, full_attempts = await _inspect_vision_region(
@@ -5825,7 +5906,7 @@ class Stage2BWorker:
             full_prompt,
             mime,
             model,
-            config.stage2b_oneplus_max_tokens,
+            vision_max_tokens,
             first_token_timeout_seconds=config.stage2b_oneplus_first_token_timeout_seconds,
             stream_idle_timeout_seconds=config.stage2b_oneplus_stream_idle_timeout_seconds,
             on_progress=full_progress,
@@ -5843,7 +5924,7 @@ class Stage2BWorker:
                 config.stage2b_vision_max_crops,
             )
             for label, crop_bytes, crop_mime in crops:
-                prompt = _vision_evidence_prompt(job, label)
+                prompt = _vision_evidence_prompt(job, label, provider=provider)
                 job["_active_stage"] = f"crop_{label}"
                 crop_progress = self._prepare_oneplus_stream_region(f"crop {label}", target=role_target)
                 parsed, raw, attempts = await _inspect_vision_region(
@@ -5852,7 +5933,7 @@ class Stage2BWorker:
                     prompt,
                     crop_mime,
                     model,
-                    config.stage2b_oneplus_max_tokens,
+                    vision_max_tokens,
                     first_token_timeout_seconds=config.stage2b_oneplus_first_token_timeout_seconds,
                     stream_idle_timeout_seconds=config.stage2b_oneplus_stream_idle_timeout_seconds,
                     on_progress=crop_progress,

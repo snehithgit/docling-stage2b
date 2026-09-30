@@ -251,6 +251,86 @@ class Stage2BStore:
             )
             return int(cursor.rowcount)
 
+    async def reclassify_completed_colab_transport_failures(self) -> dict[str, int]:
+        """Turn legacy false-success Colab text rows into retryable failures.
+
+        Older builds let ``HTTPStatusError`` (notably Cloudflare HTTP 530) fall
+        through the source-transcription helper's generic exception handler.
+        That produced an UNREADABLE/UNCERTAIN result and then marked the route
+        completed even though no model response existed.  Preserve the audit
+        JSON/artifact, but make those rows visibly failed so the normal
+        ``Retry all failed`` action can run them again.  Any still-pending
+        artifact sweep for an affected book is re-gated behind normal Text/
+        Vision completion.
+        """
+        return await self._run(self._reclassify_completed_colab_transport_failures_sync)
+
+    def _reclassify_completed_colab_transport_failures_sync(self) -> dict[str, int]:
+        migration_name = "colab_false_completed_transport_v1"
+        infrastructure_errors = {
+            "HTTPStatusError", "ConnectError", "ConnectTimeout", "ReadTimeout",
+            "WriteTimeout", "PoolTimeout", "RemoteProtocolError", "NetworkError",
+            "TransportError", "TimeoutError", "ConnectionError", "UnicodeEncodeError",
+        }
+        changed = 0
+        affected_books: set[int] = set()
+        now = utcnow()
+        with self._connection() as conn:
+            if conn.execute("SELECT 1 FROM stage2b_migrations WHERE name=?", (migration_name,)).fetchone():
+                return {"failed_text": 0, "artifact_regated": 0, "books": 0}
+            rows = conn.execute(
+                """SELECT id, postprocess_job_id, result_json, execution_provider
+                   FROM verification_jobs
+                   WHERE is_current=1 AND status='completed' AND target='pi5'
+                     AND COALESCE(code,'')<>'FULL_TECHNICAL_VISUAL'
+                     AND result_json IS NOT NULL"""
+            ).fetchall()
+            for row in rows:
+                try:
+                    result = json.loads(row["result_json"] or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                source = result.get("source_reconstruction") if isinstance(result, dict) else None
+                source = source if isinstance(source, dict) else {}
+                provider = str(
+                    (result.get("text_provider") if isinstance(result, dict) else "")
+                    or source.get("provider")
+                    or row["execution_provider"]
+                    or ""
+                ).lower()
+                error_type = str(source.get("error_type") or "")
+                if not (provider == "colab" or provider.startswith("colab:")):
+                    continue
+                if error_type not in infrastructure_errors:
+                    continue
+                error_message = str(source.get("error_message") or "Legacy Colab transport failure was incorrectly marked completed")
+                conn.execute(
+                    """UPDATE verification_jobs
+                       SET status='failed', completed_at=?, authorized=0, next_attempt_at=NULL,
+                           verdict=NULL, error_type=?, error_message=?,
+                           stage2c_entry_state=NULL, stage2c_entry_id=NULL, stage2c_entry_error=NULL
+                       WHERE id=?""",
+                    (now, error_type or "ColabTransportFailure", error_message[:2000], int(row["id"])),
+                )
+                changed += 1
+                affected_books.add(int(row["postprocess_job_id"]))
+
+            artifact_regated = 0
+            for book_id in affected_books:
+                cursor = conn.execute(
+                    """UPDATE verification_jobs
+                       SET authorized=0, run_mode='awaiting_normal', next_attempt_at=NULL
+                       WHERE postprocess_job_id=? AND is_current=1
+                         AND code='FULL_TECHNICAL_VISUAL' AND status='pending'""",
+                    (book_id,),
+                )
+                artifact_regated += int(cursor.rowcount)
+            conn.execute(
+                "INSERT INTO stage2b_migrations(name, applied_at) VALUES (?, ?)",
+                (migration_name, now),
+            )
+        return {"failed_text": changed, "artifact_regated": artifact_regated, "books": len(affected_books)}
+
     async def sync_routes(
         self,
         postprocess_job_id: int,
@@ -1076,7 +1156,8 @@ class Stage2BStore:
                     """UPDATE verification_jobs
                        SET status='pending', authorized=1, run_mode='manual',
                            started_at=NULL, completed_at=NULL, retry_count=0, next_attempt_at=NULL,
-                           error_type=NULL, error_message=NULL
+                           error_type=NULL, error_message=NULL, claimed_by=NULL, execution_provider=NULL,
+                           stage2c_entry_state=NULL, stage2c_entry_id=NULL, stage2c_entry_error=NULL
                        WHERE target=? AND status='failed' AND is_current=1""",
                     (target,),
                 )

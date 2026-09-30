@@ -35,6 +35,8 @@ from app.stage2b import (
     _validate_pi5,
     _validate_vision,
     _vision_crops,
+    _vision_prompt,
+    _vision_evidence_prompt,
 )
 from app.stage2b_store import Stage2BStore
 
@@ -447,6 +449,52 @@ class OnePlusCrosscheckRecoveryTests(unittest.IsolatedAsyncioTestCase):
             await _oneplus_text_crosscheck(
                 FakeClient(), b"img", "image/png", "garbled", "proposal", "model"
             )
+
+    async def test_colab_http_status_failure_is_not_converted_to_unreadable_completion(self):
+        class FakeClient:
+            provider = "colab:colab-1"
+            async def inspect_image_stream(self, *args, **kwargs):
+                request = httpx.Request("POST", "https://worker.trycloudflare.com/v1/chat/completions")
+                response = httpx.Response(530, request=request)
+                raise httpx.HTTPStatusError("Server error '530'", request=request, response=response)
+
+        with self.assertRaises(httpx.HTTPStatusError):
+            await _oneplus_text_crosscheck(
+                FakeClient(), b"img", "image/png", "garbled", "", "model"
+            )
+
+    async def test_colab_text_uses_richer_source_faithful_prompt_and_larger_budget(self):
+        captured = {}
+        class FakeClient:
+            provider = "colab:colab-1"
+            async def inspect_image_stream(self, *args, **kwargs):
+                captured["prompt"] = args[1]
+                captured.update(kwargs)
+                return {"choices": [{"message": {"content": "[UNREADABLE]"}, "finish_reason": "stop"}]}
+
+        original = "X" * 2500
+        await _oneplus_text_crosscheck(
+            FakeClient(), b"img", "image/png", original, "", "model",
+            before_anchors=["BEFORE " + "A" * 500], after_anchors=["AFTER " + "B" * 500],
+        )
+        self.assertIn("high-accuracy SOURCE TRANSCRIPTION", captured["prompt"])
+        self.assertIn("Resolve look-alike glyphs", captured["prompt"])
+        self.assertIn("boundary hint only", captured["prompt"])
+        self.assertGreaterEqual(captured["max_tokens"], 1536)
+
+
+class ColabPromptProfileTests(unittest.TestCase):
+    def test_colab_vision_prompt_is_richer_without_changing_schema(self):
+        job = {"reason": "visual ambiguity"}
+        normal = _vision_prompt(job, "full image", provider="oneplus")
+        colab = _vision_prompt(job, "full image", provider="colab:colab-2")
+        self.assertIn("Return JSON only", normal)
+        self.assertIn("connection/flow lines", colab)
+        self.assertIn("visible_text", colab)
+        self.assertIn("diagram_category", colab)
+        self.assertIn("TECHNICAL_USEFUL", colab)
+        evidence = _vision_evidence_prompt(job, "top-left", provider="colab:colab-2")
+        self.assertIn("up to 12 exact technical strings", evidence)
 
 class VisionParseRecoveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_double_malformed_vision_response_becomes_uncertain(self):

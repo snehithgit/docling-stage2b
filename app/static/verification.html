@@ -4,8 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Verification · Docling Auto-Convert</title>
-<link rel="stylesheet" href="/assets/styles.css?v=2026.09.30.40.11AH" />
-<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.30.40.11AH" />
+<link rel="stylesheet" href="/assets/styles.css?v=2026.09.30.40.11AH2" />
+<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.30.40.11AH2" />
 </head>
 <body class="ui29">
 <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -87,8 +87,12 @@
         </article>
       </div>
       <div class="verification-failure-strip" id="retry-failed-strip" hidden>
-        <div><strong><span id="retry-failed-count">0</span> failed verifier routes</strong><small>Retry failed Text and Vision routes only. Successful and pending work is untouched.</small></div>
-        <button class="secondary-button" id="retry-all-failed" type="button">Retry all failed</button>
+        <div><strong><span id="retry-failed-count">0</span> failed verifier routes</strong><small><span id="retry-failed-breakdown">Text 0 · Vision 0</span>. Successful and pending work is untouched.</small></div>
+        <div class="document-actions compact-actions">
+          <button class="secondary-button" id="retry-failed-text" type="button">Retry failed Text</button>
+          <button class="secondary-button" id="retry-failed-vision" type="button">Retry failed Vision</button>
+          <button class="secondary-button" id="retry-all-failed" type="button">Retry all failed</button>
+        </div>
       </div>
     </section>
 
@@ -170,8 +174,8 @@
 
   </main>
 </div>
-<script src="/assets/nav.js?v=2026.09.30.40.11AH"></script>
-<script src="/assets/verification.js?v=2026.09.30.40.11AH"></script>
+<script src="/assets/nav.js?v=2026.09.30.40.11AH2"></script>
+<script src="/assets/verification.js?v=2026.09.30.40.11AH2"></script>
 </body>
 </html>
 
