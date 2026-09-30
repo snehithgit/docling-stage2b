@@ -2,6 +2,7 @@ const PAGE_SIZE = 1;
 let auditJobs = [];
 let filteredJobs = [];
 let auditPage = 1;
+let configuredVisionReviewWorkers = [];
 const auditParams = new URLSearchParams(location.search);
 const requestedJobId = auditParams.get("job");
 const requestedBookJob = auditParams.get("book");
@@ -76,6 +77,62 @@ function aiReviewAssistantBlock(downstream) {
   const tagsText = Array.isArray(a.visible_text) ? a.visible_text.slice(0, 12) : [];
   const tagsObjects = Array.isArray(a.visible_objects) ? a.visible_objects.slice(0, 12) : [];
   return `<section class="ai-review-assistant-inline"><div class="vision-audit-section-label">AI review assistant · advisory only</div><div class="vision-audit-kv"><span>Recommendation</span><strong>${esc(recommendation)}</strong><span>Confidence</span><strong>${esc(confidenceText)}</strong><span>Worker</span><strong>${esc(a.worker_name || a.worker_id || "Colab worker")}</strong></div>${a.reason ? `<p class="vision-audit-summary-text"><strong>Reason:</strong> ${esc(a.reason)}</p>` : ""}${a.corrected_summary ? `<p class="vision-audit-summary-text"><strong>Suggested summary:</strong> ${esc(a.corrected_summary)}</p>` : ""}${tagsText.length ? `<div class="vision-audit-section-label">Suggested visible text</div>${tagList(tagsText, "")}` : ""}${tagsObjects.length ? `<div class="vision-audit-section-label">Suggested objects</div>${tagList(tagsObjects, "")}` : ""}<p class="format-note"><strong>Human authority preserved.</strong> This recommendation cannot approve, exclude, or overwrite the visual by itself.</p></section>`;
+}
+
+function visionAiReview(job) {
+  const review = job?.downstream?.ai_review_assistant;
+  return review && typeof review === "object" ? review : null;
+}
+
+function visionReviewerDisagreement(job) {
+  const review = visionAiReview(job);
+  if (!review) return false;
+  const recommendation = String(review.recommendation || "").toUpperCase();
+  const verdict = String(job.classification?.verdict || job.verdict || "").toUpperCase();
+  // UNCERTAIN -> a concrete second opinion is a resolution, not a disagreement.
+  if (verdict === "TECHNICAL_USEFUL") return ["DECORATIVE", "NOT_USEFUL"].includes(recommendation);
+  if (verdict === "DECORATIVE_OR_LOW_VALUE") return ["TECHNICAL", "USEFUL"].includes(recommendation);
+  return false;
+}
+
+function visionAiNeedsAttention(job) {
+  const review = visionAiReview(job);
+  if (!review || job.downstream?.human_visual_decision) return false;
+  return String(review.recommendation || "").toUpperCase() === "NEEDS_HUMAN" || visionReviewerDisagreement(job);
+}
+
+function friendlyAiRecommendation(value) {
+  const raw = String(value || "").toUpperCase();
+  return ({
+    TECHNICAL: "Technical",
+    DECORATIVE: "Decorative",
+    USEFUL: "Useful",
+    NOT_USEFUL: "Not useful",
+    NEEDS_HUMAN: "Needs human",
+  })[raw] || raw.replaceAll("_", " ").toLowerCase().replace(/^./, ch => ch.toUpperCase());
+}
+
+function fillAiReviewFilters() {
+  const recommendationSelect = $("va-ai-recommendation");
+  const workerSelect = $("va-review-worker");
+  const currentRecommendation = recommendationSelect.value;
+  const currentWorker = workerSelect.value;
+  const recommendations = new Set();
+  const workers = new Map(configuredVisionReviewWorkers.map(item => [String(item.id), String(item.name || item.id)]));
+
+  for (const job of auditJobs) {
+    const review = visionAiReview(job);
+    if (!review) continue;
+    const recommendation = String(review.recommendation || "").toUpperCase();
+    if (recommendation) recommendations.add(recommendation);
+    const workerId = String(review.worker_id || "").trim();
+    if (workerId) workers.set(workerId, String(review.worker_name || workers.get(workerId) || workerId));
+  }
+
+  recommendationSelect.innerHTML = `<option value="">All recommendations</option>${[...recommendations].sort().map(value => `<option value="${esc(value)}">${esc(friendlyAiRecommendation(value))}</option>`).join("")}`;
+  workerSelect.innerHTML = `<option value="">All review workers</option>${[...workers.entries()].sort((a,b) => a[1].localeCompare(b[1])).map(([id,name]) => `<option value="${esc(id)}">${esc(name)} · ${esc(id)}</option>`).join("")}`;
+  if ([...recommendationSelect.options].some(option => option.value === currentRecommendation)) recommendationSelect.value = currentRecommendation;
+  if ([...workerSelect.options].some(option => option.value === currentWorker)) workerSelect.value = currentWorker;
 }
 
 function renderJob(job) {
@@ -165,19 +222,31 @@ function doclingReviewUrl(job) {
 function applyFilters(resetPage=true) {
   const book = $("va-book").value;
   const verdict = $("va-verdict").value;
+  const aiReviewState = $("va-ai-review").value;
+  const aiRecommendation = $("va-ai-recommendation").value;
+  const reviewWorker = $("va-review-worker").value;
+  const attention = $("va-attention").value;
   const query = $("va-search").value.trim().toLowerCase();
   filteredJobs = auditJobs.filter(job => {
+    const ai = visionAiReview(job);
     if (requestedBookJob && String(job.postprocess_job_id) !== String(requestedBookJob)) return false;
     if (requestedEntry && String(job.downstream?.entry_id || "") !== String(requestedEntry)) return false;
-    if (requestedJobId && !book && !verdict && !query && !requestedEntry && String(job.id) !== String(requestedJobId)) return false;
+    if (requestedJobId && !book && !verdict && !aiReviewState && !aiRecommendation && !reviewWorker && !attention && !query && !requestedEntry && String(job.id) !== String(requestedJobId)) return false;
     if (book && job.book !== book) return false;
     if (verdict === "HUMAN_REVIEW" && !needsHumanReview(job)) return false;
     if (verdict === "HUMAN_REVIEWED" && !(job.downstream?.current_authoritative && job.downstream?.human_visual_decision)) return false;
     if (verdict === "EVIDENCE_RECOVERY" && !job.downstream?.human_evidence_recovery_required) return false;
     if (verdict === "FAILED" && job.status !== "failed") return false;
     if (verdict && !["FAILED", "HUMAN_REVIEW", "HUMAN_REVIEWED", "EVIDENCE_RECOVERY"].includes(verdict) && (job.classification?.verdict || job.verdict) !== verdict) return false;
+    if (aiReviewState === "reviewed" && !ai) return false;
+    if (aiReviewState === "unreviewed" && ai) return false;
+    if (aiRecommendation && String(ai?.recommendation || "").toUpperCase() !== aiRecommendation) return false;
+    if (reviewWorker && String(ai?.worker_id || "") !== reviewWorker) return false;
+    if (attention === "needs_human" && String(ai?.recommendation || "").toUpperCase() !== "NEEDS_HUMAN") return false;
+    if (attention === "disagreement" && !visionReviewerDisagreement(job)) return false;
+    if (attention === "needs_attention" && !visionAiNeedsAttention(job)) return false;
     if (query) {
-      const blob = [job.book, job.route_id, job.code, job.reason, job.source?.page, job.classification?.diagram_category, job.classification?.summary, ...(job.classification?.visible_text || []), ...(job.classification?.visible_objects || [])].join(" ").toLowerCase();
+      const blob = [job.book, job.route_id, job.code, job.reason, job.source?.page, job.classification?.diagram_category, job.classification?.summary, ...(job.classification?.visible_text || []), ...(job.classification?.visible_objects || []), ai?.recommendation, ai?.reason, ai?.worker_name, ai?.worker_id].join(" ").toLowerCase();
       if (!blob.includes(query)) return false;
     }
     return true;
@@ -226,12 +295,19 @@ async function loadAudit() {
   button.disabled = true;
   feedback("Loading vision verifier audit…");
   try {
+    const workerSettingsPromise = fetch("/api/review-workers/settings", {cache:"no-store"})
+      .then(response => response.ok ? response.json() : null)
+      .catch(() => null);
     const response = await fetch("/api/stage2b/vision-audit?limit=5000", {cache:"no-store"});
     if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
     const data = await response.json();
+    const workerSettings = await workerSettingsPromise;
+    const assigned = new Set(workerSettings?.settings?.vision_worker_ids || []);
+    configuredVisionReviewWorkers = (workerSettings?.workers || []).filter(worker => assigned.has(worker.id));
     auditJobs = data.jobs || [];
     renderSummary(data);
     fillBookFilter();
+    fillAiReviewFilters();
     if (requestedBookJob) {
       const scoped = auditJobs.find(job => String(job.postprocess_job_id) === String(requestedBookJob));
       if (scoped?.book) $("va-book").value = scoped.book;
@@ -310,6 +386,10 @@ document.addEventListener("click", async event => {
 $("refresh-audit").addEventListener("click", loadAudit);
 $("va-book").addEventListener("change", () => applyFilters());
 $("va-verdict").addEventListener("change", () => applyFilters());
+$("va-ai-review").addEventListener("change", () => applyFilters());
+$("va-ai-recommendation").addEventListener("change", () => applyFilters());
+$("va-review-worker").addEventListener("change", () => applyFilters());
+$("va-attention").addEventListener("change", () => applyFilters());
 $("va-search").addEventListener("input", () => applyFilters());
 $("va-clear").addEventListener("click", () => { history.replaceState({}, "", "/vision-audit"); location.reload(); });
 $("va-prev").addEventListener("click", () => { if (decisionInFlight) return; auditPage -= 1; renderPage(); window.scrollTo({top:0, behavior:"smooth"}); });

@@ -5859,12 +5859,77 @@ def _human_review_state_matches(entry: dict, state: str) -> bool:
     return True
 
 
+def _human_review_ai_review(entry: dict) -> dict | None:
+    review = entry.get("ai_review_assistant")
+    return review if isinstance(review, dict) and review else None
+
+
+def _human_review_disagreement(entry: dict) -> bool:
+    """True only when the AI reviewer contradicts a concrete first-pass verdict.
+
+    UNCERTAIN -> KEEP_ORIGINAL/APPLY_PROPOSED is a second-pass resolution, not
+    a disagreement. Human decisions are deliberately excluded from this test.
+    """
+    review = _human_review_ai_review(entry)
+    if not review:
+        return False
+    recommendation = str(review.get("recommendation") or "").upper()
+    verdict = str(entry.get("verification_verdict") or "").upper()
+    if recommendation == "KEEP_ORIGINAL":
+        return verdict == "LIKELY_CORRUPT"
+    if recommendation == "APPLY_PROPOSED":
+        return verdict == "LIKELY_OK"
+    return False
+
+
+def _human_review_ai_matches(
+    entry: dict,
+    *,
+    ai_review: str = "all",
+    recommendation: str | None = None,
+    review_worker: str | None = None,
+    attention: str = "all",
+) -> bool:
+    review = _human_review_ai_review(entry)
+    ai_state = str(ai_review or "all").lower()
+    if ai_state == "reviewed" and not review:
+        return False
+    if ai_state == "unreviewed" and review:
+        return False
+
+    rec = str((review or {}).get("recommendation") or "").upper()
+    if recommendation and rec != str(recommendation).upper():
+        return False
+
+    worker_id = str((review or {}).get("worker_id") or "")
+    if review_worker and worker_id != str(review_worker):
+        return False
+
+    attention_state = str(attention or "all").lower()
+    if attention_state in {"", "all"}:
+        return True
+    if attention_state == "needs_human":
+        return rec == "NEEDS_HUMAN"
+    if attention_state == "disagreement":
+        return _human_review_disagreement(entry)
+    if attention_state == "needs_attention":
+        return (
+            not bool(entry.get("human_verified"))
+            and (rec == "NEEDS_HUMAN" or _human_review_disagreement(entry))
+        )
+    return True
+
+
 @app.get("/api/postprocess/human-review")
 async def human_review_queue(
     job_id: int | None = None,
     source_type: str | None = None,
     reason: str | None = None,
     state: str = "all",
+    ai_review: str = "all",
+    recommendation: str | None = None,
+    review_worker: str | None = None,
+    attention: str = "all",
 ) -> dict:
     """Global one-by-one Web review queue over the authoritative correction ledgers."""
     jobs = await runtime.postprocess_store.list_jobs(limit=2000)
@@ -5881,6 +5946,15 @@ async def human_review_queue(
     seen_books: set[int] = set()
     reasons: set[str] = set()
     types: set[str] = set()
+    recommendations: set[str] = set()
+    review_workers: dict[str, str] = {}
+    ai_review_counts = {
+        "reviewed": 0,
+        "unreviewed": 0,
+        "needs_human": 0,
+        "disagreement": 0,
+        "needs_attention": 0,
+    }
     for entry in all_entries:
         jid = int(entry["postprocess_job_id"])
         if jid not in seen_books:
@@ -5891,6 +5965,41 @@ async def human_review_queue(
             reasons.add(reason_value)
         if entry.get("source_type"):
             types.add(str(entry["source_type"]))
+
+        ai = _human_review_ai_review(entry)
+        if ai:
+            ai_review_counts["reviewed"] += 1
+            rec = str(ai.get("recommendation") or "").upper()
+            if rec:
+                recommendations.add(rec)
+            worker_id = str(ai.get("worker_id") or "").strip()
+            if worker_id:
+                review_workers.setdefault(worker_id, str(ai.get("worker_name") or worker_id))
+            if rec == "NEEDS_HUMAN":
+                ai_review_counts["needs_human"] += 1
+            if _human_review_disagreement(entry):
+                ai_review_counts["disagreement"] += 1
+            if (
+                not bool(entry.get("human_verified"))
+                and (rec == "NEEDS_HUMAN" or _human_review_disagreement(entry))
+            ):
+                ai_review_counts["needs_attention"] += 1
+        else:
+            ai_review_counts["unreviewed"] += 1
+
+    # Keep currently assigned Text review workers visible even before they have
+    # produced a ledger result. Historical worker IDs remain visible from the
+    # ledger above, so removing/replacing a worker never hides its old reviews.
+    registry = runtime.worker_registry.snapshot(runtime.config)
+    configured_names = {
+        str(item.get("id")): str(item.get("name") or item.get("id"))
+        for item in (registry.get("colab_workers") or [])
+        if item.get("id")
+    }
+    review_settings = registry.get("review") or {}
+    for worker_id in review_settings.get("text_worker_ids") or []:
+        wid = str(worker_id)
+        review_workers.setdefault(wid, configured_names.get(wid, wid))
 
     filtered = []
     for entry in all_entries:
@@ -5903,6 +6012,14 @@ async def human_review_queue(
             continue
         if not _human_review_state_matches(entry, state):
             continue
+        if not _human_review_ai_matches(
+            entry,
+            ai_review=ai_review,
+            recommendation=recommendation,
+            review_worker=review_worker,
+            attention=attention,
+        ):
+            continue
         filtered.append(entry)
 
     filtered.sort(key=lambda item: (bool(item.get("human_verified")), str(item.get("book") or "").lower(), int(item.get("page") or 0), str(item.get("route_id") or "")))
@@ -5912,7 +6029,17 @@ async def human_review_queue(
         "total": len(all_entries),
         "total_filtered": len(filtered),
         "entries": filtered,
-        "facets": {"books": books, "source_types": sorted(types), "reasons": sorted(reasons)},
+        "facets": {
+            "books": books,
+            "source_types": sorted(types),
+            "reasons": sorted(reasons),
+            "recommendations": sorted(recommendations),
+            "review_workers": [
+                {"id": worker_id, "name": review_workers[worker_id]}
+                for worker_id in sorted(review_workers, key=lambda value: review_workers[value].lower())
+            ],
+            "ai_review_counts": ai_review_counts,
+        },
     }
 
 

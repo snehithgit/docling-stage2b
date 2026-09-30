@@ -4,8 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Vision Verifier Audit · Docling Auto-Convert</title>
-<link rel="stylesheet" href="/assets/styles.css?v=2026.09.30.40.11AH2" />
-<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.30.40.11AH2" />
+<link rel="stylesheet" href="/assets/styles.css?v=2026.09.30.40.11AH3" />
+<link rel="stylesheet" href="/assets/workflow.css?v=2026.09.30.40.11AH3" />
 </head>
 <body class="ui29">
 <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -68,6 +68,10 @@
       <div class="vision-audit-filters">
         <label>Book<select id="va-book"><option value="">All books</option></select></label>
         <label>Decision<select id="va-verdict"><option value="">All decisions</option><option value="HUMAN_REVIEW">Human review</option><option value="HUMAN_REVIEWED">Human reviewed</option><option value="EVIDENCE_RECOVERY">Evidence recovery</option><option value="TECHNICAL_USEFUL">Technical useful</option><option value="DECORATIVE_OR_LOW_VALUE">Decorative / low value</option><option value="UNCERTAIN">Uncertain</option><option value="FAILED">Failed</option></select></label>
+        <label>AI review<select id="va-ai-review"><option value="">All AI review states</option><option value="reviewed">AI reviewed</option><option value="unreviewed">Not AI reviewed</option></select></label>
+        <label>AI recommendation<select id="va-ai-recommendation"><option value="">All recommendations</option></select></label>
+        <label>Review worker<select id="va-review-worker"><option value="">All review workers</option></select></label>
+        <label>Attention<select id="va-attention"><option value="">All attention states</option><option value="needs_attention">Needs my attention</option><option value="needs_human">AI says needs human</option><option value="disagreement">Verifier ↔ reviewer disagreement</option></select></label>
         <label>Search<input id="va-search" type="search" placeholder="route, page, category, reason, visible text…" /></label>
       </div>
       <div class="vision-audit-filter-footer"><span id="va-count">0 results</span><div class="document-actions"><button class="mini-action" id="va-clear" type="button">Clear filters</button></div></div>
@@ -78,7 +82,7 @@
     <nav class="vision-audit-pager" aria-label="Audit pagination"><button class="secondary-button" id="va-prev" type="button">Previous</button><span id="va-page">Page 1</span><button class="secondary-button" id="va-next" type="button">Next</button></nav>
   </main>
 </div>
-<script src="/assets/nav.js?v=2026.09.30.40.11AH2"></script>
-<script src="/assets/vision-audit.js?v=2026.09.30.40.11AH2"></script>
+<script src="/assets/nav.js?v=2026.09.30.40.11AH3"></script>
+<script src="/assets/vision-audit.js?v=2026.09.30.40.11AH3"></script>
 </body>
 </html>

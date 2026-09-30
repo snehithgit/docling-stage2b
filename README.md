@@ -1,3 +1,15 @@
+## 2026.09.30.40.11AH3 — Human Review AI-review filters
+
+- Human Text Review can now filter by AI-review state, Review Assistant recommendation, physical review worker, and attention state.
+- Adds explicit **Needs my attention**, **AI says needs human**, and **Verifier ↔ reviewer disagreement** views while keeping every AI recommendation advisory-only.
+- Disagreement detection is conservative: an `UNCERTAIN` first pass resolved by the reviewer is not mislabeled as a disagreement.
+- Review-worker filters combine current Text-review assignments with historical worker IDs already persisted in `ai_review_assistant` ledger records.
+- Human Review URLs preserve the new filters across Previous/Next navigation.
+- Vision Audit/Human Review gets equivalent AI-review, recommendation, worker, and attention filters.
+- No filter can set `human_verified` or `human_visual_decision`; human authority remains unchanged.
+- Regression coverage added for AI-review facets, worker filtering, attention/disagreement semantics, and both Text/Vision filter surfaces.
+- Full details: `RELEASE_VALIDATION_2026.09.30.40.11AH3.md`.
+
 ## 2026.09.30.40.11AH2 — Colab verifier correctness + richer GPU prompts
 
 - Reclassifies legacy Colab HTTP/protocol false-success Text rows as failed so they can be retried in-app.
