@@ -1263,7 +1263,7 @@ class Runtime:
         book_catalog: list[dict] = []
         advanced = 0
         for job in jobs:
-            job_id = int(job.get("id") or 0)
+            job_id = int(job.get("postprocess_job_id") or 0)
             result_dir = Path(self.config.processed_dir) / Path(str(job.get("result_dir") or "")).name
             await asyncio.to_thread(repair_identity_metadata, result_dir, job_id)
             summary = verification_summary.get(job_id) or {}
