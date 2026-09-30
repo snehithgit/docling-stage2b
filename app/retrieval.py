@@ -380,7 +380,7 @@ def _incidental_identifier_penalty(text: str, identifiers: list[str]) -> float:
             continue
         if _CONTACT_CONTEXT_RE.search(line):
             penalty -= 15.0
-        if re.search(r"\\b(?:date|page|rev(?:ision)?)\\b", line, re.I) and re.search(r"\\d", line):
+        if re.search(r"\b(?:date|page|rev(?:ision)?)\b", line, re.I) and re.search(r"\d", line):
             penalty -= 1.5
     return penalty
 
