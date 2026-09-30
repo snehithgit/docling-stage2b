@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from .anomaly_review import anomaly_evidence_signature, detect_anomaly_types
 from .stage2c import _authoritative_visual_subjects, _vision_requires_human
 
 
@@ -29,6 +30,9 @@ def _load_ledger_sync(path: Path) -> dict[str, Any]:
 
 
 def _signature(entry: dict[str, Any], review_type: str) -> str:
+    if str(review_type).startswith("anomaly_"):
+        base_type = "text" if str(review_type).endswith("text") else "vision"
+        return "auto:" + anomaly_evidence_signature(entry, base_type)
     if review_type == "text":
         payload = {
             "entry_id": entry.get("entry_id"), "type": entry.get("entry_type"),
@@ -127,13 +131,60 @@ class ReviewAssistantStore:
                          VALUES (?,?,?,?,?,'pending',1,?)""",
                          (postprocess_job_id, result_dir, entry_id, review_type, sig, _utcnow()))
 
+    async def queue_manual_anomaly(
+        self, postprocess_job_id: int, result_dir: str, entry: dict[str, Any], review_type: str
+    ) -> dict[str, Any]:
+        return await self._run(
+            self._queue_manual_anomaly_sync, postprocess_job_id, result_dir, entry, review_type
+        )
+
+    def _queue_manual_anomaly_sync(
+        self, postprocess_job_id: int, result_dir: str, entry: dict[str, Any], review_type: str
+    ) -> dict[str, Any]:
+        if review_type not in {"anomaly_text", "anomaly_vision"}:
+            raise ValueError("Manual anomaly review type must be anomaly_text or anomaly_vision")
+        entry_id = str(entry.get("entry_id") or "")
+        if not entry_id:
+            raise ValueError("Review entry has no stable entry_id")
+        base_type = "text" if review_type == "anomaly_text" else "vision"
+        evidence_sig = anomaly_evidence_signature(entry, base_type)
+        signature = f"manual:{evidence_sig}:{time.time_ns()}"
+        with self._conn() as conn:
+            conn.execute(
+                """UPDATE review_assistant_jobs SET is_current=0
+                   WHERE postprocess_job_id=? AND entry_id=? AND review_type=? AND is_current=1""",
+                (int(postprocess_job_id), entry_id, review_type),
+            )
+            cur = conn.execute(
+                """INSERT INTO review_assistant_jobs
+                   (postprocess_job_id,result_dir,entry_id,review_type,entry_signature,status,is_current,created_at)
+                   VALUES (?,?,?,?,?,'pending',1,?)""",
+                (int(postprocess_job_id), result_dir, entry_id, review_type, signature, _utcnow()),
+            )
+            return {
+                "id": int(cur.lastrowid),
+                "postprocess_job_id": int(postprocess_job_id),
+                "result_dir": result_dir,
+                "entry_id": entry_id,
+                "review_type": review_type,
+                "entry_signature": signature,
+                "status": "pending",
+                "is_current": 1,
+            }
+
     async def retire_missing(self, valid: set[tuple[int, str, str]]) -> None:
         await self._run(self._retire_missing_sync, valid)
 
     def _retire_missing_sync(self, valid: set[tuple[int, str, str]]) -> None:
         with self._conn() as conn:
-            rows = conn.execute("SELECT id,postprocess_job_id,entry_id,review_type FROM review_assistant_jobs WHERE is_current=1").fetchall()
-            ids = [int(r["id"]) for r in rows if (int(r["postprocess_job_id"]), str(r["entry_id"]), str(r["review_type"])) not in valid]
+            rows = conn.execute(
+                "SELECT id,postprocess_job_id,entry_id,review_type,entry_signature FROM review_assistant_jobs WHERE is_current=1"
+            ).fetchall()
+            ids = [
+                int(r["id"]) for r in rows
+                if not str(r["entry_signature"] or "").startswith("manual:")
+                and (int(r["postprocess_job_id"]), str(r["entry_id"]), str(r["review_type"])) not in valid
+            ]
             if ids:
                 conn.executemany("UPDATE review_assistant_jobs SET is_current=0 WHERE id=?", [(i,) for i in ids])
 
@@ -149,7 +200,10 @@ class ReviewAssistantStore:
             row = conn.execute(f"""SELECT * FROM review_assistant_jobs
                 WHERE is_current=1 AND status='pending' AND review_type IN ({placeholders})
                   AND (next_attempt_at IS NULL OR next_attempt_at<=?)
-                ORDER BY CASE review_type WHEN 'text' THEN 0 ELSE 1 END, id ASC LIMIT 1""", args).fetchone()
+                ORDER BY CASE review_type
+                    WHEN 'text' THEN 0 WHEN 'vision' THEN 1
+                    WHEN 'anomaly_text' THEN 2 WHEN 'anomaly_vision' THEN 3 ELSE 4
+                END, id ASC LIMIT 1""", args).fetchone()
             if row is None:
                 return None
             jid = int(row["id"])
@@ -200,7 +254,13 @@ class ReviewAssistantStore:
     def _counts_sync(self) -> dict[str, int]:
         with self._conn() as conn:
             rows=conn.execute("SELECT review_type,status,COUNT(*) n FROM review_assistant_jobs WHERE is_current=1 GROUP BY review_type,status").fetchall()
-            out={"text_pending":0,"text_processing":0,"text_completed":0,"vision_pending":0,"vision_processing":0,"vision_completed":0,"failed":0}
+            out={
+                "text_pending":0,"text_processing":0,"text_completed":0,
+                "vision_pending":0,"vision_processing":0,"vision_completed":0,
+                "anomaly_text_pending":0,"anomaly_text_processing":0,"anomaly_text_completed":0,
+                "anomaly_vision_pending":0,"anomaly_vision_processing":0,"anomaly_vision_completed":0,
+                "failed":0,
+            }
             for r in rows:
                 t=str(r["review_type"]); st=str(r["status"]); n=int(r["n"])
                 key=f"{t}_{st}"
@@ -261,6 +321,29 @@ class ReviewAssistantService:
             for entry in _authoritative_visual_subjects(vision):
                 if _vision_requires_human(entry):
                     key=(jid,str(entry.get("entry_id")),"vision"); valid.add(key); await self._store.sync_candidate(jid,result_dir_name,entry,"vision")
+
+            # Anomaly review is a third, independent pass. Automatic anomaly
+            # candidates require a completed normal AI review and are never
+            # auto-created for an already human-resolved entry.
+            for entry in ledger.get("entries") or []:
+                if entry.get("status")=="superseded" or entry.get("human_verified"):
+                    continue
+                if not isinstance(entry.get("ai_review_assistant"), dict):
+                    continue
+                if entry.get("entry_type")=="text_correction":
+                    anomaly_types=detect_anomaly_types(entry,"text")
+                    if anomaly_types:
+                        key=(jid,str(entry.get("entry_id")),"anomaly_text"); valid.add(key)
+                        await self._store.sync_candidate(jid,result_dir_name,entry,"anomaly_text")
+            for entry in _authoritative_visual_subjects(vision):
+                if entry.get("human_visual_decision") or entry.get("human_verified"):
+                    continue
+                if not isinstance(entry.get("ai_review_assistant"), dict):
+                    continue
+                anomaly_types=detect_anomaly_types(entry,"vision")
+                if anomaly_types:
+                    key=(jid,str(entry.get("entry_id")),"anomaly_vision"); valid.add(key)
+                    await self._store.sync_candidate(jid,result_dir_name,entry,"anomaly_vision")
         await self._store.retire_missing(valid)
         return True
 
@@ -270,7 +353,20 @@ class ReviewAssistantService:
             if not job: return
             started=time.monotonic()
             try:
-                result=await self._worker.run_review_assistant_job(worker_id=worker_id, postprocess_job_id=int(job["postprocess_job_id"]), entry_id=str(job["entry_id"]), review_type=str(job["review_type"]))
+                review_type=str(job["review_type"])
+                if review_type.startswith("anomaly_"):
+                    result=await self._worker.run_anomaly_review_job(
+                        worker_id=worker_id,
+                        postprocess_job_id=int(job["postprocess_job_id"]),
+                        entry_id=str(job["entry_id"]),
+                        review_type=("text" if review_type=="anomaly_text" else "vision"),
+                        manual_requested=str(job.get("entry_signature") or "").startswith("manual:"),
+                    )
+                else:
+                    result=await self._worker.run_review_assistant_job(
+                        worker_id=worker_id, postprocess_job_id=int(job["postprocess_job_id"]),
+                        entry_id=str(job["entry_id"]), review_type=review_type,
+                    )
                 await self._store.mark_completed(int(job["id"]),result,time.monotonic()-started)
                 self._events.notify("review_assistant_job_completed")
             except asyncio.CancelledError:
@@ -292,10 +388,15 @@ class ReviewAssistantService:
                 if settings.get("enabled"):
                     machine_clear = await self._sync_candidates(settings)
                     text=set(settings.get("text_worker_ids") or []); vision=set(settings.get("vision_worker_ids") or [])
+                    anomaly=set(settings.get("anomaly_worker_ids") or [])
                     if not machine_clear:
                         await asyncio.sleep(max(2,int(getattr(config,"stage2b_poll_interval_seconds",3))))
                         continue
-                    for wid in sorted(text|vision):
+                    counts=await self._store.counts()
+                    normal_review_remaining=sum(int(counts.get(key) or 0) for key in (
+                        "text_pending","text_processing","vision_pending","vision_processing"
+                    ))
+                    for wid in sorted(text|vision|anomaly):
                         worker=worker_map.get(wid)
                         if not worker or not worker.get("enabled") or worker.get("paused"): continue
                         provider=f"colab:{wid}"
@@ -305,6 +406,12 @@ class ReviewAssistantService:
                         allowed=set();
                         if wid in text: allowed.add("text")
                         if wid in vision: allowed.add("vision")
+                        # Keep anomaly auditing as a true third pass. It starts
+                        # only after normal Text/Vision review queues are clear.
+                        if wid in anomaly and normal_review_remaining == 0:
+                            allowed.update({"anomaly_text","anomaly_vision"})
+                        if not allowed:
+                            continue
                         self._active[wid]=asyncio.create_task(self._run_one(wid,allowed), name=f"review-assistant-{wid}")
                 await asyncio.sleep(max(2,int(getattr(config,"stage2b_poll_interval_seconds",3))))
             except asyncio.CancelledError: raise
