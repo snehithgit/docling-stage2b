@@ -424,6 +424,7 @@ class ReviewWorkerSettingsUpdate(BaseModel):
     enabled: bool = False
     text_worker_ids: list[str] = Field(default_factory=list, max_length=32)
     vision_worker_ids: list[str] = Field(default_factory=list, max_length=32)
+    anomaly_worker_ids: list[str] = Field(default_factory=list, max_length=32)
 
 
 class EquipmentManualAssignment(BaseModel):
@@ -858,6 +859,8 @@ def _artifact_inventory_for_book(job: dict, verification_rows: list[dict], proce
                 "current_authoritative": True,
                 "human_evidence_recovery_required": bool(downstream.get("human_evidence_recovery_required")) if downstream else False,
                 "ai_review_assistant": downstream.get("ai_review_assistant") if downstream else None,
+                "anomaly_review": downstream.get("anomaly_review") if downstream else None,
+                "anomaly_review_history": downstream.get("anomaly_review_history") if downstream else None,
                 "rag_eligible": visual_rag.get("rag_eligible") if visual_rag else False,
                 "rag_eligibility_reason": visual_rag.get("rag_eligibility_reason") if visual_rag else None,
                 "visual_evidence_id": visual_rag.get("visual_evidence_id") if visual_rag else None,
@@ -3604,6 +3607,9 @@ async def stage2b_vision_audit(postprocess_job_id: int | None = None, limit: int
                     "human_evidence_recovered_at_epoch": entry.get("human_evidence_recovered_at_epoch"),
                     "human_evidence_recovery_audit_file": entry.get("human_evidence_recovery_audit_file"),
                     "human_evidence_recovery_waived": bool(entry.get("human_evidence_recovery_waived")),
+                    "ai_review_assistant": entry.get("ai_review_assistant"),
+                    "anomaly_review": entry.get("anomaly_review"),
+                    "anomaly_review_history": entry.get("anomaly_review_history") or [],
                     "has_visual_evidence": bool(
                         (entry.get("visible_text") or [])
                         or (entry.get("visible_objects") or [])
@@ -4342,7 +4348,8 @@ async def review_worker_settings() -> dict:
 async def update_review_worker_settings(update: ReviewWorkerSettingsUpdate) -> dict:
     settings = await asyncio.to_thread(
         runtime.worker_registry.update_review,
-        enabled=update.enabled, text_worker_ids=update.text_worker_ids, vision_worker_ids=update.vision_worker_ids,
+        enabled=update.enabled, text_worker_ids=update.text_worker_ids,
+        vision_worker_ids=update.vision_worker_ids, anomaly_worker_ids=update.anomaly_worker_ids,
     )
     runtime.events.notify("review_worker_settings_updated")
     return settings
@@ -4351,6 +4358,58 @@ async def update_review_worker_settings(update: ReviewWorkerSettingsUpdate) -> d
 @app.get("/api/review-workers/status")
 async def review_worker_status() -> dict:
     return await runtime.review_assistant.status()
+
+
+async def _queue_manual_anomaly_review(job_id: int, entry_id: str, review_type: str) -> dict:
+    job = await runtime.postprocess_store.get_job(int(job_id))
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Post-process job not found.")
+    result_dir_name = Path(str(job["result_dir"])).name
+    result_dir = Path(runtime.config.processed_dir) / result_dir_name
+    ledger = await asyncio.to_thread(_load_json_file, result_dir / "correction_ledger.json")
+    entry = next(
+        (item for item in (ledger.get("entries") or [])
+         if str(item.get("entry_id") or "") == str(entry_id) and item.get("status") != "superseded"),
+        None,
+    )
+    if not isinstance(entry, dict):
+        raise HTTPException(status_code=404, detail="Current review ledger entry was not found.")
+    expected = "text_correction" if review_type == "text" else "vision_enrichment"
+    if str(entry.get("entry_type") or "") != expected:
+        raise HTTPException(status_code=409, detail="Review entry type does not match this anomaly-review action.")
+
+    registry = await asyncio.to_thread(runtime.worker_registry.snapshot, runtime.config)
+    settings = registry.get("review") or {}
+    anomaly_workers = list(settings.get("anomaly_worker_ids") or [])
+    if not settings.get("enabled") or not anomaly_workers:
+        raise HTTPException(
+            status_code=409,
+            detail="Assign at least one enabled Colab worker to Anomaly review on the Review workers page first.",
+        )
+    queued = await runtime.review_assistant_store.queue_manual_anomaly(
+        int(job_id), result_dir_name, entry,
+        "anomaly_text" if review_type == "text" else "anomaly_vision",
+    )
+    runtime.events.notify(
+        "anomaly_review_manual_queued",
+        postprocess_job_id=int(job_id), entry_id=str(entry_id), review_type=review_type,
+    )
+    return {
+        "queued": True,
+        "job": queued,
+        "human_authority_preserved": True,
+        "message": "Colab anomaly re-review queued. Existing human decisions remain authoritative.",
+    }
+
+
+@app.post("/api/postprocess/jobs/{job_id}/corrections/{entry_id}/anomaly-review")
+async def queue_text_anomaly_review(job_id: int, entry_id: str) -> dict:
+    return await _queue_manual_anomaly_review(job_id, entry_id, "text")
+
+
+@app.post("/api/postprocess/jobs/{job_id}/vision-audit/{entry_id}/anomaly-review")
+async def queue_vision_anomaly_review(job_id: int, entry_id: str) -> dict:
+    return await _queue_manual_anomaly_review(job_id, entry_id, "vision")
 
 
 @app.get("/api/stage2b/colab")
@@ -5835,6 +5894,8 @@ def _human_review_entries(result_dir: Path) -> list[dict]:
             "oneplus_crosscheck": entry.get("oneplus_crosscheck"),
             "manual_crosschecks": entry.get("manual_crosschecks") or [],
             "ai_review_assistant": entry.get("ai_review_assistant"),
+            "anomaly_review": entry.get("anomaly_review"),
+            "anomaly_review_history": entry.get("anomaly_review_history") or [],
         })
     entries.sort(key=lambda item: (bool(item.get("human_verified")), int(item.get("page") or 0), str(item.get("route_id") or "")))
     return entries
