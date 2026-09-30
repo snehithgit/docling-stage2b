@@ -110,24 +110,80 @@ def test_global_human_review_queue_filters_authoritative_ledgers(tmp_path, monke
     result_a.mkdir(parents=True)
     result_b.mkdir(parents=True)
     (result_a / "correction_ledger.json").write_text(json.dumps({"entries": [
-        {"entry_id": "a1", "entry_type": "text_correction", "verification_verdict": "UNCERTAIN", "source_type": "text", "page": 2, "status": "pending", "original_text": "12 V", "verification": {"reason_code": "OCR_GARBLE"}},
-        {"entry_id": "a2", "entry_type": "text_correction", "verification_verdict": "LIKELY_CORRUPT", "source_type": "table_cell", "page": 4, "status": "applied", "human_verified": True, "proposed_text": "25 Nm", "verification": {"reason_code": "LIKELY_CORRUPT"}},
+        {
+            "entry_id": "a1", "entry_type": "text_correction", "verification_verdict": "UNCERTAIN",
+            "source_type": "text", "page": 2, "status": "pending", "original_text": "12 V",
+            "verification": {"reason_code": "OCR_GARBLE"},
+            "ai_review_assistant": {
+                "recommendation": "APPLY_PROPOSED", "worker_id": "colab-2", "worker_name": "Review GPU 2",
+                "human_authority_preserved": True,
+            },
+        },
+        {
+            "entry_id": "a2", "entry_type": "text_correction", "verification_verdict": "LIKELY_CORRUPT",
+            "source_type": "table_cell", "page": 4, "status": "applied", "human_verified": True,
+            "proposed_text": "25 Nm", "verification": {"reason_code": "LIKELY_CORRUPT"},
+            "ai_review_assistant": {
+                "recommendation": "KEEP_ORIGINAL", "worker_id": "colab-3", "worker_name": "Review GPU 3",
+                "human_authority_preserved": True,
+            },
+        },
+        {
+            "entry_id": "a3", "entry_type": "text_correction", "verification_verdict": "LIKELY_CORRUPT",
+            "source_type": "text", "page": 5, "status": "pending", "human_verified": False,
+            "verification": {"reason_code": "LIKELY_CORRUPT"},
+            "ai_review_assistant": {
+                "recommendation": "KEEP_ORIGINAL", "worker_id": "colab-3", "worker_name": "Review GPU 3",
+                "human_authority_preserved": True,
+            },
+        },
     ]}), encoding="utf-8")
     (result_b / "correction_ledger.json").write_text(json.dumps({"entries": [
-        {"entry_id": "b1", "entry_type": "text_correction", "verification_verdict": "UNCERTAIN", "source_type": "text", "page": 1, "status": "rejected", "human_verified": True, "verification": {"reason_code": "UNCERTAIN"}},
+        {
+            "entry_id": "b1", "entry_type": "text_correction", "verification_verdict": "UNCERTAIN",
+            "source_type": "text", "page": 1, "status": "rejected", "human_verified": True,
+            "verification": {"reason_code": "UNCERTAIN"},
+        },
     ]}), encoding="utf-8")
     monkeypatch.setattr(main.runtime.config, "processed_dir", str(processed))
     monkeypatch.setattr(main.runtime.postprocess_store, "list_jobs", AsyncMock(return_value=[
         {"id": 11, "source_filename": "Engine Manual.pdf", "result_dir": "book-a"},
         {"id": 12, "source_filename": "Crane Manual.pdf", "result_dir": "book-b"},
     ]))
+    monkeypatch.setattr(main.runtime.worker_registry, "snapshot", lambda _config: {
+        "colab_workers": [{"id": "colab-4", "name": "Assigned but idle"}],
+        "review": {"text_worker_ids": ["colab-4"]},
+    })
 
     result = asyncio.run(main.human_review_queue(source_type="table_cell", state="reviewed"))
     assert result["schema"] == "docling-human-review-queue/v1"
-    assert result["total"] == 3
+    assert result["total"] == 4
     assert result["total_filtered"] == 1
     assert result["entries"][0]["entry_id"] == "a2"
     assert result["entries"][0]["postprocess_job_id"] == 11
     assert result["entries"][0]["book"] == "Engine Manual.pdf"
     assert {item["postprocess_job_id"] for item in result["facets"]["books"]} == {11, 12}
     assert "LIKELY_CORRUPT" in result["facets"]["reasons"]
+
+    counts = result["facets"]["ai_review_counts"]
+    assert counts == {
+        "reviewed": 3,
+        "unreviewed": 1,
+        "needs_human": 0,
+        "disagreement": 2,
+        "needs_attention": 1,
+    }
+    assert {item["id"] for item in result["facets"]["review_workers"]} == {"colab-2", "colab-3", "colab-4"}
+
+    attention = asyncio.run(main.human_review_queue(attention="needs_attention"))
+    assert [entry["entry_id"] for entry in attention["entries"]] == ["a3"]
+
+    disagreement = asyncio.run(main.human_review_queue(attention="disagreement"))
+    assert {entry["entry_id"] for entry in disagreement["entries"]} == {"a2", "a3"}
+    assert "a1" not in {entry["entry_id"] for entry in disagreement["entries"]}  # UNCERTAIN -> APPLY is a resolution.
+
+    by_worker = asyncio.run(main.human_review_queue(
+        ai_review="reviewed", recommendation="APPLY_PROPOSED", review_worker="colab-2"
+    ))
+    assert [entry["entry_id"] for entry in by_worker["entries"]] == ["a1"]
+
