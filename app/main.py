@@ -81,6 +81,11 @@ from .stage2b_store import HUMAN_VISUAL_RECOVERY_CODE, Stage2BStore
 from .worker import ConversionWorker
 from .worker_registry import WorkerRegistry
 from .review_workers import ReviewAssistantStore, ReviewAssistantService
+from .anomaly_review import (
+    detect_anomaly_types,
+    text_anomaly_acceptance_plan,
+    vision_anomaly_acceptance_plan,
+)
 from .version import APP_VERSION
 from .table_repair import (
     TABLE_ROW_COLLAPSE_CODE, ensure_collapse_scan, table_repair_context, parse_tsv_matrix,
@@ -425,6 +430,10 @@ class ReviewWorkerSettingsUpdate(BaseModel):
     text_worker_ids: list[str] = Field(default_factory=list, max_length=32)
     vision_worker_ids: list[str] = Field(default_factory=list, max_length=32)
     anomaly_worker_ids: list[str] = Field(default_factory=list, max_length=32)
+
+
+class AnomalyHumanDecisionRequest(BaseModel):
+    decision: str = Field(pattern="^(accept|keep_current)$")
 
 
 class EquipmentManualAssignment(BaseModel):
@@ -4412,6 +4421,276 @@ async def queue_vision_anomaly_review(job_id: int, entry_id: str) -> dict:
     return await _queue_manual_anomaly_review(job_id, entry_id, "vision")
 
 
+def _anomaly_human_decision_current(entry: dict, review: dict) -> bool:
+    decision = entry.get("anomaly_human_decision")
+    if not isinstance(decision, dict) or not isinstance(review, dict):
+        return False
+    try:
+        return float(decision.get("anomaly_review_created_at_epoch") or 0) == float(review.get("created_at_epoch") or 0)
+    except (TypeError, ValueError):
+        return False
+
+
+@app.get("/api/anomaly-review")
+async def anomaly_review_queue(
+    job_id: int | None = None,
+    review_type: str = "all",
+    anomaly_type: str = "",
+    state: str = "all",
+    include_human_reviewed: bool = False,
+    query: str = "",
+) -> dict:
+    """Dedicated Text/Vision anomaly workspace over current correction ledgers."""
+    wanted_type = str(review_type or "all").strip().lower()
+    if wanted_type not in {"all", "text", "vision"}:
+        raise HTTPException(status_code=422, detail="review_type must be all, text, or vision")
+    wanted_state = str(state or "all").strip().lower()
+    valid_states = {"all", "detected", "queued", "processing", "failed", "needs_decision", "needs_human", "resolved", "human_reviewed"}
+    if wanted_state not in valid_states:
+        raise HTTPException(status_code=422, detail="Unknown anomaly state")
+
+    queue_rows = await runtime.review_assistant_store.list_jobs(5000)
+    queue_by_key: dict[tuple[int, str, str], dict] = {}
+    for row in queue_rows:
+        rt = str(row.get("review_type") or "")
+        if rt not in {"anomaly_text", "anomaly_vision"}:
+            continue
+        base_type = "text" if rt == "anomaly_text" else "vision"
+        key = (int(row.get("postprocess_job_id") or 0), str(row.get("entry_id") or ""), base_type)
+        queue_by_key[key] = row
+
+    jobs = await runtime.postprocess_store.list_jobs(limit=2000)
+    all_items: list[dict] = []
+    books: list[dict] = []
+    anomaly_types_seen: set[str] = set()
+    for job in jobs:
+        jid = int(job.get("id") or 0)
+        if not jid or not job.get("result_dir"):
+            continue
+        if job_id is not None and jid != int(job_id):
+            continue
+        result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+        ledger = await asyncio.to_thread(_load_json_file, result_dir / "correction_ledger.json")
+        entries = [e for e in (ledger.get("entries") or []) if isinstance(e, dict) and e.get("status") != "superseded"]
+        text_entries = [e for e in entries if e.get("entry_type") == "text_correction"]
+        vision_entries = _authoritative_visual_subjects([e for e in entries if e.get("entry_type") == "vision_enrichment"])
+        book_name = job.get("source_filename") or job.get("output_filename") or f"Book {jid}"
+        books.append({"postprocess_job_id": jid, "book": book_name})
+
+        for kind, current_entries in (("text", text_entries), ("vision", vision_entries)):
+            for entry in current_entries:
+                if wanted_type != "all" and kind != wanted_type:
+                    continue
+                entry_id = str(entry.get("entry_id") or "")
+                if not entry_id:
+                    continue
+                types = detect_anomaly_types(entry, kind)
+                review = entry.get("anomaly_review")
+                review = review if isinstance(review, dict) else None
+                human_reviewed = bool(entry.get("human_verified") or entry.get("human_visual_decision"))
+                queue_job = queue_by_key.get((jid, entry_id, kind))
+                if not (types or review or queue_job or (include_human_reviewed and human_reviewed)):
+                    continue
+                anomaly_types_seen.update(types)
+
+                decision_current = _anomaly_human_decision_current(entry, review or {})
+                qstatus = str((queue_job or {}).get("status") or "")
+                if qstatus == "processing":
+                    item_state = "processing"
+                elif qstatus == "pending":
+                    item_state = "queued"
+                elif qstatus == "failed":
+                    item_state = "failed"
+                elif review:
+                    if decision_current:
+                        item_state = "resolved"
+                    elif str(review.get("verdict") or "").upper() == "NEEDS_HUMAN":
+                        item_state = "needs_human"
+                    else:
+                        item_state = "needs_decision"
+                elif types:
+                    item_state = "detected"
+                else:
+                    item_state = "human_reviewed"
+
+                page = entry.get("page")
+                detail_url = (
+                    f"/review?job={jid}&entry={quote(entry_id)}&page={quote(str(page or ''))}"
+                    if kind == "text"
+                    else f"/vision-audit?book={jid}&entry={quote(entry_id)}"
+                )
+                all_items.append({
+                    "postprocess_job_id": jid,
+                    "book": book_name,
+                    "result_dir": Path(str(job["result_dir"])).name,
+                    "entry_id": entry_id,
+                    "review_type": kind,
+                    "page": page,
+                    "state": item_state,
+                    "anomaly_types": types,
+                    "human_reviewed": human_reviewed,
+                    "human_verified": bool(entry.get("human_verified")),
+                    "human_review": entry.get("human_review"),
+                    "human_visual_decision": entry.get("human_visual_decision"),
+                    "primary_verdict": entry.get("verification_verdict"),
+                    "primary_status": entry.get("status"),
+                    "status_reason": entry.get("status_reason"),
+                    "original_text": entry.get("original_text") if kind == "text" else None,
+                    "proposed_text": entry.get("proposed_text") if kind == "text" else None,
+                    "diagram_category": entry.get("diagram_category") if kind == "vision" else None,
+                    "generated_summary": entry.get("generated_summary") if kind == "vision" else None,
+                    "visible_text": entry.get("visible_text") if kind == "vision" else None,
+                    "visible_objects": entry.get("visible_objects") if kind == "vision" else None,
+                    "ai_review_assistant": entry.get("ai_review_assistant"),
+                    "anomaly_review": review,
+                    "anomaly_human_decision": entry.get("anomaly_human_decision"),
+                    "anomaly_job": queue_job,
+                    "detail_url": detail_url,
+                    "source_page_url": f"/api/postprocess/jobs/{jid}/source-page/{page}" if page else None,
+                })
+
+    summary = {
+        "total": len(all_items),
+        "text": sum(1 for i in all_items if i["review_type"] == "text"),
+        "vision": sum(1 for i in all_items if i["review_type"] == "vision"),
+    }
+    for key in ("detected", "queued", "processing", "failed", "needs_decision", "needs_human", "resolved", "human_reviewed"):
+        summary[key] = sum(1 for i in all_items if i["state"] == key)
+
+    wanted_anomaly = str(anomaly_type or "").strip()
+    wanted_query = str(query or "").strip().lower()
+    filtered: list[dict] = []
+    for item in all_items:
+        if wanted_state != "all" and item["state"] != wanted_state:
+            continue
+        if wanted_anomaly and wanted_anomaly not in item.get("anomaly_types", []):
+            continue
+        if wanted_query:
+            blob = " ".join([
+                str(item.get("book") or ""), str(item.get("entry_id") or ""),
+                str(item.get("primary_verdict") or ""), str(item.get("status_reason") or ""),
+                str(item.get("original_text") or ""), str(item.get("proposed_text") or ""),
+                str(item.get("generated_summary") or ""),
+                " ".join(str(x) for x in (item.get("anomaly_types") or [])),
+            ]).lower()
+            if wanted_query not in blob:
+                continue
+        filtered.append(item)
+
+    state_order = {"needs_human": 0, "needs_decision": 1, "failed": 2, "processing": 3, "queued": 4, "detected": 5, "human_reviewed": 6, "resolved": 7}
+    filtered.sort(key=lambda i: (state_order.get(i["state"], 9), str(i.get("book") or "").lower(), int(i.get("page") or 0)))
+    books_unique = {int(b["postprocess_job_id"]): b for b in books}
+    return {
+        "schema": "marine-anomaly-review-queue/v1",
+        "summary": summary,
+        "total_filtered": len(filtered),
+        "items": filtered,
+        "facets": {
+            "books": sorted(books_unique.values(), key=lambda b: str(b.get("book") or "").lower()),
+            "anomaly_types": sorted(anomaly_types_seen),
+        },
+        "human_authority_preserved": True,
+    }
+
+
+@app.post("/api/anomaly-review/{job_id}/{entry_id}/decision")
+async def anomaly_review_human_decision(
+    job_id: int, entry_id: str, request: AnomalyHumanDecisionRequest
+) -> dict:
+    """Apply or reject one stored Colab anomaly recommendation by explicit human choice."""
+    job = await runtime.postprocess_store.get_job(int(job_id))
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Post-process job not found.")
+    result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+    ledger_path = result_dir / "correction_ledger.json"
+
+    async with runtime.stage2b_worker._stage2c_ledger_lock:
+        ledger = await asyncio.to_thread(_load_json_file, ledger_path)
+        entry = next(
+            (item for item in (ledger.get("entries") or [])
+             if str(item.get("entry_id") or "") == str(entry_id) and item.get("status") != "superseded"),
+            None,
+        )
+        if not isinstance(entry, dict):
+            raise HTTPException(status_code=404, detail="Current anomaly-review entry was not found.")
+        review = entry.get("anomaly_review")
+        if not isinstance(review, dict) or not review.get("stored"):
+            raise HTTPException(status_code=409, detail="Run Colab anomaly review before making a Yes/No decision.")
+
+        kind = "text" if entry.get("entry_type") == "text_correction" else "vision" if entry.get("entry_type") == "vision_enrichment" else ""
+        if not kind:
+            raise HTTPException(status_code=409, detail="This ledger entry does not support anomaly review.")
+
+        previous_human = entry.get("human_review") if kind == "text" else entry.get("human_visual_decision")
+        plan = (
+            text_anomaly_acceptance_plan(entry, review)
+            if kind == "text"
+            else vision_anomaly_acceptance_plan(entry, review)
+        )
+        accepted_action = "keep_current"
+        resolved = True
+
+        if request.decision == "accept":
+            accepted_action = str(plan.get("mode") or "acknowledge")
+            resolved = bool(plan.get("resolved"))
+            if kind == "text" and plan.get("mode") == "human_text":
+                apply_human_correction_to_entry(
+                    entry, text=str(plan.get("text") or entry.get("original_text") or "[UNREADABLE]"),
+                    action=str(plan.get("action") or "reject"),
+                )
+            elif kind == "vision" and plan.get("mode") == "human_visual":
+                entry = await asyncio.to_thread(
+                    apply_human_visual_decision, result_dir, entry_id, str(plan.get("decision"))
+                )
+                ledger = await asyncio.to_thread(_load_json_file, ledger_path)
+                entry = next(
+                    (item for item in (ledger.get("entries") or [])
+                     if str(item.get("entry_id") or "") == str(entry_id) and item.get("status") != "superseded"),
+                    entry,
+                )
+            elif kind == "vision" and plan.get("mode") == "replace_evidence":
+                summary = str(review.get("corrected_summary") or "").strip()
+                if summary:
+                    entry["generated_summary"] = summary
+                if isinstance(review.get("visible_text"), list):
+                    entry["visible_text"] = list(review.get("visible_text") or [])[:100]
+                if isinstance(review.get("visible_objects"), list):
+                    entry["visible_objects"] = list(review.get("visible_objects") or [])[:100]
+
+        history = entry.get("anomaly_human_decision_history")
+        history = list(history) if isinstance(history, list) else []
+        previous_decision = entry.get("anomaly_human_decision")
+        if isinstance(previous_decision, dict) and previous_decision:
+            history.append(previous_decision)
+            entry["anomaly_human_decision_history"] = history[-10:]
+        decision_record = {
+            "decision": request.decision,
+            "anomaly_verdict": review.get("verdict"),
+            "accepted_action": accepted_action,
+            "resolved": bool(resolved),
+            "plan_reason": plan.get("reason"),
+            "previous_human_decision": previous_human,
+            "anomaly_review_created_at_epoch": review.get("created_at_epoch"),
+            "saved_at_epoch": time.time(),
+            "human_authority_preserved": True,
+        }
+        entry["anomaly_human_decision"] = decision_record
+        await asyncio.to_thread(
+            upsert_ledger_entry, result_dir, str(ledger.get("source_zip_sha256") or ""), entry
+        )
+
+    runtime.events.notify(
+        "anomaly_review_human_decision",
+        postprocess_job_id=int(job_id), entry_id=str(entry_id), decision=request.decision,
+    )
+    return {
+        "ok": True,
+        "entry_id": entry_id,
+        "decision": decision_record,
+        "human_authority_preserved": True,
+    }
+
+
 @app.get("/api/stage2b/colab")
 async def stage2b_colab_status() -> dict:
     key_ready = bool(read_colab_api_key(runtime.config))
@@ -6778,6 +7057,11 @@ async def workers_page():
 @app.get("/review-workers")
 async def review_workers_page():
     return FileResponse(STATIC_DIR / "review-workers.html")
+
+
+@app.get("/anomaly-review")
+async def anomaly_review_page():
+    return FileResponse(STATIC_DIR / "anomaly-review.html")
 
 
 @app.get("/text-audit")
