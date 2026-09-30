@@ -4521,7 +4521,9 @@ def _anomaly_decision_is_current(entry: dict, evidence_signature: str) -> bool:
 @app.get("/api/anomaly-review")
 async def anomaly_review_queue() -> dict:
     """Dedicated, advisory anomaly workspace built from current Stage 2C ledgers."""
-    books = await runtime.postprocess_store.list_jobs(limit=5000)
+    # Use the same current-book authority as the Review Assistant itself so
+    # historical post-process runs cannot reappear as duplicate anomalies.
+    books = await runtime.stage2b_store.list_books()
     queue_rows = await runtime.review_assistant_store.list_jobs(5000)
     queue_map: dict[tuple[int, str, str], dict] = {}
     for row in queue_rows:
