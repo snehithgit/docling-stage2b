@@ -43,3 +43,14 @@ jobs:
           for file in app/static/*.js; do
             node --check "$file"
           done
+
+      - name: Package validated source
+        run: |
+          zip -qr marine-pipeline-studio-v2026.09.30.40.11AH5.zip . -x ".git/*" "marine-pipeline-studio-v2026.09.30.40.11AH5.zip"
+
+      - name: Upload validated source
+        uses: actions/upload-artifact@v4
+        with:
+          name: marine-pipeline-studio-v2026.09.30.40.11AH5
+          path: marine-pipeline-studio-v2026.09.30.40.11AH5.zip
+          if-no-files-found: error
