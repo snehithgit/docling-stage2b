@@ -27,6 +27,8 @@ jobs:
       - name: Python compile
         run: python -m compileall -q app tests
       - name: Test suite
+        env:
+          PYTHONPATH: .
         run: pytest -q
       - name: Frontend JavaScript syntax
         run: |
