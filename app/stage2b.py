@@ -5605,8 +5605,8 @@ class Stage2BWorker:
             )
             if not entry:
                 raise ValueError("Anomaly-review entry is no longer current")
-            expected_type = "text_correction" if review_type == "text" else "vision_enrichment"
-            if str(entry.get("entry_type")) != expected_type:
+            expected_types = {"text_correction", "table_cell_correction"} if review_type == "text" else {"vision_enrichment"}
+            if str(entry.get("entry_type")) not in expected_types:
                 raise ValueError("Anomaly-review entry type no longer matches the queued job")
 
             anomaly_types = detect_anomaly_types(entry, review_type)
@@ -5723,8 +5723,10 @@ class Stage2BWorker:
                 "model": worker.get("model") or "koboldcpp",
                 "endpoint": endpoint,
                 "manual_requested": bool(manual_requested),
+                "evidence_signature": expected_signature,
                 "anomaly_types": anomaly_types,
                 "anomaly_types_confirmed": [str(value)[:120] for value in confirmed[:32]],
+                "evidence_signature": expected_signature,
                 "verdict": verdict,
                 "confidence": parsed.get("confidence"),
                 "reason": str(parsed.get("reason") or "")[:3000],

@@ -53,6 +53,46 @@ function outcomeLabel(job) {
   return "Pending / unresolved";
 }
 
+function textAiReview(job) {
+  const review = job?.downstream?.ai_review_assistant;
+  return review && typeof review === "object" ? review : null;
+}
+
+function aiReviewAssistantBlock(downstream) {
+  const a = downstream?.ai_review_assistant;
+  if (!a || typeof a !== "object") return "";
+  const recommendation = String(a.recommendation || "—").replaceAll("_", " ");
+  const confidence = Number(a.confidence);
+  const confidenceText = Number.isFinite(confidence) ? `${Math.round(confidence * 100)}% confidence` : "confidence not reported";
+  return `<section class="ai-review-assistant-inline"><div class="vision-audit-section-label">AI review assistant · advisory only</div><div class="vision-audit-kv"><span>Recommendation</span><strong>${esc(recommendation)}</strong><span>Confidence</span><strong>${esc(confidenceText)}</strong><span>Worker</span><strong>${esc(a.worker_name || a.worker_id || "Colab worker")}</strong></div>${a.reason ? `<p class="vision-audit-summary-text"><strong>Reason:</strong> ${esc(a.reason)}</p>` : ""}${a.suggested_text ? `<p class="vision-audit-summary-text"><strong>Suggested text:</strong> ${esc(a.suggested_text)}</p>` : ""}<p class="format-note"><strong>Human authority preserved.</strong> This recommendation cannot approve or overwrite Text by itself.</p></section>`;
+}
+
+function anomalyReviewBlock(downstream) {
+  const a = downstream?.anomaly_review;
+  if (!a || typeof a !== "object" || a.discarded || a.stored === false) return "";
+  const verdict = String(a.verdict || "NEEDS_HUMAN").replaceAll("_", " ");
+  const confidence = Number(a.confidence);
+  const confidenceText = Number.isFinite(confidence) ? `${Math.round(confidence * 100)}% confidence` : "confidence not reported";
+  const types = Array.isArray(a.anomaly_types_confirmed) && a.anomaly_types_confirmed.length
+    ? a.anomaly_types_confirmed
+    : (Array.isArray(a.anomaly_types) ? a.anomaly_types : []);
+  return `<section class="ai-review-assistant-inline"><div class="vision-audit-section-label">Anomaly review · Colab · advisory only</div><div class="vision-audit-kv"><span>Verdict</span><strong>${esc(verdict)}</strong><span>Confidence</span><strong>${esc(confidenceText)}</strong><span>Worker</span><strong>${esc(a.worker_name || a.worker_id || "Colab worker")}</strong></div>${types.length ? `<p class="format-note"><strong>Anomaly:</strong> ${esc(types.join(" · ").replaceAll("_", " "))}</p>` : ""}${a.reason ? `<p class="vision-audit-summary-text"><strong>Reason:</strong> ${esc(a.reason)}</p>` : ""}${a.corrected_text ? `<p class="vision-audit-summary-text"><strong>Corrected text proposal:</strong> ${esc(a.corrected_text)}</p>` : ""}<p class="format-note"><strong>Human authority preserved.</strong> Open Human Review to accept or edit a proposal.</p></section>`;
+}
+
+function fillAiReviewFilters(facets={}) {
+  const recSelect = $("ta-ai-recommendation");
+  const recPrevious = recSelect.value;
+  const recommendations = Array.isArray(facets.recommendations) ? facets.recommendations : [];
+  recSelect.innerHTML = `<option value="">All recommendations</option>${recommendations.map(value => `<option value="${esc(value)}">${esc(String(value).replaceAll("_", " "))}</option>`).join("")}`;
+  if (recommendations.includes(recPrevious)) recSelect.value = recPrevious;
+
+  const workerSelect = $("ta-review-worker");
+  const workerPrevious = workerSelect.value;
+  const workers = Array.isArray(facets.review_workers) ? facets.review_workers : [];
+  workerSelect.innerHTML = `<option value="">All review workers</option>${workers.map(worker => `<option value="${esc(worker.id)}">${esc(worker.name || worker.id)}</option>`).join("")}`;
+  if (workers.some(worker => String(worker.id) === workerPrevious)) workerSelect.value = workerPrevious;
+}
+
 
 function reviewDecisionUrl(job, page) {
   const params = new URLSearchParams({
@@ -124,6 +164,9 @@ function renderJob(job) {
         ${job.status === "failed" ? `<section><div class="vision-audit-section-label">Failure</div><p class="queue-error">${esc(job.error_type || "Error")}: ${esc(job.error_message || "Verification failed")}</p></section>` : `<section><div class="vision-audit-section-label">Verifier transcription</div><p class="audit-transcription">${esc(proposed || "No readable transcription")}</p></section>`}
         <section class="${rejected ? "vision-audit-override" : ""}"><div class="vision-audit-section-label">Safety decision</div><p><strong>${esc(rejected ? "Rejected — original preserved" : correction.status === "applied" ? "Accepted" : correction.reason || "No correction needed")}</strong></p>${metrics.length ? `<div class="vision-audit-kv">${metrics.map(([name,value]) => `<span>${esc(name)}</span><strong>${Number(value).toFixed(3)}</strong>`).join("")}</div>` : ""}${(scope.reasons || []).length ? `<div class="vision-audit-tags">${scope.reasons.map(x => `<span title="${esc(x)}">${esc(friendlyReason(x))}</span>`).join("")}</div>` : ""}</section>
         <section><div class="vision-audit-section-label">What the pipeline did</div><p><strong>${esc(pipeline)}</strong></p>${downstream.status_reason ? `<p class="format-note">${esc(downstream.status_reason)}</p>` : ""}</section>
+        ${aiReviewAssistantBlock(downstream)}
+        ${anomalyReviewBlock(downstream)}
+        ${downstream.entry_id ? `<div class="document-actions"><button class="mini-action text-anomaly-review" data-book="${job.postprocess_job_id}" data-entry="${esc(downstream.entry_id)}">Re-review with Colab</button><a class="mini-action" href="/anomaly-review">Open Anomaly Review</a></div>` : ""}
         ${job.human_review_required ? (publicationMissing
           ? `<div class="vision-audit-primary-actions text-audit-inline-review"><strong>Human decision required</strong><p class="format-note">The verifier result is preserved, but its review record has not been published yet. Repair the review record before making a decision.</p><div class="document-actions"><a class="mini-action" href="${esc(reviewDecisionUrl(job, page))}">Repair / inspect context</a></div></div>`
           : `<div class="vision-audit-primary-actions text-audit-inline-review"><strong>Human decision required</strong><p class="format-note">Accept the verifier text if it is correct, keep the immutable Docling original, or open the full editor when you need to change the wording.</p><div class="document-actions">${proposed.trim() ? `<button class="primary-button text-audit-decision" data-job="${job.id}" data-action="apply">Accept correction</button>` : ""}<button class="secondary-button text-audit-decision" data-job="${job.id}" data-action="reject">Keep original</button><a class="mini-action" href="${esc(reviewDecisionUrl(job, page))}">Edit / inspect context</a></div></div>`) : downstream.human_verified ? `<div class="vision-audit-human-state"><strong>Human reviewed</strong><span>Authoritative</span></div>` : ""}
@@ -178,9 +221,17 @@ async function loadAudit() {
     const params = new URLSearchParams({limit: String(PAGE_SIZE), offset: String((auditPage - 1) * PAGE_SIZE)});
     const book = $("ta-book").value;
     const outcome = $("ta-outcome").value;
+    const aiReview = $("ta-ai-review").value;
+    const aiRecommendation = $("ta-ai-recommendation").value;
+    const reviewWorker = $("ta-review-worker").value;
+    const attention = $("ta-attention").value;
     const query = $("ta-search").value.trim();
     if (book) params.set("book", book);
     if (outcome) params.set("outcome", outcome);
+    if (aiReview && aiReview !== "all") params.set("ai_review", aiReview);
+    if (aiRecommendation) params.set("recommendation", aiRecommendation);
+    if (reviewWorker) params.set("review_worker", reviewWorker);
+    if (attention && attention !== "all") params.set("attention", attention);
     if (query) params.set("query", query);
     if (requestedJobId) params.set("verification_job_id", requestedJobId);
     const response = await fetch(`/api/stage2b/text-audit?${params}`, {cache:"no-store"});
@@ -192,6 +243,7 @@ async function loadAudit() {
     totalFiltered = Number(data.total_filtered ?? auditJobs.length);
     renderSummary(data);
     fillBookFilter(data.books || []);
+    fillAiReviewFilters(data.facets || {});
     renderPage();
     feedback("");
   } catch (error) {
@@ -242,16 +294,40 @@ async function applyInlineDecision(jobId, action) {
   }
 }
 
-$("ta-results").addEventListener("click", event => {
-  const button = event.target.closest(".text-audit-decision");
-  if (!button) return;
-  applyInlineDecision(button.dataset.job, button.dataset.action);
+$("ta-results").addEventListener("click", async event => {
+  const decision = event.target.closest(".text-audit-decision");
+  if (decision) {
+    applyInlineDecision(decision.dataset.job, decision.dataset.action);
+    return;
+  }
+  const anomaly = event.target.closest(".text-anomaly-review");
+  if (!anomaly) return;
+  if (!confirm("Re-verify this Text item with an assigned Colab anomaly worker? The result is advisory and will not overwrite a human decision.")) return;
+  const old = anomaly.textContent;
+  anomaly.disabled = true;
+  anomaly.textContent = "Queueing…";
+  try {
+    const response = await fetch(`/api/postprocess/jobs/${encodeURIComponent(anomaly.dataset.book)}/corrections/${encodeURIComponent(anomaly.dataset.entry)}/anomaly-review`, {method:"POST", cache:"no-store"});
+    let data = {};
+    try { data = await response.json(); } catch (_) { data = {}; }
+    if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+    feedback("Colab anomaly re-review queued. Human authority is unchanged.", "success");
+  } catch (error) {
+    feedback(`Could not queue anomaly review: ${error.message}`, "warning");
+  } finally {
+    anomaly.disabled = false;
+    anomaly.textContent = old;
+  }
 });
 
 function reloadFromFirstPage() { auditPage = 1; loadAudit(); }
 $("refresh-audit").addEventListener("click", loadAudit);
 $("ta-book").addEventListener("change", reloadFromFirstPage);
 $("ta-outcome").addEventListener("change", reloadFromFirstPage);
+$("ta-ai-review").addEventListener("change", reloadFromFirstPage);
+$("ta-ai-recommendation").addEventListener("change", reloadFromFirstPage);
+$("ta-review-worker").addEventListener("change", reloadFromFirstPage);
+$("ta-attention").addEventListener("change", reloadFromFirstPage);
 $("ta-search").addEventListener("input", () => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(reloadFromFirstPage, 250);
@@ -260,6 +336,10 @@ $("ta-clear").addEventListener("click", () => {
   history.replaceState({}, "", "/text-audit");
   $("ta-book").value = "";
   $("ta-outcome").value = "";
+  $("ta-ai-review").value = "all";
+  $("ta-ai-recommendation").value = "";
+  $("ta-review-worker").value = "";
+  $("ta-attention").value = "all";
   $("ta-search").value = "";
   auditPage = 1;
   loadAudit();

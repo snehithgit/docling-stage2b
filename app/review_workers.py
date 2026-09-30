@@ -123,6 +123,23 @@ class ReviewAssistantStore:
         if not entry_id:
             return
         with self._conn() as conn:
+            if str(review_type).startswith("anomaly_"):
+                base_type = "text" if str(review_type).endswith("text") else "vision"
+                evidence_sig = anomaly_evidence_signature(entry, base_type)
+                manual = conn.execute(
+                    """SELECT entry_signature FROM review_assistant_jobs
+                       WHERE postprocess_job_id=? AND entry_id=? AND review_type=?
+                         AND is_current=1 AND entry_signature LIKE 'manual:%'
+                       ORDER BY id DESC LIMIT 1""",
+                    (postprocess_job_id, entry_id, review_type),
+                ).fetchone()
+                if manual is not None:
+                    manual_sig = str(manual["entry_signature"] or "")
+                    if manual_sig.startswith(f"manual:{evidence_sig}:"):
+                        # A user-requested batch/single re-review is the newest
+                        # authority for this same evidence version. Do not let
+                        # background candidate sync retire it before Colab runs.
+                        return
             conn.execute("""UPDATE review_assistant_jobs SET is_current=0
                          WHERE postprocess_job_id=? AND entry_id=? AND review_type=? AND entry_signature<>? AND is_current=1""",
                          (postprocess_job_id, entry_id, review_type, sig))
@@ -322,28 +339,10 @@ class ReviewAssistantService:
                 if _vision_requires_human(entry):
                     key=(jid,str(entry.get("entry_id")),"vision"); valid.add(key); await self._store.sync_candidate(jid,result_dir_name,entry,"vision")
 
-            # Anomaly review is a third, independent pass. Automatic anomaly
-            # candidates require a completed normal AI review and are never
-            # auto-created for an already human-resolved entry.
-            for entry in ledger.get("entries") or []:
-                if entry.get("status")=="superseded" or entry.get("human_verified"):
-                    continue
-                if not isinstance(entry.get("ai_review_assistant"), dict):
-                    continue
-                if entry.get("entry_type")=="text_correction":
-                    anomaly_types=detect_anomaly_types(entry,"text")
-                    if anomaly_types:
-                        key=(jid,str(entry.get("entry_id")),"anomaly_text"); valid.add(key)
-                        await self._store.sync_candidate(jid,result_dir_name,entry,"anomaly_text")
-            for entry in _authoritative_visual_subjects(vision):
-                if entry.get("human_visual_decision") or entry.get("human_verified"):
-                    continue
-                if not isinstance(entry.get("ai_review_assistant"), dict):
-                    continue
-                anomaly_types=detect_anomaly_types(entry,"vision")
-                if anomaly_types:
-                    key=(jid,str(entry.get("entry_id")),"anomaly_vision"); valid.add(key)
-                    await self._store.sync_candidate(jid,result_dir_name,entry,"anomaly_vision")
+            # Anomaly work is operator-triggered from the dedicated Anomaly
+            # Review page. Do not auto-create anomaly jobs here. Manual anomaly
+            # jobs use a "manual:" signature and retire_missing() intentionally
+            # preserves them until the assigned Colab worker completes them.
         await self._store.retire_missing(valid)
         return True
 
