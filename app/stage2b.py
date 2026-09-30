@@ -5723,6 +5723,7 @@ class Stage2BWorker:
                 "model": worker.get("model") or "koboldcpp",
                 "endpoint": endpoint,
                 "manual_requested": bool(manual_requested),
+                "evidence_signature": expected_signature,
                 "anomaly_types": anomaly_types,
                 "anomaly_types_confirmed": [str(value)[:120] for value in confirmed[:32]],
                 "evidence_signature": expected_signature,
