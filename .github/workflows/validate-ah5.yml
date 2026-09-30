@@ -29,4 +29,4 @@ jobs:
       - name: JavaScript syntax
         run: find app/static -name '*.js' -print0 | xargs -0 -n1 node --check
       - name: Test suite
-        run: pytest -q
+        run: PYTHONPATH=. pytest -q
