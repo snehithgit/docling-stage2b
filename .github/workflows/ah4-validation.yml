@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - release-2026.09.30.40.11AH4
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
