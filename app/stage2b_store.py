@@ -925,10 +925,50 @@ class Stage2BStore:
         output_filename: str,
         jobs: list[dict[str, Any]],
     ) -> int:
-        """Insert additive full-artifact vision jobs without superseding old Stage 2B rows."""
+        """Prepare the current full-artifact sweep for one concrete analysis run.
+
+        Artifact rows are additive within a run, but they must not remain current
+        against an older ``__runN`` directory after Stage 2A is rerun.  Normal
+        verifier rows can safely preserve a compatible generation because their
+        contract is route-based; artifact-sweep completions also publish run-local
+        visual evidence, so a result-directory change must re-arm matching sweep
+        routes and retire sweep routes that no longer exist in the current plan.
+        """
         created = 0
         now = utcnow()
+        planned_keys = {
+            (str(item.get("target") or ""), str(item.get("route_id") or ""))
+            for item in jobs
+            if str(item.get("target") or "") in {"pi5", "oneplus"} and str(item.get("route_id") or "")
+        }
         with self._connection() as conn:
+            stale_rows = conn.execute(
+                """SELECT id, target, route_id FROM verification_jobs
+                   WHERE postprocess_job_id=? AND generation=? AND is_current=1
+                     AND code='FULL_TECHNICAL_VISUAL' AND result_dir<>?""",
+                (postprocess_job_id, generation, result_dir),
+            ).fetchall()
+            for row in stale_rows:
+                key = (str(row["target"] or ""), str(row["route_id"] or ""))
+                if key in planned_keys:
+                    conn.execute(
+                        """UPDATE verification_jobs
+                           SET result_dir=?, output_filename=?, status='pending', authorized=0,
+                               run_mode='awaiting_normal', started_at=NULL, completed_at=NULL,
+                               processing_seconds=NULL, attempt_count=0, retry_count=0,
+                               next_attempt_at=NULL, model=NULL, endpoint=NULL, verdict=NULL,
+                               request_json=NULL, result_json=NULL, artifact_path=NULL,
+                               error_type=NULL, error_message=NULL, claimed_by=NULL,
+                               execution_provider=NULL, stage2c_entry_state=NULL,
+                               stage2c_entry_id=NULL, stage2c_entry_error=NULL, is_current=1
+                           WHERE id=?""",
+                        (result_dir, output_filename, int(row["id"])),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE verification_jobs SET is_current=0, authorized=0 WHERE id=?",
+                        (int(row["id"]),),
+                    )
             for item in jobs:
                 target = str(item.get("target") or "")
                 if target not in {"pi5", "oneplus"}:

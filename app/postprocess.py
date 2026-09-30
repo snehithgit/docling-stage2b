@@ -2639,11 +2639,13 @@ class PostprocessWorker:
         store: PostprocessStore,
         events: EventBroker,
         groq_quota: GroqQuotaGuard | None = None,
+        worker_registry: Any | None = None,
     ) -> None:
         self._config_getter = config_getter
         self._store = store
         self._events = events
         self._groq_quota = groq_quota
+        self._worker_registry = worker_registry
         self._stopping = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
         self._verifier_task: asyncio.Task[None] | None = None
@@ -2894,6 +2896,21 @@ class PostprocessWorker:
             if provider == "oneplus":
                 return await OpenAICompatibleVerifier(config.oneplus_url).health()
             if provider == "colab":
+                if self._worker_registry is not None:
+                    workers = await asyncio.to_thread(self._worker_registry.configured_colabs, config)
+                    if not workers:
+                        return EndpointHealth(False, model="Colab", detail="No enabled Colab worker is ready")
+                    worker = workers[0]
+                    worker_id = str(worker.get("id") or "colab")
+                    key = await asyncio.to_thread(self._worker_registry.read_api_key, worker_id)
+                    endpoint = str(worker.get("url") or "").strip()
+                    model = str(worker.get("model") or "koboldcpp")
+                    health = await OpenAICompatibleVerifier(
+                        endpoint, timeout_seconds=int(getattr(config, "colab_timeout_seconds", 600)), api_key=key
+                    ).health()
+                    if health.reachable:
+                        return EndpointHealth(True, model=health.model or model, detail=f"{worker_id} · {health.detail or 'reachable'}")
+                    return EndpointHealth(False, model=model, detail=f"{worker_id} · {health.detail or 'health probe failed'}")
                 key = read_colab_api_key(config)
                 endpoint = str(getattr(config, "colab_url", "") or "").strip()
                 if not bool(getattr(config, "colab_enabled", False)):

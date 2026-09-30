@@ -419,3 +419,73 @@ def test_artifact_yields_when_other_role_has_normal_work_for_same_physical_provi
         assert await worker._normal_work_waiting_for_provider("pi5") is True
         assert await worker._normal_work_waiting_for_provider("oneplus") is False
     asyncio.run(run())
+
+
+def test_artifact_sweep_rows_move_to_new_analysis_run_and_rearm(tmp_path):
+    async def run():
+        store = Stage2BStore(str(tmp_path / "jobs.db"))
+        await store.initialize()
+        jobs = [
+            {
+                "route_id": "AV000001",
+                "target": "oneplus",
+                "source": {"type": "picture", "index": 1, "artifact_sweep": True},
+            },
+            {
+                "route_id": "AV000002",
+                "target": "oneplus",
+                "source": {"type": "picture", "index": 2, "artifact_sweep": True},
+            },
+        ]
+        assert await store.create_artifact_sweep_jobs(
+            1, 1, "same-generation", "Anemometer__job1__run16", "Anemometer.zip", jobs
+        ) == 2
+        old_rows = await store.list_book_jobs_raw(1)
+        for row in old_rows:
+            await store.mark_completed(
+                row["id"], 1.0, "model", "endpoint", "ACCEPT",
+                {"provider": "oneplus"}, {"ok": True}, "artifact.json",
+            )
+
+        # A Stage 2A rerun can preserve the same verification generation while
+        # changing the concrete result directory. Artifact evidence is run-local,
+        # so those rows must be re-armed against the new run rather than leaving
+        # a second current Verification-status row behind.
+        assert await store.create_artifact_sweep_jobs(
+            1, 1, "same-generation", "Anemometer__job1__run19", "Anemometer.zip", jobs
+        ) == 0
+        rows = await store.list_book_jobs_raw(1)
+        assert len(rows) == 2
+        assert {row["result_dir"] for row in rows} == {"Anemometer__job1__run19"}
+        assert {row["status"] for row in rows} == {"pending"}
+        assert all(row["result_json"] is None for row in rows)
+        assert all(row["artifact_path"] is None for row in rows)
+
+        books = await store.list_books()
+        assert len(books) == 1
+        assert books[0]["result_dir"] == "Anemometer__job1__run19"
+        assert books[0]["artifact_pending"] == 2
+
+    asyncio.run(run())
+
+
+def test_artifact_sweep_rows_removed_from_new_plan_are_not_current(tmp_path):
+    async def run():
+        store = Stage2BStore(str(tmp_path / "jobs.db"))
+        await store.initialize()
+        old_jobs = [
+            {"route_id": "AV000001", "target": "oneplus", "source": {"type": "picture", "index": 1, "artifact_sweep": True}},
+            {"route_id": "AV000002", "target": "oneplus", "source": {"type": "picture", "index": 2, "artifact_sweep": True}},
+        ]
+        new_jobs = [old_jobs[0]]
+        await store.create_artifact_sweep_jobs(1, 1, "g", "book__run16", "book.zip", old_jobs)
+        await store.create_artifact_sweep_jobs(1, 1, "g", "book__run19", "book.zip", new_jobs)
+        rows = await store.list_book_jobs_raw(1)
+        assert len(rows) == 1
+        assert rows[0]["route_id"] == "AV000001"
+        assert rows[0]["result_dir"] == "book__run19"
+        books = await store.list_books()
+        assert len(books) == 1
+        assert books[0]["artifact_total"] == 1
+
+    asyncio.run(run())

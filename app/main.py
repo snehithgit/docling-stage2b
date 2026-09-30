@@ -877,12 +877,12 @@ class Runtime:
         self.client = DoclingClient(lambda: self.config)
         self.worker = ConversionWorker(lambda: self.config, self.store, self.client, self.events)
         self.postprocess_store = PostprocessStore(self.config.database_path)
-        self.postprocess_worker = PostprocessWorker(
-            lambda: self.config, self.postprocess_store, self.events, self.groq_quota
-        )
-        self.stage2b_store = Stage2BStore(self.config.database_path)
         self.worker_registry = WorkerRegistry(self.config.database_path)
         self.worker_registry.ensure_legacy_colab(self.config)
+        self.postprocess_worker = PostprocessWorker(
+            lambda: self.config, self.postprocess_store, self.events, self.groq_quota, self.worker_registry
+        )
+        self.stage2b_store = Stage2BStore(self.config.database_path)
         self.book_lifecycle_locks = BookLifecycleLocks()
         self.oneplus_controller = OnePlusController(lambda: self.config)
         self.stage2b_worker = Stage2BWorker(
@@ -4485,12 +4485,14 @@ async def stage2b_start(target: str) -> dict:
         if not __import__("os").environ.get(runtime.config.text_cloud_api_key_env, "").strip():
             raise HTTPException(status_code=409, detail=f"{runtime.config.text_cloud_api_key_env} is not configured.")
     if selected_provider == "colab":
-        if not runtime.config.colab_enabled:
-            raise HTTPException(status_code=409, detail="Colab verifier is disabled.")
-        if not str(runtime.config.colab_url or "").strip():
-            raise HTTPException(status_code=409, detail="Colab tunnel URL is not configured.")
-        if not read_colab_api_key(runtime.config):
-            raise HTTPException(status_code=409, detail="Colab API key is not configured.")
+        configured_colabs = await asyncio.to_thread(
+            runtime.worker_registry.configured_colabs, runtime.config
+        )
+        if not configured_colabs:
+            raise HTTPException(
+                status_code=409,
+                detail="No enabled Colab worker has both a tunnel URL and API key. Configure/test one on Workers first.",
+            )
     await runtime.stage2b_worker.sync_routes_once()
     await runtime.set_stage2b_paused(target, False)
     count = await runtime.stage2b_worker.start_manual(target)
