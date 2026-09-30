@@ -29,6 +29,27 @@ function rawBlock(title, value) {
   return `<details class="vision-audit-raw"><summary>${esc(title)}</summary><pre>${esc(pretty(value))}</pre></details>`;
 }
 
+function friendlyRecommendation(value) {
+  const raw = String(value || "").toUpperCase();
+  return ({KEEP_ORIGINAL:"Keep original",APPLY_PROPOSED:"Apply proposed correction",NEEDS_HUMAN:"Needs human",TECHNICAL:"Technical",NOT_USEFUL:"Not useful"})[raw] || raw.replaceAll("_"," ").toLowerCase().replace(/^./, c => c.toUpperCase());
+}
+
+function aiReviewBlock(downstream) {
+  const a = downstream?.ai_review_assistant;
+  if (!a) return "";
+  const confidence = Number(a.confidence);
+  const conf = Number.isFinite(confidence) ? `${Math.round(confidence * 100)}% confidence` : "confidence not reported";
+  return `<section class="ai-review-assistant-inline"><div class="vision-audit-section-label">AI review assistant · advisory only</div><div class="vision-audit-kv"><span>Recommendation</span><strong>${esc(friendlyRecommendation(a.recommendation))}</strong><span>Confidence</span><strong>${esc(conf)}</strong><span>Worker</span><strong>${esc(a.worker_name || a.worker_id || "Colab worker")}</strong></div>${a.reason ? `<p class="vision-audit-summary-text"><strong>Reason:</strong> ${esc(a.reason)}</p>` : ""}<p class="format-note"><strong>Human authority preserved.</strong></p></section>`;
+}
+
+function anomalyReviewBlock(downstream) {
+  const a = downstream?.anomaly_review;
+  if (!a) return "";
+  const confidence = Number(a.confidence);
+  const conf = Number.isFinite(confidence) ? `${Math.round(confidence * 100)}% confidence` : "confidence not reported";
+  return `<section class="ai-review-assistant-inline"><div class="vision-audit-section-label">Anomaly review · Colab</div><div class="vision-audit-kv"><span>Verdict</span><strong>${esc(String(a.verdict || "NEEDS_HUMAN").replaceAll("_"," "))}</strong><span>Confidence</span><strong>${esc(conf)}</strong><span>Worker</span><strong>${esc(a.worker_name || a.worker_id || "Colab worker")}</strong></div>${(a.anomaly_types || []).length ? `<div class="vision-audit-tags">${a.anomaly_types.map(x => `<span>${esc(x.replaceAll("_"," "))}</span>`).join("")}</div>` : ""}${a.reason ? `<p class="vision-audit-summary-text"><strong>Reason:</strong> ${esc(a.reason)}</p>` : ""}<div class="document-actions"><a class="mini-action primary-mini" href="/anomaly-review">Open Anomaly Review</a></div></section>`;
+}
+
 function friendlyReason(value) {
   const raw = String(value || "");
   const known = {
@@ -124,6 +145,8 @@ function renderJob(job) {
         ${job.status === "failed" ? `<section><div class="vision-audit-section-label">Failure</div><p class="queue-error">${esc(job.error_type || "Error")}: ${esc(job.error_message || "Verification failed")}</p></section>` : `<section><div class="vision-audit-section-label">Verifier transcription</div><p class="audit-transcription">${esc(proposed || "No readable transcription")}</p></section>`}
         <section class="${rejected ? "vision-audit-override" : ""}"><div class="vision-audit-section-label">Safety decision</div><p><strong>${esc(rejected ? "Rejected — original preserved" : correction.status === "applied" ? "Accepted" : correction.reason || "No correction needed")}</strong></p>${metrics.length ? `<div class="vision-audit-kv">${metrics.map(([name,value]) => `<span>${esc(name)}</span><strong>${Number(value).toFixed(3)}</strong>`).join("")}</div>` : ""}${(scope.reasons || []).length ? `<div class="vision-audit-tags">${scope.reasons.map(x => `<span title="${esc(x)}">${esc(friendlyReason(x))}</span>`).join("")}</div>` : ""}</section>
         <section><div class="vision-audit-section-label">What the pipeline did</div><p><strong>${esc(pipeline)}</strong></p>${downstream.status_reason ? `<p class="format-note">${esc(downstream.status_reason)}</p>` : ""}</section>
+        ${aiReviewBlock(downstream)}
+        ${anomalyReviewBlock(downstream)}
         ${job.human_review_required ? (publicationMissing
           ? `<div class="vision-audit-primary-actions text-audit-inline-review"><strong>Human decision required</strong><p class="format-note">The verifier result is preserved, but its review record has not been published yet. Repair the review record before making a decision.</p><div class="document-actions"><a class="mini-action" href="${esc(reviewDecisionUrl(job, page))}">Repair / inspect context</a></div></div>`
           : `<div class="vision-audit-primary-actions text-audit-inline-review"><strong>Human decision required</strong><p class="format-note">Accept the verifier text if it is correct, keep the immutable Docling original, or open the full editor when you need to change the wording.</p><div class="document-actions">${proposed.trim() ? `<button class="primary-button text-audit-decision" data-job="${job.id}" data-action="apply">Accept correction</button>` : ""}<button class="secondary-button text-audit-decision" data-job="${job.id}" data-action="reject">Keep original</button><a class="mini-action" href="${esc(reviewDecisionUrl(job, page))}">Edit / inspect context</a></div></div>`) : downstream.human_verified ? `<div class="vision-audit-human-state"><strong>Human reviewed</strong><span>Authoritative</span></div>` : ""}
@@ -146,6 +169,19 @@ function fillBookFilter(books=[]) {
   const values = [...new Set((books || []).filter(Boolean))].sort((a,b) => String(a).localeCompare(String(b)));
   select.innerHTML = `<option value="">All books</option>${values.map(book => `<option value="${esc(book)}">${esc(book)}</option>`).join("")}`;
   if (values.includes(previous)) select.value = previous;
+}
+
+function fillAiFilters(facets={}) {
+  const recommendation = $("ta-ai-recommendation");
+  const worker = $("ta-review-worker");
+  const oldRecommendation = recommendation.value;
+  const oldWorker = worker.value;
+  recommendation.innerHTML = `<option value="">All recommendations</option>${(facets.recommendations || []).map(value => `<option value="${esc(value)}">${esc(friendlyRecommendation(value))}</option>`).join("")}`;
+  worker.innerHTML = `<option value="">All review workers</option>${(facets.review_workers || []).map(item => `<option value="${esc(item.id)}">${esc(item.name || item.id)} · ${esc(item.id)}</option>`).join("")}`;
+  if ([...recommendation.options].some(option => option.value === oldRecommendation)) recommendation.value = oldRecommendation;
+  if ([...worker.options].some(option => option.value === oldWorker)) worker.value = oldWorker;
+  const c = facets.ai_review_counts || {};
+  $("ta-ai-summary").textContent = `AI reviewed ${Number(c.reviewed || 0).toLocaleString()} · Not reviewed ${Number(c.unreviewed || 0).toLocaleString()} · Needs human ${Number(c.needs_human || 0).toLocaleString()} · Disagreements ${Number(c.disagreement || 0).toLocaleString()} · Needs my attention ${Number(c.needs_attention || 0).toLocaleString()}`;
 }
 
 function renderPage() {
@@ -182,6 +218,14 @@ async function loadAudit() {
     if (book) params.set("book", book);
     if (outcome) params.set("outcome", outcome);
     if (query) params.set("query", query);
+    const aiReview = $("ta-ai-review").value;
+    const recommendation = $("ta-ai-recommendation").value;
+    const reviewWorker = $("ta-review-worker").value;
+    const attention = $("ta-attention").value;
+    if (aiReview && aiReview !== "all") params.set("ai_review", aiReview);
+    if (recommendation) params.set("recommendation", recommendation);
+    if (reviewWorker) params.set("review_worker", reviewWorker);
+    if (attention && attention !== "all") params.set("attention", attention);
     if (requestedJobId) params.set("verification_job_id", requestedJobId);
     const response = await fetch(`/api/stage2b/text-audit?${params}`, {cache:"no-store"});
     if (!response.ok) throw new Error((await response.text()) || `HTTP ${response.status}`);
@@ -192,6 +236,7 @@ async function loadAudit() {
     totalFiltered = Number(data.total_filtered ?? auditJobs.length);
     renderSummary(data);
     fillBookFilter(data.books || []);
+    fillAiFilters(data.facets || {});
     renderPage();
     feedback("");
   } catch (error) {
@@ -252,6 +297,10 @@ function reloadFromFirstPage() { auditPage = 1; loadAudit(); }
 $("refresh-audit").addEventListener("click", loadAudit);
 $("ta-book").addEventListener("change", reloadFromFirstPage);
 $("ta-outcome").addEventListener("change", reloadFromFirstPage);
+$("ta-ai-review").addEventListener("change", reloadFromFirstPage);
+$("ta-ai-recommendation").addEventListener("change", reloadFromFirstPage);
+$("ta-review-worker").addEventListener("change", reloadFromFirstPage);
+$("ta-attention").addEventListener("change", reloadFromFirstPage);
 $("ta-search").addEventListener("input", () => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(reloadFromFirstPage, 250);
@@ -260,6 +309,10 @@ $("ta-clear").addEventListener("click", () => {
   history.replaceState({}, "", "/text-audit");
   $("ta-book").value = "";
   $("ta-outcome").value = "";
+  $("ta-ai-review").value = "all";
+  $("ta-ai-recommendation").value = "";
+  $("ta-review-worker").value = "";
+  $("ta-attention").value = "all";
   $("ta-search").value = "";
   auditPage = 1;
   loadAudit();
