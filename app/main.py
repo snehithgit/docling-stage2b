@@ -4444,6 +4444,14 @@ async def _queue_manual_anomaly_review(job_id: int, entry_id: str, review_type: 
             status_code=409,
             detail="Assign at least one enabled Colab worker to Anomaly review on the Review workers page first.",
         )
+    if isinstance(entry.get("anomaly_review_decision"), dict):
+        await _set_anomaly_review_decision(int(job_id), str(entry_id), review_type, None)
+        ledger = await asyncio.to_thread(_load_json_file, result_dir / "correction_ledger.json")
+        entry = next(
+            (item for item in (ledger.get("entries") or [])
+             if str(item.get("entry_id") or "") == str(entry_id) and item.get("status") != "superseded"),
+            entry,
+        )
     queued = await runtime.review_assistant_store.queue_manual_anomaly(
         int(job_id), result_dir_name, entry,
         "anomaly_text" if review_type == "text" else "anomaly_vision",
@@ -4604,10 +4612,10 @@ async def anomaly_review_queue() -> dict:
                 state = "processing"
             elif queue_status == "pending":
                 state = "queued"
-            elif result_current:
-                state = "reviewed"
             elif decision_current:
                 state = "dismissed"
+            elif result_current:
+                state = "reviewed"
             else:
                 state = "needs_decision"
 
