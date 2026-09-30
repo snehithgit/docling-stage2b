@@ -4690,6 +4690,89 @@ async def anomaly_review_queue() -> dict:
     }
 
 
+@app.post("/api/anomaly-review/reverify-all")
+async def reverify_all_anomalies(confirm: bool = False) -> dict:
+    """Queue one fresh manual Colab audit for every current anomaly.
+
+    This is intentionally one operator decision for the whole anomaly set.
+    Existing human decisions remain authoritative and are only supplied to
+    Colab as context.
+    """
+    if not confirm:
+        raise HTTPException(
+            status_code=422,
+            detail="Explicit confirmation is required before queueing all anomaly reviews.",
+        )
+
+    registry = await asyncio.to_thread(runtime.worker_registry.snapshot, runtime.config)
+    settings = registry.get("review") or {}
+    anomaly_workers = [
+        str(worker_id) for worker_id in (settings.get("anomaly_worker_ids") or [])
+    ]
+    if not settings.get("enabled") or not anomaly_workers:
+        raise HTTPException(
+            status_code=409,
+            detail="Assign at least one enabled Colab worker to Anomaly review on the Review workers page first.",
+        )
+
+    snapshot = await anomaly_review_queue()
+    items = list(snapshot.get("items") or [])
+    queued = 0
+    already_running = 0
+    skipped = 0
+    errors: list[dict] = []
+
+    for item in items:
+        state = str(item.get("state") or "")
+        if state in {"queued", "processing"}:
+            already_running += 1
+            continue
+        job_id = int(item.get("postprocess_job_id") or 0)
+        entry_id = str(item.get("entry_id") or "")
+        review_type = str(item.get("review_type") or "")
+        if not job_id or not entry_id or review_type not in {"text", "vision"}:
+            skipped += 1
+            continue
+        try:
+            # A previous per-item "No" from an older AH5 build must not block
+            # the new global Yes decision. Reopen it before queueing.
+            if isinstance(item.get("anomaly_review_decision"), dict):
+                await _set_anomaly_review_decision(job_id, entry_id, review_type, None)
+            await _queue_manual_anomaly_review(job_id, entry_id, review_type)
+            queued += 1
+        except HTTPException as exc:
+            errors.append({
+                "postprocess_job_id": job_id,
+                "entry_id": entry_id,
+                "review_type": review_type,
+                "status_code": int(exc.status_code),
+                "error": str(exc.detail),
+            })
+        except Exception as exc:
+            errors.append({
+                "postprocess_job_id": job_id,
+                "entry_id": entry_id,
+                "review_type": review_type,
+                "error": str(exc),
+            })
+
+    runtime.events.notify(
+        "anomaly_review_bulk_queued",
+        queued=queued, already_running=already_running, skipped=skipped, failed=len(errors),
+    )
+    return {
+        "accepted": True,
+        "queued": queued,
+        "already_running": already_running,
+        "skipped": skipped,
+        "failed": len(errors),
+        "errors": errors[:50],
+        "total_candidates": len(items),
+        "human_authority_preserved": True,
+        "message": "Current anomaly set queued for Colab re-verification.",
+    }
+
+
 async def _set_anomaly_review_decision(
     job_id: int, entry_id: str, review_type: str, decision: str | None
 ) -> dict:
