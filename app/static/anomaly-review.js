@@ -120,17 +120,20 @@ function applyFilters() {
 
 function renderSummary(data) {
   const c = data.counts || {};
-  $("ar-needs").textContent = Number(c.needs_decision || 0).toLocaleString();
+  const detected = (data.items || []).filter(item => Array.isArray(item.anomaly_types) && item.anomaly_types.length).length;
+  $("ar-needs").textContent = detected.toLocaleString();
   $("ar-running").textContent = `${Number(c.queued || 0).toLocaleString()} / ${Number(c.processing || 0).toLocaleString()}`;
   $("ar-reviewed").textContent = Number(c.reviewed || 0).toLocaleString();
-  $("ar-dismissed").textContent = Number(c.dismissed || 0).toLocaleString();
   $("ar-human").textContent = Number(c.human_reviewed || 0).toLocaleString();
 
   const workers = data.workers || {};
+  const available = Boolean(workers.enabled && (workers.anomaly_workers || []).length);
+  const yes = $("ar-batch-yes");
+  if (yes) yes.disabled = !available || detected === 0;
   const note = $("ar-worker-note");
-  if (!workers.enabled || !(workers.anomaly_workers || []).length) {
+  if (!available) {
     note.hidden = false;
-    note.innerHTML = '<strong>No anomaly Colab worker is assigned.</strong><p>Open Review workers and assign at least one enabled Colab worker to Anomaly review before running the global re-verification.</p><a class="mini-action" href="/review-workers">Open Review workers</a>';
+    note.innerHTML = '<strong>No anomaly Colab worker is assigned.</strong><p>Open Review workers and assign at least one enabled Colab worker to Anomaly review before choosing Yes.</p><a class="mini-action" href="/review-workers">Open Review workers</a>';
   } else {
     note.hidden = true;
     note.innerHTML = "";
@@ -157,37 +160,42 @@ async function loadAnomalies() {
 }
 
 async function reverifyAll() {
-  const button = $("ar-rerun-all");
-  if (!button || button.disabled) return;
-  const total = anomalyItems.length;
+  const yes = $("ar-batch-yes");
+  const no = $("ar-batch-no");
+  const status = $("ar-batch-status");
+  const total = anomalyItems.filter(item => Array.isArray(item.anomaly_types) && item.anomaly_types.length).length;
   if (!total) {
-    feedback("There are no current anomalies to re-verify.", "warning");
+    feedback("There are no current detected anomalies to re-verify.", "warning");
     return;
   }
-  const accepted = confirm(`Re-verify ALL ${total.toLocaleString()} current anomalies with the assigned Colab anomaly workers?\n\nThis includes anomalies on already human-reviewed items. Colab results remain advisory and never overwrite a human decision automatically.\n\nOK = Yes, Cancel = No.`);
-  if (!accepted) {
-    feedback("No changes made. Bulk anomaly re-verification was cancelled.", "info");
-    return;
-  }
-  const old = button.textContent;
-  button.disabled = true;
-  button.textContent = "Queueing all anomalies…";
+  yes.disabled = true;
+  no.disabled = true;
+  status.textContent = `Queueing all ${total.toLocaleString()} current anomalies for Colab…`;
   try {
-    const response = await fetch("/api/anomaly-review/reverify-all?confirm=true", {method:"POST", cache:"no-store"});
+    const response = await fetch("/api/anomaly-review/reverify-all", {method:"POST", cache:"no-store"});
     let data = {};
     try { data = await response.json(); } catch (_) { data = {}; }
     if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
-    feedback(`Queued ${Number(data.queued || 0).toLocaleString()} anomalies for Colab. ${Number(data.already_running || 0).toLocaleString()} were already queued/processing. Human authority is unchanged.`, "success");
+    const failed = Array.isArray(data.failed) ? data.failed.length : 0;
     await loadAnomalies();
+    status.textContent = `Yes selected — queued ${Number(data.queued || 0).toLocaleString()} of ${Number(data.eligible || total).toLocaleString()} anomalies${Number(data.already_running || 0) ? ` · ${Number(data.already_running).toLocaleString()} already queued/processing` : ""}${failed ? ` · ${failed} failed to queue` : ""}. Human decisions remain authoritative.`;
+    feedback("Global Colab anomaly re-verification started.", "success");
   } catch (error) {
+    status.textContent = "";
     feedback(error.message || "Could not queue all anomaly reviews.", "warning");
   } finally {
-    button.disabled = false;
-    button.textContent = old;
+    no.disabled = false;
+    if (!yes.disabled) yes.disabled = false;
   }
 }
 
-$("ar-rerun-all").addEventListener("click", reverifyAll);
+function declineAll() {
+  $("ar-batch-status").textContent = "No selected — no anomaly jobs were queued. The anomaly list and all human decisions remain unchanged.";
+  feedback("No Colab anomaly batch was queued.", "completed");
+}
+
+$("ar-batch-yes").addEventListener("click", reverifyAll);
+$("ar-batch-no").addEventListener("click", declineAll);
 $("ar-refresh").addEventListener("click", loadAnomalies);
 ["ar-book","ar-type","ar-state","ar-human-state","ar-anomaly"].forEach(id => $(id).addEventListener("change", applyFilters));
 $("ar-search").addEventListener("input", () => {
