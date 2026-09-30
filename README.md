@@ -1,3 +1,23 @@
+## 2026.09.30.40.11AH5 — Dedicated Anomaly Review workspace
+
+- Adds a dedicated **Anomaly Review** sidebar page for suspicious Text/Vision ledger states.
+- Anomalies are detected from the current authoritative ledger but are **not sent to Colab automatically**. Every item waits for an explicit **Yes · re-verify with Colab** or **No · dismiss** decision.
+- A No decision is scoped to the current evidence signature; if verifier/reviewer/human evidence later changes, the anomaly can surface again.
+- Yes queues the existing third-pass Colab source-evidence audit. Text audits re-read the exact target crop; Vision audits re-read the original technical image. Results are advisory and never overwrite a human decision.
+- Human-reviewed anomalies can be re-run with Colab. The previous anomaly result is retained in ledger history and stale late results are discarded.
+- Text Audit now has the same AI-review state, recommendation, Review Worker and attention/disagreement filters as Vision/Human Review.
+- Text table-cell correction entries are supported by the anomaly re-review path.
+- Review Worker Remaining counts continue to use pending + processing, so claim/requeue transitions do not look like duplicate work.
+- Full details: `RELEASE_VALIDATION_2026.09.30.40.11AH5.md`.
+
+## 2026.09.30.40.11AH4 — Colab anomaly review engine
+
+- Adds deterministic Text/Vision anomaly detection after the normal Review Assistant pass.
+- Adds a third-pass Colab anomaly auditor which re-reads original source evidence and stores `anomaly_review` plus bounded `anomaly_review_history` in the authoritative ledger.
+- Adds one-click post-human **Re-review with Colab** controls while preserving human authority.
+- Adds dedicated Anomaly worker assignment to Review Workers and stable Remaining counters.
+- AH5 supersedes AH4's automatic anomaly dispatch with explicit Yes/No operator control.
+
 ## 2026.09.30.40.11AH4 — Colab anomaly review
 
 - Adds a separate **Anomaly review** stage after the normal AI Review Assistant, with independent Colab worker assignment.
