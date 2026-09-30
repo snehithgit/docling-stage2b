@@ -339,10 +339,18 @@ function queueFilterParams() {
   const type = filtersLoaded ? ($("review-filter-type")?.value || "") : (q.get("filter_type") || "");
   const reason = filtersLoaded ? ($("review-filter-reason")?.value || "") : (q.get("filter_reason") || "");
   const state = filtersLoaded ? ($("review-filter-state")?.value || "all") : (q.get("filter_state") || "all");
+  const aiReview = filtersLoaded ? ($("review-filter-ai")?.value || "all") : (q.get("filter_ai") || "all");
+  const recommendation = filtersLoaded ? ($("review-filter-recommendation")?.value || "") : (q.get("filter_recommendation") || "");
+  const worker = filtersLoaded ? ($("review-filter-worker")?.value || "") : (q.get("filter_worker") || "");
+  const attention = filtersLoaded ? ($("review-filter-attention")?.value || "all") : (q.get("filter_attention") || "all");
   if (book) params.set("job_id", book);
   if (type) params.set("source_type", type);
   if (reason) params.set("reason", reason);
   if (state && state !== "all") params.set("state", state);
+  if (aiReview && aiReview !== "all") params.set("ai_review", aiReview);
+  if (recommendation) params.set("recommendation", recommendation);
+  if (worker) params.set("review_worker", worker);
+  if (attention && attention !== "all") params.set("attention", attention);
   return params;
 }
 
@@ -352,10 +360,18 @@ function reviewUrl(entry) {
   const type = filtersLoaded ? ($("review-filter-type")?.value || "") : (q.get("filter_type") || "");
   const reason = filtersLoaded ? ($("review-filter-reason")?.value || "") : (q.get("filter_reason") || "");
   const state = filtersLoaded ? ($("review-filter-state")?.value || "all") : (q.get("filter_state") || "all");
+  const aiReview = filtersLoaded ? ($("review-filter-ai")?.value || "all") : (q.get("filter_ai") || "all");
+  const recommendation = filtersLoaded ? ($("review-filter-recommendation")?.value || "") : (q.get("filter_recommendation") || "");
+  const worker = filtersLoaded ? ($("review-filter-worker")?.value || "") : (q.get("filter_worker") || "");
+  const attention = filtersLoaded ? ($("review-filter-attention")?.value || "all") : (q.get("filter_attention") || "all");
   if (book) params.set("filter_book", book);
   if (type) params.set("filter_type", type);
   if (reason) params.set("filter_reason", reason);
   if (state && state !== "all") params.set("filter_state", state);
+  if (aiReview && aiReview !== "all") params.set("filter_ai", aiReview);
+  if (recommendation) params.set("filter_recommendation", recommendation);
+  if (worker) params.set("filter_worker", worker);
+  if (attention && attention !== "all") params.set("filter_attention", attention);
   return `/review?${params}`;
 }
 
@@ -371,20 +387,54 @@ function friendlyType(value) {
   return value === "table_cell" ? "Table cell" : value === "text" ? "Text block" : String(value || "Other").replaceAll("_", " ");
 }
 
+function filterEsc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+
+function friendlyRecommendation(value) {
+  const raw = String(value || "").toUpperCase();
+  return ({
+    KEEP_ORIGINAL: "Keep original",
+    APPLY_PROPOSED: "Apply proposed correction",
+    NEEDS_HUMAN: "Needs human",
+    TECHNICAL: "Technical",
+    NOT_USEFUL: "Not useful",
+  })[raw] || raw.replaceAll("_", " ").toLowerCase().replace(/^./, ch => ch.toUpperCase());
+}
+
 function fillReviewFilters(data) {
   const facets = data.facets || {};
   const bookSelect = $("review-filter-book");
   const reasonSelect = $("review-filter-reason");
+  const recommendationSelect = $("review-filter-recommendation");
+  const workerSelect = $("review-filter-worker");
   const currentBook = bookSelect.value || q.get("filter_book") || "";
   const currentReason = reasonSelect.value || q.get("filter_reason") || "";
-  bookSelect.innerHTML = `<option value="">All books</option>${(facets.books || []).map(item => `<option value="${String(item.postprocess_job_id)}">${String(item.book || `Book ${item.postprocess_job_id}`).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}</option>`).join("")}`;
-  reasonSelect.innerHTML = `<option value="">All reasons</option>${(facets.reasons || []).map(item => `<option value="${String(item).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}">${String(friendlyReason(item)).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}</option>`).join("")}`;
+  const currentRecommendation = recommendationSelect.value || q.get("filter_recommendation") || "";
+  const currentWorker = workerSelect.value || q.get("filter_worker") || "";
+
+  bookSelect.innerHTML = `<option value="">All books</option>${(facets.books || []).map(item => `<option value="${filterEsc(item.postprocess_job_id)}">${filterEsc(item.book || `Book ${item.postprocess_job_id}`)}</option>`).join("")}`;
+  reasonSelect.innerHTML = `<option value="">All reasons</option>${(facets.reasons || []).map(item => `<option value="${filterEsc(item)}">${filterEsc(friendlyReason(item))}</option>`).join("")}`;
+  recommendationSelect.innerHTML = `<option value="">All recommendations</option>${(facets.recommendations || []).map(item => `<option value="${filterEsc(item)}">${filterEsc(friendlyRecommendation(item))}</option>`).join("")}`;
+  workerSelect.innerHTML = `<option value="">All review workers</option>${(facets.review_workers || []).map(item => `<option value="${filterEsc(item.id)}">${filterEsc(item.name || item.id)} · ${filterEsc(item.id)}</option>`).join("")}`;
+
   if ([...bookSelect.options].some(o => o.value === currentBook)) bookSelect.value = currentBook;
   if ([...reasonSelect.options].some(o => o.value === currentReason)) reasonSelect.value = currentReason;
+  if ([...recommendationSelect.options].some(o => o.value === currentRecommendation)) recommendationSelect.value = currentRecommendation;
+  if ([...workerSelect.options].some(o => o.value === currentWorker)) workerSelect.value = currentWorker;
+
   const type = q.get("filter_type") || "";
   const state = q.get("filter_state") || "all";
+  const aiReview = q.get("filter_ai") || "all";
+  const attention = q.get("filter_attention") || "all";
   if ($("review-filter-type") && !$("review-filter-type").value && type) $("review-filter-type").value = type;
   if ($("review-filter-state") && state) $("review-filter-state").value = state;
+  if ($("review-filter-ai") && !$("review-filter-ai").value && aiReview) $("review-filter-ai").value = aiReview;
+  if ($("review-filter-attention") && attention) $("review-filter-attention").value = attention;
+
+  const counts = facets.ai_review_counts || {};
+  $("review-ai-summary").textContent =
+    `AI reviewed ${Number(counts.reviewed || 0).toLocaleString()} · Not reviewed ${Number(counts.unreviewed || 0).toLocaleString()} · Needs human ${Number(counts.needs_human || 0).toLocaleString()} · Disagreements ${Number(counts.disagreement || 0).toLocaleString()} · Needs my attention ${Number(counts.needs_attention || 0).toLocaleString()}`;
   filtersLoaded = true;
 }
 
@@ -577,12 +627,25 @@ async function applyReviewFilters() {
   } catch (error) { message(error.message || "Could not filter review queue.", "error"); }
 }
 
-["review-filter-book", "review-filter-type", "review-filter-reason", "review-filter-state"].forEach(id => $(id).addEventListener("change", applyReviewFilters));
+[
+  "review-filter-book",
+  "review-filter-type",
+  "review-filter-reason",
+  "review-filter-state",
+  "review-filter-ai",
+  "review-filter-recommendation",
+  "review-filter-worker",
+  "review-filter-attention",
+].forEach(id => $(id).addEventListener("change", applyReviewFilters));
 $("review-filter-clear").addEventListener("click", () => {
   $("review-filter-book").value = "";
   $("review-filter-type").value = "";
   $("review-filter-reason").value = "";
   $("review-filter-state").value = "all";
+  $("review-filter-ai").value = "all";
+  $("review-filter-recommendation").value = "";
+  $("review-filter-worker").value = "";
+  $("review-filter-attention").value = "all";
   applyReviewFilters();
 });
 load();
