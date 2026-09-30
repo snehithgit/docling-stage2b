@@ -83,6 +83,14 @@ function reviewDecisionUrl(job, page) {
   });
   if ($("ta-outcome")?.value === "human_review") params.set("filter_state", "needs_review");
   if ($("ta-book")?.value) params.set("filter_book", String(job.postprocess_job_id));
+  const aiReview = $("ta-ai-review")?.value || "all";
+  const recommendation = $("ta-ai-recommendation")?.value || "";
+  const reviewWorker = $("ta-review-worker")?.value || "";
+  const attention = $("ta-attention")?.value || "all";
+  if (aiReview !== "all") params.set("filter_ai", aiReview);
+  if (recommendation) params.set("filter_recommendation", recommendation);
+  if (reviewWorker) params.set("filter_worker", reviewWorker);
+  if (attention !== "all") params.set("filter_attention", attention);
   return `/review?${params}`;
 }
 
