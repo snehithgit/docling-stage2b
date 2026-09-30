@@ -31,7 +31,7 @@ jobs:
         run: python -m compileall -q app tests
 
       - name: Test suite
-        run: pytest -q
+        run: PYTHONPATH=. pytest -q
 
       - name: Frontend JavaScript syntax
         run: |
