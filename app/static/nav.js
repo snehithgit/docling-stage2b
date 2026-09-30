@@ -72,7 +72,7 @@
 })();
 
 (() => {
-  const version = "2026.09.30.40.11AH4";
+  const version = "2026.09.30.40.11AH5";
   const sidebar = document.querySelector('.sidebar');
   if (!sidebar) return;
   const badge = document.createElement('div');
@@ -104,6 +104,7 @@
     verify: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M4 12h7M4 17h5"/><path d="m15 15 2 2 4-5"/></svg>',
     workers: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="11" rx="2"/><path d="M7 20h10M9 16v4M15 16v4M7.5 9h3M13.5 9h3M7.5 12h9"/></svg>',
     reviewWorkers: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5z"/><path d="m8 9 1.5 1.5L12 8M13.5 10H16M8 15h8"/></svg>',
+    anomaly: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2.8 20h18.4L12 3Z"/><path d="M12 9v5M12 17.5h.01"/></svg>',
     artifact: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 10h8M8 14h5"/></svg>',
     audit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z"/><circle cx="12" cy="12" r="2.5"/></svg>',
     rag: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 5 5M8 8.5h5M8 11.5h3"/></svg>',
@@ -117,6 +118,7 @@
     ['/verification', 'Verification', icons.verify],
     ['/workers', 'Workers', icons.workers],
     ['/review-workers', 'Review workers', icons.reviewWorkers],
+    ['/anomaly-review', 'Anomaly review', icons.anomaly],
     ['/artifact-audit', 'Artifact audit', icons.artifact],
     ['/text-audit', 'Verifier audit', icons.audit],
     ['/retrieval', 'RAG', icons.rag],
@@ -155,6 +157,7 @@
     '/verification': ['Stage 2B verification', 'Run and retry verification here. Physical worker configuration and Artifact participation live on the Workers page.', 'Clear pending and failed checks'],
     '/workers': ['Inference workers', 'Stop/resume each physical device independently, manage multiple Colab workers, and choose Artifact sweep participants.', 'Configure worker participation'],
     '/review-workers': ['AI review workers', 'After Text, Vision, and Artifact machine work finishes, assigned Colab workers can prepare second-opinion suggestions for the human review queue. Human decisions remain authoritative.', 'Assign review workers'],
+    '/anomaly-review': ['Anomaly Review', 'Audit disagreements, truncations, suspicious rewrites and other ledger anomalies with an independent Colab pass. Colab suggestions require an explicit human Yes/No decision.', 'Review detected anomalies'],
     '/artifact-audit': ['Technical visual audit', 'Inspect technical pictures produced by verification. Rerunning a visual verification makes downstream Stage 2C/Stage 3/machine embeddings stale.', 'Resolve visual evidence'],
     '/text-audit': ['Text verification audit', 'Inspect verifier decisions and source-image transcription. Human corrections take precedence and trigger downstream rebuilding.', 'Resolve questionable text'],
     '/vision-audit': ['Vision evidence audit', 'Review what the vision verifier extracted before it becomes RAG visual evidence.', 'Confirm evidence quality'],
