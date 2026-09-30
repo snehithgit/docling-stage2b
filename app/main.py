@@ -4802,6 +4802,62 @@ async def queue_all_anomaly_reviews() -> dict:
     }
 
 
+@app.post("/api/anomaly-review/review-all")
+async def rereview_all_anomalies() -> dict:
+    """Queue one fresh Colab anomaly audit for every current detected anomaly.
+
+    This is the single batch re-review action exposed by the Anomaly Review
+    page. Active anomaly jobs are left alone, and human decisions are never
+    overwritten by the resulting model audit.
+    """
+    registry = await asyncio.to_thread(runtime.worker_registry.snapshot, runtime.config)
+    settings = registry.get("review") or {}
+    anomaly_workers = list(settings.get("anomaly_worker_ids") or [])
+    if not settings.get("enabled") or not anomaly_workers:
+        raise HTTPException(
+            status_code=409,
+            detail="Assign at least one enabled Colab worker to Anomaly review on the Review workers page first.",
+        )
+
+    snapshot = await anomaly_review_queue()
+    candidates = [
+        item for item in (snapshot.get("items") or [])
+        if item.get("anomaly_types")
+        and str(item.get("state") or "") not in {"queued", "processing"}
+    ]
+    queued = 0
+    skipped = 0
+    errors: list[dict] = []
+    for item in candidates:
+        try:
+            await _queue_manual_anomaly_review(
+                int(item.get("postprocess_job_id") or 0),
+                str(item.get("entry_id") or ""),
+                str(item.get("review_type") or ""),
+            )
+            queued += 1
+        except HTTPException as exc:
+            skipped += 1
+            errors.append({
+                "postprocess_job_id": item.get("postprocess_job_id"),
+                "entry_id": item.get("entry_id"),
+                "review_type": item.get("review_type"),
+                "detail": str(exc.detail),
+            })
+    runtime.events.notify(
+        "anomaly_review_batch_queued",
+        queued=queued, skipped=skipped, candidates=len(candidates),
+    )
+    return {
+        "queued": queued,
+        "skipped": skipped,
+        "candidates": len(candidates),
+        "errors": errors[:50],
+        "human_authority_preserved": True,
+        "message": f"Queued {queued} current anomalies for fresh Colab review.",
+    }
+
+
 @app.post("/api/anomaly-review/{job_id}/{entry_id}/{review_type}/queue")
 async def queue_anomaly_review(job_id: int, entry_id: str, review_type: str) -> dict:
     return await _queue_manual_anomaly_review(job_id, entry_id, review_type)
