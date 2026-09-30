@@ -3359,6 +3359,10 @@ async def stage2b_text_audit(
     outcome: str = "",
     query: str = "",
     verification_job_id: int | None = None,
+    ai_review: str = "all",
+    recommendation: str | None = None,
+    review_worker: str | None = None,
+    attention: str = "all",
 ) -> dict:
     """Read-only audit of completed/failed Text verifier source transcriptions."""
     rows = await runtime.stage2b_store.list_results_raw("pi5", limit=5000)
@@ -3404,6 +3408,10 @@ async def stage2b_text_audit(
                     "raw_docling_immutable": entry.get("raw_docling_immutable", True),
                     "entry_id": entry.get("entry_id"),
                     "verification_verdict": entry.get("verification_verdict"),
+                    "ai_review_assistant": entry.get("ai_review_assistant"),
+                    "anomaly_review": entry.get("anomaly_review"),
+                    "anomaly_review_history": entry.get("anomaly_review_history") or [],
+                    "anomaly_human_decision": entry.get("anomaly_human_decision"),
                     "current_authoritative": True,
                     "publication_ready": True,
                     "publication_state": "ready",
@@ -3484,6 +3492,44 @@ async def stage2b_text_audit(
         "human_reviewed": sum(1 for j in jobs if (j.get("downstream") or {}).get("human_verified")),
     }
     books = sorted({str(job.get("book") or "") for job in jobs if str(job.get("book") or "")})
+
+    recommendations: set[str] = set()
+    review_workers: dict[str, str] = {}
+    ai_review_counts = {"reviewed": 0, "unreviewed": 0, "needs_human": 0, "disagreement": 0, "needs_attention": 0}
+    for item in jobs:
+        downstream = item.get("downstream") or {}
+        review_entry = {
+            "entry_type": "text_correction",
+            "verification_verdict": downstream.get("verification_verdict") or item.get("verdict"),
+            "human_verified": bool(downstream.get("human_verified")),
+            "ai_review_assistant": downstream.get("ai_review_assistant"),
+        }
+        ai = _human_review_ai_review(review_entry)
+        if ai:
+            ai_review_counts["reviewed"] += 1
+            rec = str(ai.get("recommendation") or "").upper()
+            if rec:
+                recommendations.add(rec)
+            wid = str(ai.get("worker_id") or "").strip()
+            if wid:
+                review_workers.setdefault(wid, str(ai.get("worker_name") or wid))
+            if rec == "NEEDS_HUMAN":
+                ai_review_counts["needs_human"] += 1
+            if _human_review_disagreement(review_entry):
+                ai_review_counts["disagreement"] += 1
+            if not review_entry["human_verified"] and (rec == "NEEDS_HUMAN" or _human_review_disagreement(review_entry)):
+                ai_review_counts["needs_attention"] += 1
+        else:
+            ai_review_counts["unreviewed"] += 1
+
+    registry = runtime.worker_registry.snapshot(runtime.config)
+    configured_names = {
+        str(worker.get("id")): str(worker.get("name") or worker.get("id"))
+        for worker in (registry.get("colab_workers") or []) if worker.get("id")
+    }
+    for wid in (registry.get("review") or {}).get("text_worker_ids") or []:
+        worker_id = str(wid)
+        review_workers.setdefault(worker_id, configured_names.get(worker_id, worker_id))
     wanted_book = str(book or "").strip()
     wanted_outcome = str(outcome or "").strip().lower()
     wanted_query = str(query or "").strip().lower()
@@ -3502,14 +3548,33 @@ async def stage2b_text_audit(
                 continue
         elif wanted_outcome and actual != wanted_outcome:
             continue
+        downstream = item.get("downstream") or {}
+        review_entry = {
+            "entry_type": "text_correction",
+            "verification_verdict": downstream.get("verification_verdict") or item.get("verdict"),
+            "human_verified": bool(downstream.get("human_verified")),
+            "ai_review_assistant": downstream.get("ai_review_assistant"),
+        }
+        if not _human_review_ai_matches(
+            review_entry,
+            ai_review=ai_review,
+            recommendation=recommendation,
+            review_worker=review_worker,
+            attention=attention,
+        ):
+            continue
         if wanted_query:
             request = item.get("request") or {}
             correction = item.get("correction") or {}
             scope = item.get("scope_guard") or {}
+            ai = downstream.get("ai_review_assistant") or {}
+            anomaly = downstream.get("anomaly_review") or {}
             blob = " ".join([
                 str(item.get("book") or ""), str(item.get("route_id") or ""), str(item.get("code") or ""),
                 str(item.get("reason") or ""), str(request.get("page") or ""), str(request.get("suspect_text") or ""),
                 str(correction.get("proposed_text") or ""), " ".join(str(value) for value in (scope.get("reasons") or [])),
+                str(ai.get("recommendation") or ""), str(ai.get("reason") or ""),
+                str(anomaly.get("verdict") or ""), str(anomaly.get("reason") or ""),
             ]).lower()
             if wanted_query not in blob:
                 continue
@@ -3524,6 +3589,14 @@ async def stage2b_text_audit(
         "offset": offset,
         "limit": page_limit,
         "jobs": filtered[offset:offset + page_limit],
+        "facets": {
+            "recommendations": sorted(recommendations),
+            "review_workers": [
+                {"id": worker_id, "name": review_workers[worker_id]}
+                for worker_id in sorted(review_workers, key=lambda value: review_workers[value].lower())
+            ],
+            "ai_review_counts": ai_review_counts,
+        },
     }
 
 
