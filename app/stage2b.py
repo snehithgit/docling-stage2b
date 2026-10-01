@@ -2659,6 +2659,12 @@ class Stage2BWorker:
         # and CRC-scanned for every local-model call.
         self._doc_cache: dict[str, tuple[tuple[int, int], dict[str, Any]]] = {}
         self._device_locks = {"pi5": asyncio.Lock(), "oneplus": asyncio.Lock(), "groq": asyncio.Lock(), "colab": asyncio.Lock()}
+        # Periodic safety net for orphaned DB rows left in 'processing'.
+        # recover_interrupted() only runs at startup; the running process also
+        # scans periodically, while explicitly excluding jobs it still reports
+        # as active so slow in-flight work is never duplicated.
+        self._stale_processing_last_scan_epoch = 0.0
+        self._stale_processing_scan_lock = asyncio.Lock()
         # Scheduler-level provider reservations keep Text, Vision and the
         # shared Artifact pool from claiming the same physical provider at once.
         # The existing device locks remain the final inference single-flight gate;
@@ -4332,9 +4338,51 @@ class Stage2BWorker:
             and read_colab_api_key(config)
         )
 
+    async def _maybe_reclaim_stale_processing(self) -> None:
+        """Periodically recover orphaned ``processing`` rows without a restart.
+
+        The store excludes every job id that this process still reports as
+        active. That matters for slow OnePlus/Colab requests: reclaiming a
+        merely long-running row would make the same verification runnable a
+        second time while its original coroutine is still alive.
+        """
+        config = self._config_getter()
+        interval = max(30, int(getattr(config, "stage2b_stale_processing_scan_interval_seconds", 300)))
+        now = time.time()
+        if now - self._stale_processing_last_scan_epoch < interval:
+            return
+        if self._stale_processing_scan_lock.locked():
+            return
+        async with self._stale_processing_scan_lock:
+            if now - self._stale_processing_last_scan_epoch < interval:
+                return
+            self._stale_processing_last_scan_epoch = now
+            stale_after = max(60, int(getattr(config, "stage2b_stale_processing_seconds", 1800)))
+            active_job_ids: set[int] = set()
+            for state in self.worker_state.values():
+                try:
+                    job_id = int(state.get("active_job_id") or 0)
+                except (TypeError, ValueError):
+                    job_id = 0
+                if job_id > 0:
+                    active_job_ids.add(job_id)
+            try:
+                reclaimed = await self._store.reclaim_stale_processing(stale_after, active_job_ids)
+            except Exception:
+                logger.exception("Stage 2B stale-processing reclaim scan failed")
+                return
+            if reclaimed:
+                logger.warning(
+                    "Stage 2B reclaimed %s orphaned job(s) left in 'processing' past %ss; "
+                    "returned to pending",
+                    reclaimed, stale_after,
+                )
+                self._events.notify("stage2b_stale_processing_reclaimed", count=reclaimed)
+
     async def _device_loop(self, target: str) -> None:
         while not self._stopping.is_set():
             try:
+                await self._maybe_reclaim_stale_processing()
                 if self._paused(target):
                     await asyncio.sleep(self._config_getter().stage2b_poll_interval_seconds)
                     continue
@@ -4557,6 +4605,54 @@ class Stage2BWorker:
         except Exception:
             logger.exception("Could not write Stage 2B failure artifact for job %s", job.get("id"))
             return None
+
+    async def _defer_endpoint_outage_or_retry(
+        self,
+        target: str,
+        job: dict[str, Any],
+        exc: Exception,
+        seconds: float,
+        *,
+        provider: str,
+        delay: int,
+        error_type: str = "EndpointUnavailable",
+        is_artifact_sweep: bool = False,
+        artifact_worker: str = "",
+    ) -> None:
+        """Bound the retry-count-exempt endpoint-outage path for one job.
+
+        Endpoint deferrals intentionally preserve the normal retry budget for
+        transient provider outages. They still need their own cap, otherwise a
+        deterministic head-of-queue job can be selected forever. The outage
+        counter is incremented only on this path; quota/cooldown deferrals and
+        normal retries reset it in the store.
+        """
+        defer_count = await self._store.mark_deferred(
+            int(job["id"]), error_type, str(exc), delay_seconds=delay, count_outage=True
+        )
+        max_defers = max(1, int(getattr(self._config_getter(), "stage2b_endpoint_outage_max_defers", 20)))
+        event_provider = str(provider or target).split(":", 1)[0].lower()
+        if defer_count >= max_defers:
+            logger.error(
+                "Stage 2B %s job %s route %s exceeded endpoint-outage defer cap (%s/%s) on %s; "
+                "escalating to normal retry/fail so the queue can advance",
+                target, job.get("id"), job.get("route_id"), defer_count, max_defers, provider,
+            )
+            self._events.notify(
+                f"stage2b_{event_provider}_outage_defer_exhausted",
+                **(await self._notification_job_context(job, error=exc)),
+            )
+            if is_artifact_sweep:
+                self._cooldown_artifact_worker(artifact_worker)
+            await self._retry_or_fail(target, job, exc, seconds)
+            return
+
+        logger.warning(
+            "Stage 2B %s job %s deferred without retry penalty: %s endpoint unavailable "
+            "(outage defer %s/%s); health probe in %ss",
+            target, job.get("id"), provider, defer_count, max_defers, delay,
+        )
+        self._events.notify(f"stage2b_{event_provider}_endpoint_deferred")
 
     async def _retry_or_fail(
         self,
@@ -4827,10 +4923,11 @@ class Stage2BWorker:
                     provider, f"HTTP {status}: Colab tunnel/authentication is not usable",
                     event_context=await self._notification_job_context(job, error=exc),
                 )
-                await self._store.mark_deferred(
-                    int(job["id"]), "ColabEndpointUnavailable", str(exc), delay_seconds=delay
+                await self._defer_endpoint_outage_or_retry(
+                    target, job, exc, seconds, provider=provider, delay=delay,
+                    error_type="ColabEndpointUnavailable",
+                    is_artifact_sweep=is_artifact_sweep, artifact_worker=artifact_worker,
                 )
-                self._events.notify("stage2b_colab_endpoint_deferred")
             elif retryable:
                 if is_artifact_sweep:
                     self._cooldown_artifact_worker(artifact_worker)
@@ -4867,14 +4964,11 @@ class Stage2BWorker:
                 delay = await self._open_endpoint_circuit(
                     provider, f"{type(exc).__name__}: {exc}", event_context=outage_context
                 )
-                await self._store.mark_deferred(
-                    int(job["id"]), "EndpointUnavailable", str(exc), delay_seconds=delay
+                await self._defer_endpoint_outage_or_retry(
+                    target, job, exc, seconds, provider=provider, delay=delay,
+                    error_type="EndpointUnavailable",
+                    is_artifact_sweep=is_artifact_sweep, artifact_worker=artifact_worker,
                 )
-                logger.warning(
-                    "Stage 2B %s job %s deferred without retry penalty: %s endpoint unavailable; health probe in %ss",
-                    target, job.get("id"), provider, delay,
-                )
-                self._events.notify(f"stage2b_{provider}_endpoint_deferred")
             else:
                 if is_artifact_sweep:
                     self._cooldown_artifact_worker(artifact_worker)

@@ -141,6 +141,7 @@ class Stage2BStore:
                     stage2c_entry_id TEXT,
                     stage2c_entry_error TEXT,
                     is_current INTEGER NOT NULL DEFAULT 1,
+                    outage_defer_count INTEGER NOT NULL DEFAULT 0,
                     UNIQUE(postprocess_job_id, generation, route_id, target)
                 )"""
             )
@@ -148,6 +149,8 @@ class Stage2BStore:
             columns = {row[1] for row in conn.execute("PRAGMA table_info(verification_jobs)").fetchall()}
             if "retry_count" not in columns:
                 conn.execute("ALTER TABLE verification_jobs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0")
+            if "outage_defer_count" not in columns:
+                conn.execute("ALTER TABLE verification_jobs ADD COLUMN outage_defer_count INTEGER NOT NULL DEFAULT 0")
             if "next_attempt_at" not in columns:
                 conn.execute("ALTER TABLE verification_jobs ADD COLUMN next_attempt_at TEXT")
             if "priority_score" not in columns:
@@ -220,11 +223,57 @@ class Stage2BStore:
             count = conn.execute("SELECT COUNT(*) FROM verification_jobs WHERE status='processing' AND is_current=1").fetchone()[0]
             conn.execute(
                 """UPDATE verification_jobs
-                   SET status='pending', started_at=NULL, next_attempt_at=NULL,
+                   SET status='pending', started_at=NULL, next_attempt_at=NULL, outage_defer_count=0,
                        error_type='Interrupted', error_message='Recovered after restart'
                    WHERE status='processing' AND is_current=1"""
             )
             return int(count)
+
+    async def reclaim_stale_processing(
+        self, stale_after_seconds: int, active_job_ids: set[int] | None = None
+    ) -> int:
+        """Return orphaned, long-stuck ``processing`` rows to ``pending``.
+
+        ``recover_interrupted`` only runs once at app startup. A long-lived
+        process can therefore retain an orphaned ``processing`` row if the
+        coroutine that owned it disappeared without reaching a normal
+        completion/failure transition. ``active_job_ids`` is supplied by the
+        running worker and is deliberately excluded: resetting a row whose
+        coroutine is still live would allow duplicate execution of the same
+        verification job.
+        """
+        ids: set[int] = set()
+        for value in active_job_ids or set():
+            try:
+                parsed = int(value)
+            except (TypeError, ValueError):
+                continue
+            if parsed > 0:
+                ids.add(parsed)
+        return await self._run(self._reclaim_stale_processing_sync, stale_after_seconds, sorted(ids))
+
+    def _reclaim_stale_processing_sync(
+        self, stale_after_seconds: int, active_job_ids: list[int]
+    ) -> int:
+        # utc_after() only ever adds a non-negative offset (it clamps negative
+        # input to 0), so it cannot produce a cutoff in the past. Compute the
+        # past cutoff directly instead.
+        cutoff = (datetime.now(UTC) - timedelta(seconds=abs(int(stale_after_seconds)))).isoformat()
+        with self._connection() as conn:
+            sql = """UPDATE verification_jobs
+                     SET status='pending', started_at=NULL, next_attempt_at=NULL,
+                         claimed_by=NULL, outage_defer_count=0,
+                         error_type='StaleProcessing',
+                         error_message='Recovered: orphaned processing row past the staleness window'
+                     WHERE status='processing' AND is_current=1
+                       AND started_at IS NOT NULL AND started_at<?"""
+            params: list[Any] = [cutoff]
+            if active_job_ids:
+                placeholders = ",".join("?" for _ in active_job_ids)
+                sql += f" AND id NOT IN ({placeholders})"
+                params.extend(active_job_ids)
+            cursor = conn.execute(sql, tuple(params))
+            return int(cursor.rowcount)
 
     async def requeue_endpoint_outage_failures(self) -> int:
         """Recover current rows that older releases failed only because an endpoint was down."""
@@ -240,7 +289,7 @@ class Stage2BStore:
             cursor = conn.execute(
                 f"""UPDATE verification_jobs
                     SET status='pending', authorized=1, run_mode='outage_recovery',
-                        started_at=NULL, completed_at=NULL, retry_count=0, next_attempt_at=NULL,
+                        started_at=NULL, completed_at=NULL, retry_count=0, outage_defer_count=0, next_attempt_at=NULL,
                         error_type=NULL, error_message=NULL
                     WHERE is_current=1 AND status='failed' AND error_type IN ({placeholders})""",
                 outage_types,
@@ -554,7 +603,7 @@ class Stage2BStore:
                     """UPDATE verification_jobs
                        SET status='pending', authorized=1, run_mode='human_recovery',
                            started_at=NULL, completed_at=NULL, processing_seconds=NULL,
-                           retry_count=0, next_attempt_at=NULL, model=NULL, endpoint=NULL,
+                           retry_count=0, outage_defer_count=0, next_attempt_at=NULL, model=NULL, endpoint=NULL,
                            verdict=NULL, request_json=NULL, result_json=NULL, artifact_path=NULL,
                            error_type=NULL, error_message=NULL, claimed_by=NULL, execution_provider=NULL,
                            stage2c_entry_state=NULL, stage2c_entry_id=NULL, stage2c_entry_error=NULL,
@@ -892,29 +941,61 @@ class Stage2BStore:
                    SET status='completed', completed_at=?, processing_seconds=?,
                        model=?, endpoint=?, verdict=?, request_json=?, result_json=?,
                        execution_provider=COALESCE(?, execution_provider),
-                       artifact_path=?, authorized=0, retry_count=0, next_attempt_at=NULL,
+                       artifact_path=?, authorized=0, retry_count=0, outage_defer_count=0, next_attempt_at=NULL,
                        error_type=NULL, error_message=NULL
                    WHERE id=?""",
                 (utcnow(), seconds, model, endpoint, verdict, request_json, result_json, provider, artifact_path, job_id),
             )
 
-    async def mark_deferred(self, job_id: int, error_type: str, error_message: str, delay_seconds: int = 60) -> None:
+    async def mark_deferred(
+        self,
+        job_id: int,
+        error_type: str,
+        error_message: str,
+        delay_seconds: int = 60,
+        *,
+        count_outage: bool = False,
+    ) -> int:
         """Return an in-flight job to pending without consuming retry budget.
 
-        Used for deliberate quota pauses: nothing failed, so retry_count must not
-        increase and the manual authorization is preserved for automatic resume.
+        Quota/cooldown pauses are not endpoint outages, so they reset the
+        endpoint-outage streak. Only callers that explicitly pass
+        ``count_outage=True`` increment ``outage_defer_count``. This keeps the
+        counter faithful to *consecutive endpoint outages* instead of letting
+        unrelated operational pauses prematurely exhaust the outage budget.
+        Returns the updated outage-defer count.
         """
-        await self._run(self._mark_deferred_sync, job_id, error_type, error_message, delay_seconds)
+        return await self._run(
+            self._mark_deferred_sync,
+            job_id,
+            error_type,
+            error_message,
+            delay_seconds,
+            bool(count_outage),
+        )
 
-    def _mark_deferred_sync(self, job_id: int, error_type: str, error_message: str, delay_seconds: int) -> None:
+    def _mark_deferred_sync(
+        self, job_id: int, error_type: str, error_message: str, delay_seconds: int, count_outage: bool
+    ) -> int:
         with self._connection() as conn:
             conn.execute(
                 """UPDATE verification_jobs
                    SET status='pending', started_at=NULL, next_attempt_at=?,
-                       error_type=?, error_message=?
+                       error_type=?, error_message=?,
+                       outage_defer_count=CASE WHEN ? THEN outage_defer_count+1 ELSE 0 END
                    WHERE id=?""",
-                (utc_after(max(1, int(delay_seconds))), error_type, error_message[:2000], job_id),
+                (
+                    utc_after(max(1, int(delay_seconds))),
+                    error_type,
+                    error_message[:2000],
+                    1 if count_outage else 0,
+                    job_id,
+                ),
             )
+            row = conn.execute(
+                "SELECT outage_defer_count FROM verification_jobs WHERE id=?", (job_id,)
+            ).fetchone()
+            return int(row["outage_defer_count"]) if row else 0
 
     async def mark_retryable(self, job_id: int, error_type: str, error_message: str, delay_seconds: int = 15, artifact_path: str | None = None) -> None:
         await self._run(self._mark_retryable_sync, job_id, error_type, error_message, delay_seconds, artifact_path)
@@ -924,7 +1005,7 @@ class Stage2BStore:
             conn.execute(
                 """UPDATE verification_jobs
                    SET status='pending', started_at=NULL, retry_count=retry_count+1,
-                       next_attempt_at=?, error_type=?, error_message=?, artifact_path=?
+                       outage_defer_count=0, next_attempt_at=?, error_type=?, error_message=?, artifact_path=?
                    WHERE id=?""",
                 (utc_after(delay_seconds), error_type, error_message[:2000], artifact_path, job_id),
             )
@@ -937,7 +1018,7 @@ class Stage2BStore:
             conn.execute(
                 """UPDATE verification_jobs
                    SET status='failed', completed_at=?, authorized=0, next_attempt_at=NULL,
-                       error_type=?, error_message=?, artifact_path=?,
+                       outage_defer_count=0, error_type=?, error_message=?, artifact_path=?,
                        stage2c_entry_state=NULL, stage2c_entry_id=NULL, stage2c_entry_error=NULL
                    WHERE id=?""",
                 (utcnow(), error_type, error_message[:2000], artifact_path, job_id),
@@ -953,7 +1034,7 @@ class Stage2BStore:
                    SET status='pending', authorized=1, run_mode='manual',
                        started_at=NULL, completed_at=NULL, processing_seconds=NULL,
                        verdict=NULL, request_json=NULL, result_json=NULL, artifact_path=NULL,
-                       execution_provider=NULL, claimed_by=NULL, retry_count=0, next_attempt_at=NULL,
+                       execution_provider=NULL, claimed_by=NULL, retry_count=0, outage_defer_count=0, next_attempt_at=NULL,
                        error_type=NULL, error_message=NULL,
                        stage2c_entry_state=NULL, stage2c_entry_id=NULL, stage2c_entry_error=NULL
                    WHERE id=? AND is_current=1 AND status IN ('completed','failed')""",
@@ -969,7 +1050,7 @@ class Stage2BStore:
             cursor = conn.execute(
                 """UPDATE verification_jobs
                    SET status='pending', authorized=1, run_mode='manual',
-                       started_at=NULL, completed_at=NULL, retry_count=0, next_attempt_at=NULL,
+                       started_at=NULL, completed_at=NULL, retry_count=0, outage_defer_count=0, next_attempt_at=NULL,
                        execution_provider=NULL, claimed_by=NULL, error_type=NULL, error_message=NULL,
                        stage2c_entry_state=NULL, stage2c_entry_id=NULL, stage2c_entry_error=NULL
                    WHERE id=? AND status='failed' AND is_current=1""",
@@ -1035,7 +1116,7 @@ class Stage2BStore:
                         """UPDATE verification_jobs
                            SET result_dir=?, output_filename=?, status='pending', authorized=0,
                                run_mode='awaiting_normal', started_at=NULL, completed_at=NULL,
-                               processing_seconds=NULL, attempt_count=0, retry_count=0,
+                               processing_seconds=NULL, attempt_count=0, retry_count=0, outage_defer_count=0,
                                next_attempt_at=NULL, model=NULL, endpoint=NULL, verdict=NULL,
                                request_json=NULL, result_json=NULL, artifact_path=NULL,
                                error_type=NULL, error_message=NULL, claimed_by=NULL,
@@ -1114,7 +1195,7 @@ class Stage2BStore:
             cursor = conn.execute(
                 """UPDATE verification_jobs
                    SET status='pending', authorized=0, run_mode='awaiting_normal',
-                       started_at=NULL, completed_at=NULL, retry_count=0, next_attempt_at=NULL,
+                       started_at=NULL, completed_at=NULL, retry_count=0, outage_defer_count=0, next_attempt_at=NULL,
                        error_type=NULL, error_message=NULL
                    WHERE target=? AND code='FULL_TECHNICAL_VISUAL'
                      AND status='failed' AND is_current=1""",
@@ -1132,7 +1213,7 @@ class Stage2BStore:
             cursor = conn.execute(
                 """UPDATE verification_jobs
                    SET status='pending', authorized=1, run_mode='manual',
-                       started_at=NULL, completed_at=NULL, retry_count=0, next_attempt_at=NULL,
+                       started_at=NULL, completed_at=NULL, retry_count=0, outage_defer_count=0, next_attempt_at=NULL,
                        error_type=NULL, error_message=NULL
                    WHERE target=? AND status='failed' AND is_current=1""",
                 (target,),
@@ -1155,7 +1236,7 @@ class Stage2BStore:
                 cursor = conn.execute(
                     """UPDATE verification_jobs
                        SET status='pending', authorized=1, run_mode='manual',
-                           started_at=NULL, completed_at=NULL, retry_count=0, next_attempt_at=NULL,
+                           started_at=NULL, completed_at=NULL, retry_count=0, outage_defer_count=0, next_attempt_at=NULL,
                            error_type=NULL, error_message=NULL, claimed_by=NULL, execution_provider=NULL,
                            stage2c_entry_state=NULL, stage2c_entry_id=NULL, stage2c_entry_error=NULL
                        WHERE target=? AND status='failed' AND is_current=1""",

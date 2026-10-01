@@ -218,6 +218,22 @@ class AppConfig:
     # and health-probe with exponential backoff before claiming more work.
     stage2b_endpoint_breaker_base_seconds: int = 30
     stage2b_endpoint_breaker_max_seconds: int = 300
+    # An endpoint-outage deferral never consumes retry_count (by design, so a
+    # genuinely transient blip doesn't burn a job's real retry budget), which
+    # means a job whose provider never recovers would otherwise sit at the
+    # head of its queue and block every job behind it indefinitely. Once a
+    # single job has been deferred this many times in a row on the outage
+    # path, it is escalated onto the normal retry/fail path (which does
+    # consume retry_count) so the queue can advance past it and the problem
+    # becomes visible as a normal failed job instead of a silent stall.
+    stage2b_endpoint_outage_max_defers: int = 20
+    # Safety net for an orphaned row left in 'processing' after its owning
+    # worker disappeared without reaching a normal failure/defer transition.
+    # recover_interrupted() only runs at process startup; this periodic scan
+    # handles the same condition in a long-lived process. Jobs that the current
+    # process still reports as active are excluded to prevent duplicate work.
+    stage2b_stale_processing_seconds: int = 1800
+    stage2b_stale_processing_scan_interval_seconds: int = 300
     # Artifact sweeps use a shared Pi5/OnePlus work-stealing pool. A worker
     # that hits a transport/server failure temporarily stops claiming new
     # artifact jobs so the other healthy worker can drain the queue.
@@ -469,6 +485,12 @@ class AppConfig:
             raise ValueError("Endpoint circuit-breaker base delay must be at least five seconds")
         if self.stage2b_endpoint_breaker_max_seconds < self.stage2b_endpoint_breaker_base_seconds:
             raise ValueError("Endpoint circuit-breaker max delay must be >= base delay")
+        if self.stage2b_endpoint_outage_max_defers < 1:
+            raise ValueError("Endpoint outage max-defers must be at least one")
+        if self.stage2b_stale_processing_seconds < 60:
+            raise ValueError("Stale-processing reclaim window must be at least 60 seconds")
+        if self.stage2b_stale_processing_scan_interval_seconds < 30:
+            raise ValueError("Stale-processing scan interval must be at least 30 seconds")
         if self.stage2b_artifact_worker_cooldown_seconds < 5:
             raise ValueError("Artifact worker cooldown must be at least five seconds")
         if self.stage2b_max_retries < 0:
