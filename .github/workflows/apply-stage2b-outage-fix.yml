@@ -1,0 +1,52 @@
+name: Apply Stage2B outage queue-stall fix
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/apply-stage2b-outage-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reassemble and verify patch payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .github/stage2b-outage-patch/part-* > /tmp/stage2b-outage-fix.patch
+          echo "ccfae01eb75aab023e9951962b17c633849642c628028b80c70f03196898d4e5  /tmp/stage2b-outage-fix.patch" | sha256sum -c -
+          git apply --check /tmp/stage2b-outage-fix.patch
+
+      - name: Apply Stage2B fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply /tmp/stage2b-outage-fix.patch
+
+      - name: Syntax validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile app/config.py app/stage2b.py app/stage2b_store.py
+
+      - name: Commit source fix and remove temporary patch machinery
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -r .github/stage2b-outage-patch
+          git rm .github/workflows/apply-stage2b-outage-fix.yml
+          git add app/config.py app/stage2b.py app/stage2b_store.py
+          git commit -m "Fix Stage2B outage queue stall recovery"
+          git push origin HEAD:main
