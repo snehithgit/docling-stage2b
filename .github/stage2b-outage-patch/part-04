@@ -73,4 +73,4 @@
 @@ -1132,7 +1213,7 @@ class Stage2BStore:
              cursor = conn.execute(
                  """UPDATE verification_jobs
-   
+  
