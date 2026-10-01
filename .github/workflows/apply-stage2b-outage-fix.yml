@@ -23,7 +23,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          sha256sum .github/stage2b-outage-patch/part-*
           cat .github/stage2b-outage-patch/part-* > /tmp/stage2b-outage-fix.patch
+          sha256sum /tmp/stage2b-outage-fix.patch
           echo "ccfae01eb75aab023e9951962b17c633849642c628028b80c70f03196898d4e5  /tmp/stage2b-outage-fix.patch" | sha256sum -c -
           git apply --check /tmp/stage2b-outage-fix.patch
 
