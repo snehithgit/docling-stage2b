@@ -1,0 +1,87 @@
+nt=0,
++                         error_type='StaleProcessing',
++                         error_message='Recovered: orphaned processing row past the staleness window'
++                     WHERE status='processing' AND is_current=1
++                       AND started_at IS NOT NULL AND started_at<?"""
++            params: list[Any] = [cutoff]
++            if active_job_ids:
++                placeholders = ",".join("?" for _ in active_job_ids)
++                sql += f" AND id NOT IN ({placeholders})"
++                params.extend(active_job_ids)
++            cursor = conn.execute(sql, tuple(params))
++            return int(cursor.rowcount)
++
+     async def requeue_endpoint_outage_failures(self) -> int:
+         """Recover current rows that older releases failed only because an endpoint was down."""
+         return await self._run(self._requeue_endpoint_outage_failures_sync)
+@@ -240,7 +289,7 @@ class Stage2BStore:
+             cursor = conn.execute(
+                 f"""UPDATE verification_jobs
+                     SET status='pending', authorized=1, run_mode='outage_recovery',
+-                        started_at=NULL, completed_at=NULL, retry_count=0, next_attempt_at=NULL,
++                        started_at=NULL, completed_at=NULL, retry_count=0, outage_defer_count=0, next_attempt_at=NULL,
+                         error_type=NULL, error_message=NULL
+                     WHERE is_current=1 AND status='failed' AND error_type IN ({placeholders})""",
+                 outage_types,
+@@ -554,7 +603,7 @@ class Stage2BStore:
+                     """UPDATE verification_jobs
+                        SET status='pending', authorized=1, run_mode='human_recovery',
+                            started_at=NULL, completed_at=NULL, processing_seconds=NULL,
+-                           retry_count=0, next_attempt_at=NULL, model=NULL, endpoint=NULL,
++                           retry_count=0, outage_defer_count=0, next_attempt_at=NULL, model=NULL, endpoint=NULL,
+                            verdict=NULL, request_json=NULL, result_json=NULL, artifact_path=NULL,
+                            error_type=NULL, error_message=NULL, claimed_by=NULL, execution_provider=NULL,
+                            stage2c_entry_state=NULL, stage2c_entry_id=NULL, stage2c_entry_error=NULL,
+@@ -892,29 +941,61 @@ class Stage2BStore:
+                    SET status='completed', completed_at=?, processing_seconds=?,
+                        model=?, endpoint=?, verdict=?, request_json=?, result_json=?,
+                        execution_provider=COALESCE(?, execution_provider),
+-                       artifact_path=?, authorized=0, retry_count=0, next_attempt_at=NULL,
++                       artifact_path=?, authorized=0, retry_count=0, outage_defer_count=0, next_attempt_at=NULL,
+                        error_type=NULL, error_message=NULL
+                    WHERE id=?""",
+                 (utcnow(), seconds, model, endpoint, verdict, request_json, result_json, provider, artifact_path, job_id),
+             )
+ 
+-    async def mark_deferred(self, job_id: int, error_type: str, error_message: str, delay_seconds: int = 60) -> None:
++    async def mark_deferred(
++        self,
++        job_id: int,
++        error_type: str,
++        error_message: str,
++        delay_seconds: int = 60,
++        *,
++        count_outage: bool = False,
++    ) -> int:
+         """Return an in-flight job to pending without consuming retry budget.
+ 
+-        Used for deliberate quota pauses: nothing failed, so retry_count must not
+-        increase and the manual authorization is preserved for automatic resume.
++        Quota/cooldown pauses are not endpoint outages, so they reset the
++        endpoint-outage streak. Only callers that explicitly pass
++        ``count_outage=True`` increment ``outage_defer_count``. This keeps the
++        counter faithful to *consecutive endpoint outages* instead of letting
++        unrelated operational pauses prematurely exhaust the outage budget.
++        Returns the updated outage-defer count.
+         """
+-        await self._run(self._mark_deferred_sync, job_id, error_type, error_message, delay_seconds)
++        return await self._run(
++            self._mark_deferred_sync,
++            job_id,
++            error_type,
++            error_message,
++            delay_seconds,
++            bool(count_outage),
++        )
+ 
+-    def _mark_deferred_sync(self, job_id: int, error_type: str, error_message: str, delay_seconds: int) -> None:
++    def _mark_deferred_sync(
++        self, job_id: int, error_type: str, error_message: str, delay_seconds: int, count_outage: bool
++    ) -> int:
+         with self._connection() as conn:
+             conn.execute(
+                 """UPDATE verification_jobs
+                    SET status='pending', started_at=NULL, next_attempt_at=?,
+-                       error_type=?, error_message=?
++                       error_type=?, error_message=?,
++                       outage_defer_count=CASE WHEN ? THEN outage_defer_count+
