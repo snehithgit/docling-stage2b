@@ -1,4 +1,5 @@
 name: Apply Stage2B outage queue-stall fix
+# Exact patch blobs repaired; rerun integrity/apply gate.
 
 on:
   push:
