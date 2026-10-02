@@ -20,12 +20,12 @@ from .archive import select_docling_document
 _SCHEMA_INDEX = "docling-retrieval-index/v1"
 _SCHEMA_QUALITY = "docling-retrieval-quality/v1"
 _SCHEMA_BENCHMARK = "docling-retrieval-benchmark/v3"
-RETRIEVAL_RULE_VERSION = "retrieval-source-integrity-v6"
+RETRIEVAL_RULE_VERSION = "retrieval-relevance-first-v9.2"
 
 # Generic technical-reference and identifier handling. These rules deliberately
 # know nothing about manufacturers or individual books.
 _DEFINITION_INTENT_RE = re.compile(
-    r"\b(?:what\s+is|what\s+does|what\b.{0,80}\bdo\b|function\s+of|refer(?:s|red)?\s+to|means?|identify|identification)\b",
+    r"\b(?:what\s+is|what\s+does|what\b.{0,80}\bdo\b|what\s+should\s+i\s+know\s+about|function\s+of|refer(?:s|red)?\s+to|means?|identify|identifier|identification|associated\s+with|explain(?:s|ed|ing)?|describ(?:e|es|ed|ing)|details?|information\s+(?:about|on|for)|tell\s+me\s+about|look\s+up|find\s+(?:the\s+)?description\s+of|where\b.{0,100}\b(?:explained|described|defined|documented|covered)\b|manual\s+(?:give|gives|say|says))\b",
     re.IGNORECASE,
 )
 _PROCEDURE_INTENT_RE = re.compile(
@@ -33,7 +33,7 @@ _PROCEDURE_INTENT_RE = re.compile(
     re.IGNORECASE,
 )
 _TROUBLESHOOT_INTENT_RE = re.compile(
-    r"\b(?:what\s+to\s+do|alarm|fault|trip|failure|failed|not\s+working|problem|error|trouble|cause|remedy|corrective|why)\b",
+    r"\b(?:what\s+to\s+do|alarm|fault|trip|failure|failed|not\s+working|problem|error|trouble|cause|remedy|corrective|why|recommend(?:s|ed)?\b.{0,60}\bwhen|when\b.{0,80}\btoo\s+(?:low|high))\b",
     re.IGNORECASE,
 )
 _FUNCTION_INTENT_RE = re.compile(r"\b(?:what\b.{0,80}\bdo\b|what\s+does|function\s+of|how\s+does|purpose\s+of)\b", re.IGNORECASE)
@@ -73,6 +73,18 @@ _QUERY_ACTION_TERMS = {
     "refer", "refers", "mean", "means", "identify", "alarm", "fault", "trip", "failure",
     "failed", "problem", "error", "trouble", "cause", "remedy", "corrective", "came",
 }
+# Extra query scaffolding is intentionally kept separate from
+# _QUERY_ACTION_TERMS. The latter is part of the long-standing generic subject
+# scorer, so expanding it globally can change procedure ranking in unrelated
+# manuals. Compact subjects are used only by the new definition/parts features.
+_QUERY_SCAFFOLD_TERMS = {
+    "about", "according", "associated", "belong", "belongs", "component", "describe", "described",
+    "description", "detail", "details", "do", "does", "explain", "explained", "find", "found", "give",
+    "given", "gives", "id", "identify", "identifier", "information", "instruct", "item", "know", "listed",
+    "list", "look", "lookup", "catalog", "catalogue", "correspond", "corresponds", "part/order", "can", "you", "section", "chapter", "subsection", "assembly", "manual", "me", "need", "needs", "number", "order", "part", "parts",
+    "please", "replacement", "say", "says", "should", "refer", "refers", "reference", "spare", "spares",
+    "store", "stores", "tell", "under", "up", "use",
+}
 _PROCEDURE_EVIDENCE = {
     "check", "adjust", "measure", "inspect", "remove", "install", "operate", "connect",
     "start", "stop", "loosen", "tighten", "drain", "replace", "set", "turn", "open",
@@ -92,11 +104,28 @@ _FUNCTION_EVIDENCE = {
 _CONTACT_CONTEXT_RE = re.compile(r"\b(?:tel|telephone|fax|phone|mobile|contact|office|address|www|email|e-mail)\b", re.IGNORECASE)
 _CROSS_REFERENCE_QUERY_RE = re.compile(r"\b(?:refer|reference|see|section|chapter|clause|where\s+(?:is|are|can)|which\s+(?:section|chapter|drawing|table))\b", re.IGNORECASE)
 _PART_ITEM_QUERY_RE = re.compile(r"\b(?:item|pos(?:ition)?)\s*#?\s*(\d{2,4})\b", re.IGNORECASE)
+_PARTS_INTENT_RE = re.compile(
+    r"\b(?:spare(?:s)?(?:\s*(?:no|number|id))?|part\s*(?:no|number|id)|part\s*/\s*order(?:\s*(?:no|number|id))?|order\s*(?:no|number)|article\s*(?:no|number)|catalog(?:ue)?\s*(?:no|number|id)|replacement|stores?\s+needs?|listed\s+(?:under|for)|listed\s+identifier|which\s+listed\s+identifier|which\s+(?:part|order|catalog(?:ue)?)\s+number)\b",
+    re.IGNORECASE,
+)
+_PARTS_TABLE_EVIDENCE_RE = re.compile(
+    r"\b(?:article\s*(?:no|number)|part\s*(?:no|number)|parts?\s+manual|qty|quantity|description|supplementary\s+data)\b",
+    re.IGNORECASE,
+)
+_PARTS_NUMBER_COLUMN_RE = re.compile(
+    r"\b(?:article\s*(?:no|number)|part\s*(?:no|number)|order\s*[-./ ]?\s*(?:no|number)|bestell\s*[-./ ]?\s*nr|art\.?\s*no\.?|catalog(?:ue)?\s*(?:no|number))\b",
+    re.IGNORECASE,
+)
 _OPERATING_DURATION_QUERY_RE = re.compile(r"\b(?:operating|working|service|run[- ]?in|break[- ]?in|hours?|hrs?)\b", re.IGNORECASE)
 _OPERATING_DURATION_EVIDENCE_RE = re.compile(r"\b\d+(?:[.,]\d+)?\s*(?:hours?|hrs?)\b", re.IGNORECASE)
 _SECTION_QUERY_RE = re.compile(r"\b(?:section|chapter|clause)\s+([A-Za-z0-9]+(?:[._/-][A-Za-z0-9]+)*)", re.IGNORECASE)
+_NAMED_SECTION_CONTEXT_RE = re.compile(r"\b(?:in|under|from|within)\s+(?:the\s+)?[\"“”']?(?P<name>[A-Za-z][A-Za-z0-9 /&()_.-]{1,80}?)[\"“”']?\s+(?:section|chapter|subsection|assembly)\b", re.IGNORECASE)
 _QUOTED_QUERY_RE = re.compile(r"[\"“”']([^\"“”']{3,100})[\"“”']")
 _MAINTENANCE_INTERVAL_RE = re.compile(r"[-+]?\d+(?:[.,]\d+)?\s*(?:h|hr|hrs|hour|hours|day|days|week|weeks|month|months|year|years)\b", re.IGNORECASE)
+_INTERVAL_QUERY_RE = re.compile(
+    r"\b(?:interval|period|frequency|how\s+often|maintenance\s+schedule|service\s+schedule|when\s+is\b.{0,100}\bdue)\b",
+    re.IGNORECASE,
+)
 
 _ENGINEERING_UNITS = {
     "a", "bar", "c", "f", "hz", "ka", "kg", "kn", "kw", "l", "ma", "mm", "mpa", "nm",
@@ -111,7 +140,7 @@ _STOPWORDS = {
     "of", "on", "or", "that", "the", "this", "to", "what", "when", "where", "which", "with", "why",
 }
 _TOKEN_RE = re.compile(
-    r"[a-z0-9]+(?:[-_/.+:][a-z0-9]+)+|\d+(?:\.\d+)?(?:°[cf])?|[a-z]+|\d+",
+    r"[a-z0-9]+(?:[-_/.+:][a-z0-9]+)+|\d+(?:\.\d+)?(?:°[cf])?|[a-z0-9]+",
     re.IGNORECASE,
 )
 
@@ -149,6 +178,40 @@ def _query_subject_terms(query: str, attribute: str | None = None) -> list[str]:
     terms: list[str] = []
     for token in _tokens(query):
         if token in _QUERY_ACTION_TERMS:
+            continue
+        if attribute and _ATTRIBUTE_ALIASES.get(token) == attribute:
+            continue
+        if token in _ENGINEERING_UNITS:
+            continue
+        terms.append(token)
+    return list(dict.fromkeys(terms))
+
+
+def _named_section_context(query: str) -> tuple[str, tuple[str, ...]]:
+    """Return a natural-language section/assembly qualifier and its tokens.
+
+    Example: ``in the "Description" section`` is ranking context, not part of
+    the technical subject being defined.
+    """
+    match = _NAMED_SECTION_CONTEXT_RE.search(str(query or ""))
+    if not match:
+        return "", ()
+    name = re.sub(r"\s+", " ", str(match.group("name") or "")).strip(" .,:;\"'“”")
+    return name, tuple(_tokens(name))
+
+
+def _compact_subject_terms(query: str, attribute: str | None = None) -> list[str]:
+    """Technical noun phrase for definition/parts reranking only.
+
+    Keep potentially meaningful technical words (for example ``alarm``) even
+    when the legacy generic scorer treats them as intent/action words. Strip
+    conversational and parts-request scaffolding instead.
+    """
+    terms: list[str] = []
+    _context_name, context_tokens = _named_section_context(query)
+    context_terms = set(context_tokens)
+    for token in _tokens(query):
+        if token in _QUERY_SCAFFOLD_TERMS or token in context_terms:
             continue
         if attribute and _ATTRIBUTE_ALIASES.get(token) == attribute:
             continue
@@ -203,31 +266,166 @@ def _subject_cohesion(row: dict[str, Any], subject_terms: list[str]) -> float:
     return 0.0
 
 
+@lru_cache(maxsize=2048)
+def _query_profile(query: str) -> dict[str, Any]:
+    """Parse query-only features once instead of once per corpus row."""
+    value = str(query or "")
+    attribute = _query_attribute(value)
+    definition = bool(_DEFINITION_INTENT_RE.search(value))
+    parts_intent = bool(_PARTS_INTENT_RE.search(value))
+    identifiers = tuple(_identifier_candidates(value))
+    named_section, named_section_terms = _named_section_context(value)
+    compact_subject_terms = tuple(_compact_subject_terms(value, attribute))
+    # Definition and parts queries must rank the technical noun phrase, not
+    # conversational wrappers such as "manual", "information" or "order".
+    if identifiers or definition or parts_intent:
+        subject_terms = compact_subject_terms
+    else:
+        subject_terms = tuple(_query_subject_terms(value, attribute))
+    part_item = _PART_ITEM_QUERY_RE.search(value)
+    return {
+        "attribute": attribute,
+        "identifiers": identifiers,
+        "subject_terms": subject_terms,
+        "compact_subject_terms": compact_subject_terms,
+        "procedure": bool(_PROCEDURE_INTENT_RE.search(value)),
+        "troubleshoot": bool(_TROUBLESHOOT_INTENT_RE.search(value)),
+        "definition": definition,
+        "function_intent": bool(_FUNCTION_INTENT_RE.search(value)),
+        "action_request": bool(_ACTION_REQUEST_RE.search(value)),
+        "parts_intent": parts_intent,
+        "value_intent": bool(_VALUE_INTENT_RE.search(value)),
+        "cross_reference": bool(_CROSS_REFERENCE_QUERY_RE.search(value)),
+        "interval_intent": bool(_INTERVAL_QUERY_RE.search(value)),
+        "operating_duration": bool(_OPERATING_DURATION_QUERY_RE.search(value)),
+        "load_query": bool(_LOAD_QUERY_RE.search(value)),
+        "part_item": part_item.group(1) if part_item else "",
+        "named_section": named_section,
+        "named_section_terms": named_section_terms,
+    }
+
+
 def _query_feature_score(row: dict[str, Any], query: str) -> float:
     """Generic reranking features independent of any manufacturer or book."""
     if not query:
         return 0.0
-    counter = Counter(row.get("_tokens") or _tokens(str(row.get("text") or "")))
+    profile = _query_profile(query)
+    counter = row.get("_counter") or Counter(row.get("_tokens") or _tokens(str(row.get("text") or "")))
     raw_text = str(row.get("text") or "")
-    attribute = _query_attribute(query)
-    subject_terms = _query_subject_terms(query, attribute)
+    attribute = profile["attribute"]
+    subject_terms = list(profile["subject_terms"])
     matches, ratio, structural_subject_matches = _subject_overlap(row, subject_terms)
-    procedure = bool(_PROCEDURE_INTENT_RE.search(query))
-    troubleshoot = bool(_TROUBLESHOOT_INTENT_RE.search(query))
-    definition = bool(_DEFINITION_INTENT_RE.search(query))
-    function_intent = bool(_FUNCTION_INTENT_RE.search(query))
-    action_request = bool(_ACTION_REQUEST_RE.search(query))
+    procedure = bool(profile["procedure"])
+    troubleshoot = bool(profile["troubleshoot"])
+    definition = bool(profile["definition"])
+    function_intent = bool(profile["function_intent"])
+    action_request = bool(profile["action_request"])
     score = 0.0
 
     # Subject first: a perfect procedure for the wrong equipment should not win.
     if subject_terms:
         score += 1.55 * matches + 2.6 * ratio
         score += min(2.4, structural_subject_matches * 0.8)
-        score += _subject_cohesion(row, subject_terms)
+        if matches == len(subject_terms):
+            score += _subject_cohesion(row, subject_terms)
         if ratio == 0 and (procedure or troubleshoot or attribute):
             score -= 4.0
         elif ratio < 0.5 and len(subject_terms) >= 2:
             score -= 1.0
+
+
+    parts_intent = bool(profile["parts_intent"])
+    compact_subject_terms = list(profile["compact_subject_terms"])
+    if parts_intent and compact_subject_terms:
+        table_evidence = bool(row.get("table_related")) or str(row.get("content_type") or "").startswith("table")
+        has_parts_columns = bool(_PARTS_TABLE_EVIDENCE_RE.search(raw_text))
+        has_part_number_column = bool(_PARTS_NUMBER_COLUMN_RE.search(raw_text))
+        subject_phrase = " ".join(compact_subject_terms)
+        normalized_body = str(row.get("_normalized_text") or _normalized(raw_text))
+        compact_matches, compact_ratio, _ = _subject_overlap(row, compact_subject_terms)
+        exact_subject_phrase = bool(subject_phrase and subject_phrase in normalized_body)
+        subject_present = exact_subject_phrase or compact_ratio >= 0.75
+        if table_evidence and subject_present:
+            score += 8.0
+        if has_parts_columns and subject_present:
+            score += 7.0
+        # A parts-number request needs a table that actually exposes an
+        # article/order/part-number column. Generic contents/data tables can
+        # contain the same component name and many numbers but cannot answer
+        # the requested stores identifier.
+        if has_part_number_column and subject_present:
+            score += 16.0
+        elif table_evidence and subject_present and re.search(r"\b(?:contents|page[- ]?no|class[- ]?no|data\s+sheet)\b", raw_text[:800], re.I):
+            score -= 14.0
+        if table_evidence and exact_subject_phrase:
+            score += 7.0
+        # Bind the requested description to an actual table row. This avoids
+        # returning generic spare-parts instructions merely because they repeat
+        # the same component name.
+        best_row_score = 0.0
+        # Row binding is the most expensive parts-intent feature. Only scan
+        # individual rows after the cheap whole-chunk check has established
+        # that this candidate actually contains the requested subject and is
+        # table-like. This keeps broad candidate_depth searches responsive.
+        if table_evidence and subject_present:
+            subject_set = set(compact_subject_terms)
+            for line in (raw_text.splitlines() or [raw_text]):
+                line_tokens = set(_tokens(line))
+                if not subject_set or len(subject_set & line_tokens) / max(1, len(subject_set)) < 0.75:
+                    continue
+                normalized_line = _normalized(line)
+                if subject_phrase and subject_phrase in normalized_line:
+                    best_row_score = max(best_row_score, 22.0)
+                if "|" in line:
+                    cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+                    numeric_cells = sum(bool(re.search(r"\d", cell)) for cell in cells)
+                    structured_cells = sum(bool(re.search(r"(?:\d{3,}[-/.]\d{2,}|\d{2,}\s+\d{3,}-\d{2,}|[A-Za-z]+\d+[A-Za-z0-9._/-]*)", cell)) for cell in cells)
+                    if numeric_cells >= 2:
+                        best_row_score = max(best_row_score, 10.0)
+                    if structured_cells >= 1:
+                        best_row_score = max(best_row_score, 16.0)
+                elif re.search(r"(?:\d{3,}[-/.]\d{2,}|\d{2,}\s+\d{3,}-\d{2,})", line):
+                    best_row_score = max(best_row_score, 8.0)
+        score += best_row_score
+        # A parts-list row normally combines the requested description with a
+        # numeric/structured order identifier. Prefer that over prose that only
+        # discusses ordering or maintenance of the same component.
+        if subject_present and re.search(r"\b\d{2,}(?:[ ./_-]\d{2,})+\b|\b[A-Za-z]+\d+[A-Za-z0-9._/-]*\b", raw_text):
+            score += 6.0
+        if not table_evidence and re.search(r"\bhow\s+to\s+order\s+spare\s+parts\b", raw_text, re.I):
+            score -= 5.0
+
+    if definition and compact_subject_terms:
+        subject_phrase = " ".join(compact_subject_terms)
+        normalized_body = str(row.get("_normalized_text") or _normalized(raw_text))
+        pos = normalized_body.find(subject_phrase) if subject_phrase else -1
+        if pos >= 0:
+            score += 4.5
+            local = normalized_body[pos:pos + max(220, len(subject_phrase) + 160)]
+            if re.search(r"\b(?:is|are|means?|refers?|serves?|provides?|contains?|consists?|allows?|used|function|purpose|driven|switched|energized|powered|set|determined|designed|describes?|represents?|indicates?|sufficient|located)\b", local, re.I):
+                score += 8.0
+            if any(re.search(r"\b(?:description|general|function|purpose)\b", str(h), re.I) for h in (row.get("headings") or [])):
+                score += 3.0
+        if len(raw_text) < 220 and re.search(r"\b(?:engineering\s+drawing|flow\s+chart|photograph)\b", raw_text, re.I):
+            score -= 3.0
+        # Natural definition/description questions normally need explanatory
+        # prose, not a contents entry or a spare-parts row that merely repeats
+        # the same component name. Keep this a modest tie-breaker so genuine
+        # table definitions can still rank when no prose explanation exists.
+        if not parts_intent and not profile["value_intent"]:
+            if str(row.get("content_type") or "") == "prose" and pos >= 0:
+                score += 2.5
+            if re.search(r"\b(?:table\s+of\s+contents|parts\s+manual|spare\s+parts\s+manual)\b", raw_text[:500], re.I):
+                score -= 5.0
+        # Prefer the actual named component subsection over a neighboring
+        # paragraph that merely mentions it. Also reward tight co-occurrence
+        # of all technical subject terms for definition questions whose wording
+        # is not an exact phrase match (e.g. "purpose of the present description").
+        headings_norm = _normalized(" ".join(str(h) for h in (row.get("headings") or [])))
+        if subject_phrase and subject_phrase in headings_norm:
+            score += 35.0
+        if compact_subject_terms and all(term in set(_tokens(raw_text)) for term in compact_subject_terms):
+            score += min(8.0, _subject_cohesion(row, compact_subject_terms) * 2.0)
 
     if procedure:
         evidence = len(_PROCEDURE_EVIDENCE & set(counter))
@@ -237,7 +435,20 @@ def _query_feature_score(row: dict[str, Any], query: str) -> float:
         if str(row.get("content_type") or "") == "prose" and evidence:
             score += 0.4
 
+        # Distinctive procedure wording should outrank a related symptom or
+        # troubleshooting row that shares only generic nouns.
+        compact_proc = [t for t in _tokens(query) if t not in _STOPWORDS and t not in {"steps","step","follow","specified","way","servicing","service","need","should"}]
+        if len(compact_proc) >= 2:
+            proc_phrase = " ".join(compact_proc[-3:])
+            if proc_phrase and proc_phrase in _normalized(raw_text):
+                score += 6.0
+
     if troubleshoot:
+        symptom_match = re.search(r"\bwhen\s+(.+?)(?:[?.!]|$)", query or "", re.I)
+        if symptom_match:
+            symptom = _normalized(symptom_match.group(1))
+            if symptom and symptom in _normalized(raw_text):
+                score += 18.0
         evidence = len(_TROUBLESHOOT_EVIDENCE & set(counter))
         score += min(7.0, evidence * 1.05)
         if evidence >= 3:
@@ -263,6 +474,8 @@ def _query_feature_score(row: dict[str, Any], query: str) -> float:
             score += 3.2
         if re.search(r"\b(?:manually|during\s+checking|during\s+adjustment)\b", raw_text, re.I):
             score -= 1.8
+        if str(row.get("content_type") or "") == "prose" and function_evidence >= 2:
+            score += 2.0
         if str(row.get("content_type") or "") == "table" and function_evidence == 0:
             score -= 5.5
 
@@ -274,7 +487,7 @@ def _query_feature_score(row: dict[str, Any], query: str) -> float:
             # Subject-only descriptions should not outrank the requested value.
             score -= 2.4
 
-    value_intent = bool(_VALUE_INTENT_RE.search(query))
+    value_intent = bool(profile["value_intent"])
     if value_intent:
         table_evidence = bool(row.get("table_related")) or str(row.get("content_type") or "").startswith("table")
         has_numeric = bool(re.search(r"[-+]?\d+(?:[.,]\d+)?", raw_text))
@@ -282,7 +495,7 @@ def _query_feature_score(row: dict[str, Any], query: str) -> float:
             score += 2.0
         if row.get("stitched_table") and table_evidence and has_numeric:
             score += 2.5
-        if _LOAD_QUERY_RE.search(query):
+        if profile["load_query"]:
             direct_load_value = bool(_DIRECT_LOAD_VALUE_RE.search(raw_text))
             explicit_value_request = bool(re.search(r"\b(?:value|capacity|rating|rated)\b", query, re.I))
             if direct_load_value:
@@ -297,7 +510,26 @@ def _query_feature_score(row: dict[str, Any], query: str) -> float:
             if row.get("stitched_table") and re.search(r"\b(?:hoisting|lifting)\s+capacity\b", raw_text, re.I):
                 score += 12.0 if explicit_value_request else 5.0
 
-    if _CROSS_REFERENCE_QUERY_RE.search(query or ""):
+    # Natural-language section/assembly qualifiers disambiguate repeated
+    # definitions and parts descriptions. Treat them as structural context,
+    # not as subject terms, and strongly prefer citations whose heading path
+    # carries that context.
+    named_section = str(profile.get("named_section") or "").strip()
+    named_section_terms = set(profile.get("named_section_terms") or ())
+    if named_section and named_section_terms:
+        headings_text = " ".join(str(value) for value in (row.get("headings") or []))
+        heading_terms = set(_tokens(headings_text))
+        heading_ratio = len(named_section_terms & heading_terms) / max(1, len(named_section_terms))
+        if _normalized(named_section) and _normalized(named_section) in _normalized(headings_text):
+            score += 60.0
+        elif heading_ratio >= 0.75:
+            score += 9.0
+        elif heading_ratio >= 0.5:
+            score += 4.0
+        elif named_section_terms.issubset(set(_tokens(raw_text))):
+            score += 1.0
+
+    if profile["cross_reference"]:
         headings_text = " ".join(str(value) for value in (row.get("headings") or []))
         for section_match in _SECTION_QUERY_RE.finditer(query or ""):
             section = section_match.group(1)
@@ -320,17 +552,32 @@ def _query_feature_score(row: dict[str, Any], query: str) -> float:
         if re.search(r"\b(?:see|refer\s+to)\b", raw_text, re.I) and ratio > 0:
             score += 1.4
 
-    if value_intent and re.search(r"\b(?:interval|period|maintenance|service)\b", query, re.I):
-        if _MAINTENANCE_INTERVAL_RE.search(raw_text) and matches > 0:
-            score += 5.0
+    interval_intent = bool(profile["interval_intent"])
+    if interval_intent:
+        has_interval = bool(_MAINTENANCE_INTERVAL_RE.search(raw_text))
+        interval_subject = ""
+        interval_match = re.search(r"\bshould\s+(.+?)\s+be\s+(?:checked|inspected|serviced|replaced|cleaned|maintained)\b", query or "", re.I)
+        if interval_match:
+            interval_subject = _normalized(interval_match.group(1))
+        if interval_subject:
+            if interval_subject in _normalized(raw_text):
+                score += 14.0
+            else:
+                score -= 8.0
+        if has_interval and matches > 0:
+            score += 15.0
+        elif matches > 0:
+            # Pages inheriting the same maintenance heading are common in long
+            # manuals; do not let a heading-only neighbor outrank the row that
+            # actually states the interval.
+            score -= 4.0
 
     # Parts-list item numbers are often plain numeric values (e.g. item 033),
     # so they are intentionally excluded from the global structured-ID guard.
     # When the query explicitly labels a number as an item/position, however,
     # it is a strong local identifier and should bind to that row.
-    part_item = _PART_ITEM_QUERY_RE.search(query or "")
-    if part_item:
-        item_no = part_item.group(1)
+    item_no = str(profile["part_item"] or "")
+    if item_no:
         matching_lines = [
             line for line in (raw_text.splitlines() or [raw_text])
             if re.search(rf"(?<!\d){re.escape(item_no)}(?!\d)", line)
@@ -358,7 +605,7 @@ def _query_feature_score(row: dict[str, Any], query: str) -> float:
     # Commissioning/run-in questions commonly ask for a paired limit and
     # duration. Prefer evidence that actually contains the duration/value over
     # generic descriptions of the same motor/system.
-    if value_intent and _OPERATING_DURATION_QUERY_RE.search(query or ""):
+    if value_intent and profile["operating_duration"]:
         if _OPERATING_DURATION_EVIDENCE_RE.search(raw_text):
             score += 5.0
         if re.search(r"\b(?:run[- ]?in|breaking[- ]?in|starting\s+up)\b", query, re.I) and re.search(r"\b(?:run[- ]?in|starting\s+up)\b", raw_text, re.I):
@@ -400,7 +647,7 @@ def _identifier_candidates(query: str) -> list[str]:
     out: list[str] = []
     for idx, match in enumerate(raw):
         token = match.group(0).lower()
-        if token in _STOPWORDS or len(token) < 2:
+        if token in _STOPWORDS or token in _QUERY_SCAFFOLD_TERMS or len(token) < 2:
             continue
         next_token = raw[idx + 1].group(0).lower() if idx + 1 < len(raw) else ""
         if next_token in _ENGINEERING_UNITS:
@@ -561,7 +808,7 @@ def follow_reference(
     q_tokens = _tokens(parent_query or title or section)
     for rank, (score, idx) in enumerate(scored[:max(1, top_k)], start=1):
         row = dict(docs[idx])
-        row.pop("_tokens", None); row.pop("_heading_tokens", None); row.pop("_normalized_text", None)
+        row.pop("_tokens", None); row.pop("_counter", None); row.pop("_length", None); row.pop("_heading_tokens", None); row.pop("_normalized_text", None)
         results.append({
             **row,
             "rank": rank,
@@ -1268,6 +1515,8 @@ def _load_index_cached(path: str, mtime_ns: int, size: int) -> tuple[dict[str, A
             if isinstance(value, dict):
                 value = dict(value)
                 value["_tokens"] = _tokens(str(value.get("text") or ""))
+                value["_counter"] = Counter(value["_tokens"])
+                value["_length"] = max(1, sum(value["_counter"].values()))
                 value["_heading_tokens"] = set(_tokens(" ".join(value.get("headings") or [])))
                 value["_normalized_text"] = _normalized(str(value.get("text") or ""))
                 rows.append(value)
@@ -1431,16 +1680,25 @@ def search_indices(index_paths: list[Path], query: str, *, top_k: int = 5) -> li
 
     q_counts = Counter(q_tokens)
     query_terms = list(q_counts)
-    counters: list[Counter[str]] = [Counter(row.get("_tokens") or []) for row in docs]
-    lengths = [max(1, sum(counter.values())) for counter in counters]
+    counters: list[Counter[str]] = [row.get("_counter") or Counter(row.get("_tokens") or []) for row in docs]
+    lengths = [int(row.get("_length") or max(1, sum(counter.values()))) for row, counter in zip(docs, counters)]
     avgdl = sum(lengths) / len(lengths)
     df = {term: sum(1 for counter in counters if term in counter) for term in query_terms}
     n_docs = len(docs)
     q_phrase = _normalized(query)
     technical = [term for term in query_terms if any(ch.isdigit() for ch in term) or any(ch in term for ch in "/._+-:")]
-    identifiers = _identifier_candidates(query)
-    definition_intent = bool(_DEFINITION_INTENT_RE.search(query or ""))
-    procedure_intent = bool(_PROCEDURE_INTENT_RE.search(query or ""))
+    profile = _query_profile(query)
+    identifiers = list(profile["identifiers"])
+    raw_query = re.sub(r"\s+", " ", str(query or "").strip())
+    literal_query_pattern = None
+    if raw_query and len(raw_query) <= 64 and any(ch.isdigit() for ch in raw_query):
+        literal_query_pattern = re.compile(
+            rf"(?<![A-Za-z0-9_./:+-]){re.escape(raw_query)}(?![A-Za-z0-9_./:+-])",
+            re.IGNORECASE,
+        )
+    definition_intent = bool(profile["definition"])
+    function_intent = bool(profile["function_intent"])
+    procedure_intent = bool(profile["procedure"])
 
     scored: list[tuple[float, int]] = []
     k1, b = 1.4, 0.75
@@ -1466,18 +1724,62 @@ def search_indices(index_paths: list[Path], query: str, *, top_k: int = 5) -> li
             if found == len(technical):
                 score += 1.2
         raw_text = str(row.get("text") or "")
+        # Short literal technical lookups (drawing IDs, part codes, tags,
+        # revision identifiers) must not be washed out by generic BM25 terms.
+        # This is intentionally query-driven and manufacturer-agnostic.
+        if literal_query_pattern is not None and literal_query_pattern.search(raw_text):
+            score += 12.0
+        elif (
+            len(q_tokens) == 1
+            and raw_query
+            and any(ch.isdigit() for ch in raw_query)
+            and (any(ch in raw_query for ch in "-_/.+:") or (any(ch.isalpha() for ch in raw_query) and any(ch.isdigit() for ch in raw_query)))
+            and re.search(re.escape(raw_query), raw_text, re.IGNORECASE)
+        ):
+            # Some manuals concatenate tag fragments with adjacent fields
+            # (for example ``MB:238-MB:50``). A terse operator lookup for the
+            # meaningful fragment should still retrieve that citation, while
+            # pure numeric substrings remain protected from accidental matches.
+            score += 10.0
         if identifiers:
             for identifier in identifiers:
                 exact = bool(_identifier_boundary_pattern(identifier).search(raw_text))
+                embedded_fragment = bool(
+                    not exact
+                    and any(ch in identifier for ch in "-_/.+:")
+                    and re.search(rf"(?:^|[:/]){re.escape(identifier)}(?![A-Za-z0-9_])", raw_text, re.IGNORECASE)
+                )
+                revision_extension = bool(
+                    not exact
+                    and not embedded_fragment
+                    and any(ch in identifier for ch in "-_/." )
+                    and re.search(
+                        rf"(?<![A-Za-z0-9_./:+-]){re.escape(identifier)}(?=[:/](?:[A-Za-z]?\d))",
+                        raw_text,
+                        re.IGNORECASE,
+                    )
+                )
                 cell_definition = _identifier_cell_definition(raw_text, identifier)
                 structured_occurrences = [token for token in _tokens(raw_text) if identifier in token and token != identifier]
                 if exact:
-                    score += 4.2
-                    if definition_intent:
-                        score += 1.6
-                if cell_definition:
-                    score += 4.5
-                if not exact and structured_occurrences:
+                    score += 14.0
+                    if definition_intent and not function_intent:
+                        score += 4.0
+                elif embedded_fragment:
+                    # Drawings and schematics sometimes prepend a field/tag to
+                    # an otherwise meaningful identifier fragment. Treat a
+                    # separator-delimited fragment as strong evidence without
+                    # opening the door to arbitrary numeric substring matches.
+                    score += 10.0
+                elif revision_extension:
+                    # Standards/drawing identifiers are often followed by a
+                    # revision or year suffix (for example EN 50130-4:1995).
+                    # Only structured query IDs qualify, so bare numeric
+                    # prefixes still cannot match arbitrary longer IDs.
+                    score += 11.0
+                if cell_definition and not function_intent:
+                    score += 8.0
+                if not exact and not embedded_fragment and not revision_extension and structured_occurrences:
                     score -= min(2.8, 0.9 + 0.45 * len(structured_occurrences))
         score += _query_feature_score(row, query)
         score += _incidental_identifier_penalty(raw_text, identifiers)
@@ -1490,7 +1792,7 @@ def search_indices(index_paths: list[Path], query: str, *, top_k: int = 5) -> li
     candidate_limit = min(len(scored), max(max(1, int(top_k)) * 6, max(1, int(top_k))))
     for rank, (score, idx) in enumerate(scored[:candidate_limit], start=1):
         row = dict(docs[idx])
-        row.pop("_tokens", None); row.pop("_heading_tokens", None); row.pop("_normalized_text", None)
+        row.pop("_tokens", None); row.pop("_counter", None); row.pop("_length", None); row.pop("_heading_tokens", None); row.pop("_normalized_text", None)
         candidates.append({
             **row,
             "rank": rank,
