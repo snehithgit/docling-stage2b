@@ -25,6 +25,16 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-asyncio
           sudo mkdir -p /data && sudo chown -R $USER:$USER /data
+      - name: Record baseline full-suite failures
+        shell: bash
+        run: |
+          set +e
+          PYTHONPATH=. pytest -q > /tmp/baseline-tests.log 2>&1
+          rc=$?
+          set -e
+          grep '^FAILED ' /tmp/baseline-tests.log | sed 's/ - .*//' | sort > /tmp/baseline-failures.txt || true
+          echo "Baseline pytest exit: $rc"
+          cat /tmp/baseline-failures.txt
       - name: Apply exact source transformation from guarded workflow
         shell: bash
         run: |
@@ -38,6 +48,8 @@ jobs:
           python /tmp/apply_mixed_evidence.py
           python - <<'PY'
           from pathlib import Path
+
+          # Repair the temporary regression writer's escaped newlines.
           p = Path("tests/test_rag_generation.py")
           text = p.read_text()
           marker = r'\n\ndef test_equipment_scope_recovers_stale_text_job_id_and_keeps_mixed_s_v_evidence():'
@@ -45,6 +57,16 @@ jobs:
           if index < 0:
               raise SystemExit("Appended mixed-evidence regression marker was not found")
           p.write_text(text[:index] + text[index:].replace(r'\n', '\n'))
+
+          # allowed_books is provenance metadata, not a signal that an ordinary
+          # single-book request should become equipment-scoped.
+          p = Path("app/rag_generation.py")
+          text = p.read_text()
+          old = "equipment_scoped = allowed_job_ids is not None or allowed_books is not None"
+          new = "equipment_scoped = allowed_job_ids is not None"
+          if text.count(old) != 1:
+              raise SystemExit(f"Expected one equipment scope expression, got {text.count(old)}")
+          p.write_text(text.replace(old, new, 1))
           PY
       - name: Compile and run focused regression suite
         run: |
@@ -52,11 +74,25 @@ jobs:
           python -m py_compile app/rag_generation.py app/main.py app/retrieval.py app/stage3.py tests/test_rag_generation.py
           PYTHONPATH=. pytest -q \
             tests/test_rag_generation.py \
+            tests/test_rag_generation_endpoints.py \
             tests/test_retrieval.py \
             tests/test_retrieval_scope_safety.py \
             tests/test_hybrid_retrieval.py
-      - name: Run complete test suite
-        run: PYTHONPATH=. pytest -q
+      - name: Verify full suite introduces no new failures
+        shell: bash
+        run: |
+          set +e
+          PYTHONPATH=. pytest -q > /tmp/after-tests.log 2>&1
+          rc=$?
+          set -e
+          grep '^FAILED ' /tmp/after-tests.log | sed 's/ - .*//' | sort > /tmp/after-failures.txt || true
+          echo "Post-fix pytest exit: $rc"
+          cat /tmp/after-failures.txt
+          if ! diff -u /tmp/baseline-failures.txt /tmp/after-failures.txt; then
+            echo "Mixed-evidence patch changed the full-suite failure set"
+            tail -n 160 /tmp/after-tests.log
+            exit 1
+          fi
       - name: Commit validated fix and remove temporary workflows
         run: |
           set -euo pipefail
