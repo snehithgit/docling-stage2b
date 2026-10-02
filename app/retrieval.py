@@ -1464,7 +1464,13 @@ def write_retrieval_artifacts(result_dir: Path, chunks: list[dict[str, Any]], *,
     return summary
 
 
-def refresh_retrieval_artifacts(result_dir: Path, *, max_tokens: int = 256) -> dict[str, Any]:
+def refresh_retrieval_artifacts(
+    result_dir: Path,
+    *,
+    max_tokens: int = 256,
+    postprocess_job_id: int | None = None,
+    source_filename: str | None = None,
+) -> dict[str, Any]:
     """Rebuild derived retrieval artifacts from existing canonical Stage 3 chunks.
 
     This is intentionally retrieval-only: ``chunks.jsonl`` is read but never
@@ -1487,9 +1493,10 @@ def refresh_retrieval_artifacts(result_dir: Path, *, max_tokens: int = 256) -> d
         manifest = json.loads((result_dir / "source_manifest.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, TypeError):
         pass
-    match = re.search(r"__job(\d+)", result_dir.name)
-    postprocess_job_id = int(match.group(1)) if match else None
-    source_filename = str(manifest.get("source_filename") or result_dir.name)
+    if postprocess_job_id is None:
+        match = re.search(r"__job(\d+)", result_dir.name)
+        postprocess_job_id = int(match.group(1)) if match else None
+    source_filename = str(source_filename or manifest.get("source_filename") or result_dir.name)
     _annotated, index_rows, summary = annotate_retrieval_rows(
         chunks, postprocess_job_id=postprocess_job_id, source_filename=source_filename,
         result_dir_name=result_dir.name, max_tokens=max_tokens,

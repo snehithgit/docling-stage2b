@@ -1243,8 +1243,17 @@ class Stage3ChunkBuilder:
             manifest = json.loads((result_dir / "source_manifest.json").read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError, TypeError):
             pass
-        job_match = re.search(r"__job(\d+)", result_dir.name)
-        job_id = int(job_match.group(1)) if job_match else None
+        job_id = None
+        status_path = result_dir / "stage3_chunking.json"
+        if status_path.is_file():
+            try:
+                persisted_status = json.loads(status_path.read_text(encoding="utf-8"))
+                job_id = int(persisted_status.get("postprocess_job_id") or 0) or None
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                job_id = None
+        if job_id is None:
+            job_match = re.search(r"__job(\d+)", result_dir.name)
+            job_id = int(job_match.group(1)) if job_match else None
         optimized, retrieval_rows, retrieval_quality = annotate_retrieval_rows(
             optimized,
             postprocess_job_id=job_id,

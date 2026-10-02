@@ -145,6 +145,7 @@ def prepare_generation_sources(
     visual_results: list[dict[str, Any]] | None = None,
     max_sources: int = 5,
     allowed_job_ids: set[int] | None = None,
+    allowed_books: list[dict[str, Any]] | None = None,
     equipment_name: str | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Build a conservative mixed [S#] + [V#] evidence packet.
@@ -156,23 +157,98 @@ def prepare_generation_sources(
     """
     results = list(results or [])
     visuals = list(visual_results or [])
+    had_text_results = bool(results)
     equipment_scoped = allowed_job_ids is not None
     allowed_ids = {int(value) for value in (allowed_job_ids or set()) if int(value) > 0}
+    allowed_book_rows = [dict(row) for row in (allowed_books or []) if isinstance(row, dict)]
+    for book in allowed_book_rows:
+        try:
+            job_id = int(book.get("postprocess_job_id") or 0)
+        except (TypeError, ValueError):
+            job_id = 0
+        if job_id > 0:
+            allowed_ids.add(job_id)
+
+    def _basename(value: Any) -> str:
+        return str(value or "").replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+
+    books_by_job: dict[int, dict[str, Any]] = {}
+    books_by_result_dir: dict[str, dict[str, Any]] = {}
+    books_by_source: dict[str, list[dict[str, Any]]] = {}
+    for book in allowed_book_rows:
+        try:
+            job_id = int(book.get("postprocess_job_id") or 0)
+        except (TypeError, ValueError):
+            job_id = 0
+        if job_id > 0:
+            books_by_job[job_id] = book
+        result_key = _basename(book.get("result_dir"))
+        if result_key:
+            books_by_result_dir[result_key] = book
+        source_key = str(book.get("source_filename") or "").strip().casefold()
+        if source_key:
+            books_by_source.setdefault(source_key, []).append(book)
+
+    def _scope_book(row: dict[str, Any]) -> dict[str, Any] | None:
+        if not equipment_scoped:
+            return {}
+        try:
+            row_job = int(row.get("postprocess_job_id") or 0)
+        except (TypeError, ValueError):
+            row_job = 0
+        if row_job > 0 and row_job in allowed_ids:
+            return books_by_job.get(row_job) or {"postprocess_job_id": row_job}
+        result_key = _basename(row.get("result_dir"))
+        if result_key and result_key in books_by_result_dir:
+            return books_by_result_dir[result_key]
+        source_key = str(row.get("source_filename") or "").strip().casefold()
+        matches = books_by_source.get(source_key) or []
+        if len(matches) == 1:
+            return matches[0]
+        return None
 
     def in_equipment_scope(row: dict[str, Any]) -> bool:
-        if not equipment_scoped:
-            return True
-        try:
-            return int(row.get("postprocess_job_id") or 0) in allowed_ids
-        except (TypeError, ValueError):
-            return False
+        return not equipment_scoped or _scope_book(row) is not None
 
-    # Scope is a hard boundary, not a ranking hint. Filter before choosing the
-    # anchor so an unscoped top result can never sneak into the generation
-    # packet merely because it happened to be results[0].
+    def normalize_equipment_scope(row: dict[str, Any]) -> dict[str, Any]:
+        copy = dict(row)
+        book = _scope_book(copy)
+        if not equipment_scoped or not book:
+            return copy
+        try:
+            current_job = int(book.get("postprocess_job_id") or 0)
+        except (TypeError, ValueError):
+            current_job = 0
+        if current_job > 0:
+            copy["postprocess_job_id"] = current_job
+        if book.get("result_dir"):
+            copy["result_dir"] = str(book.get("result_dir"))
+        if book.get("source_filename"):
+            copy["source_filename"] = str(book.get("source_filename"))
+        return copy
+
+    # Scope is a hard boundary, not a ranking hint. Result-directory identity
+    # is accepted because Stage-3 result directories are already selected from
+    # the equipment's current book records. This repairs legacy/reset indexes
+    # whose embedded numeric job id no longer matches the current DB row.
     if equipment_scoped:
-        results = [row for row in results if in_equipment_scope(row)]
-        visuals = [row for row in visuals if in_equipment_scope(row)]
+        results = [normalize_equipment_scope(row) for row in results if in_equipment_scope(row)]
+        visuals = [normalize_equipment_scope(row) for row in visuals if in_equipment_scope(row)]
+    if equipment_scoped and had_text_results and not results:
+        # Never silently turn a text+visual retrieval into a V-only generation
+        # packet because text provenance could not be reconciled. Failing closed
+        # is safer than producing an answer from the wrong modality.
+        return [], {
+            "mode": "equipment",
+            "equipment": equipment_name or "Selected equipment",
+            "allowed_postprocess_job_ids": sorted(allowed_ids),
+            "book": None,
+            "postprocess_job_id": None,
+            "includes_adjacent_context": False,
+            "text_evidence_count": 0,
+            "visual_evidence_count": 0,
+            "scope_error": "text_provenance_mismatch",
+        }
     if not results and not visuals:
         if equipment_scoped:
             return [], {

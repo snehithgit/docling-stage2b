@@ -310,3 +310,83 @@ def test_claim_grounding_rejects_uncited_technical_claim_even_when_other_claim_i
     result = citation_audit(answer, sources)
     assert result["grounding_passed"] is False
     assert any(row["reason"] == "missing_claim_citation" for row in result["unsupported_claims"])
+
+def test_equipment_scope_recovers_stale_text_job_id_and_keeps_mixed_s_v_evidence():
+    from app.rag_generation import prepare_generation_sources
+
+    books = [{
+        "postprocess_job_id": 21,
+        "source_filename": "Fire alarm panel",
+        "result_dir": "Fire alarm panel__job12__run0",
+    }]
+    rows = [{
+        "postprocess_job_id": 12,  # stale id embedded in an older retrieval index
+        "source_filename": "Fire alarm panel",
+        "result_dir": "Fire alarm panel__job12__run0",
+        "chunk_id": "CHK-000171",
+        "page_numbers": [47],
+        "text": "The HC100 is a conventional heat detector. The sensor is a thermistor that reacts to changes in temperature.",
+    }]
+    visuals = [{
+        "postprocess_job_id": 21,
+        "source_filename": "Fire alarm panel",
+        "result_dir": "Fire alarm panel__job12__run0",
+        "visual_evidence_id": "VE-1",
+        "page_numbers": [23],
+        "picture_index": 57,
+        "category": "electrical_schematic",
+        "visible_text": ["Last detector", "End of line resistor"],
+        "summary": "Detector wiring schematic",
+    }]
+    sources, scope = prepare_generation_sources(
+        rows,
+        "What sensor does the HC100 heat detector use?",
+        visual_results=visuals,
+        max_sources=5,
+        allowed_job_ids={21},
+        allowed_books=books,
+        equipment_name="Fire alarm panel",
+    )
+    labels = [source["label"] for source in sources]
+    assert "S1" in labels and "V1" in labels
+    assert scope["text_evidence_count"] == 1
+    assert scope["visual_evidence_count"] == 1
+    s1 = next(source for source in sources if source["label"] == "S1")
+    assert s1["postprocess_job_id"] == 21
+    assert "thermistor" in s1["text"]
+
+
+def test_equipment_scope_fails_closed_instead_of_silently_sending_visual_only():
+    from app.rag_generation import prepare_generation_sources
+
+    rows = [{
+        "postprocess_job_id": 999,
+        "source_filename": "Unrelated manual",
+        "result_dir": "wrong__job999__run0",
+        "chunk_id": "BAD",
+        "text": "Unrelated text.",
+    }]
+    visuals = [{
+        "postprocess_job_id": 21,
+        "source_filename": "Fire alarm panel",
+        "result_dir": "Fire alarm panel__job12__run0",
+        "visual_evidence_id": "VE-1",
+        "visible_text": ["detector"],
+        "summary": "Detector wiring",
+    }]
+    sources, scope = prepare_generation_sources(
+        rows,
+        "What sensor is used?",
+        visual_results=visuals,
+        max_sources=5,
+        allowed_job_ids={21},
+        allowed_books=[{
+            "postprocess_job_id": 21,
+            "source_filename": "Fire alarm panel",
+            "result_dir": "Fire alarm panel__job12__run0",
+        }],
+        equipment_name="Fire alarm panel",
+    )
+    assert sources == []
+    assert scope["scope_error"] == "text_provenance_mismatch"
+

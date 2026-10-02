@@ -5382,6 +5382,8 @@ async def retrieval_reindex_all() -> dict:
                 refresh_retrieval_artifacts,
                 result_dir,
                 max_tokens=runtime.config.stage3_chunk_max_tokens,
+                postprocess_job_id=int(book.get("postprocess_job_id") or 0),
+                source_filename=str(book.get("source_filename") or ""),
             )
             results.append({
                 "postprocess_job_id": book["postprocess_job_id"],
@@ -5586,7 +5588,8 @@ async def retrieval_prompt_bundle(update: RetrievalPromptExportRequest) -> dict:
     allowed_job_ids = {int(row.get("postprocess_job_id") or 0) for row in selected_books} if scope.get("mode") == "equipment" else None
     sources, evidence_scope = prepare_generation_sources(
         results, update.query, visual_results=visual_results, max_sources=top_k,
-        allowed_job_ids=allowed_job_ids, equipment_name=scope.get("equipment_name"),
+        allowed_job_ids=allowed_job_ids, allowed_books=selected_books,
+        equipment_name=scope.get("equipment_name"),
     )
     if not sources:
         raise HTTPException(status_code=404, detail="No retrieved source chunks are available to export.")
@@ -5617,7 +5620,8 @@ async def _execute_retrieval_generation(update: RetrievalGenerateRequest) -> dic
     allowed_job_ids = {int(row.get("postprocess_job_id") or 0) for row in selected_books} if scope.get("mode") == "equipment" else None
     sources, evidence_scope = prepare_generation_sources(
         results, update.query, visual_results=visual_results, max_sources=top_k,
-        allowed_job_ids=allowed_job_ids, equipment_name=scope.get("equipment_name"),
+        allowed_job_ids=allowed_job_ids, allowed_books=selected_books,
+        equipment_name=scope.get("equipment_name"),
     )
     if not sources:
         raise HTTPException(status_code=404, detail="No retrieved source chunks are available for answer generation.")
