@@ -1,8 +1,9 @@
-name: Fix retrieval freshness and reuse existing embeddings
+name: Apply retrieval freshness reuse fix
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
       - .github/workflows/fix-retrieval-freshness-reuse.yml
 
@@ -10,10 +11,10 @@ permissions:
   contents: write
 
 jobs:
-  fix-and-validate:
+  apply-fix:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout main
+      - name: Checkout
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
@@ -23,196 +24,26 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-dev.txt
 
-      - name: Prepare runtime layout
+      - name: Prepare runtime directories
         run: |
           sudo mkdir -p /data/db /data/input /data/output /data/processed
           sudo chown -R "$(id -u):$(id -g)" /data
 
-      - name: Apply freshness compatibility fix
-        shell: bash
+      - name: Apply patch
         run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          # 1) A ranking/scoring rule change must not invalidate canonical Stage 3
-          # chunks or the retrieval index. Keep the mismatch visible as diagnostics.
-          p = Path('app/pipeline_state.py')
-          s = p.read_text()
-          old = '''    retrieval_rule_match = (not retrieval_rule_version) or str(quality.get("retrieval_rule_version") or "") == str(retrieval_rule_version)\n    canonical_ready = bool(stage2c_info.get("ready") and ready_status and signature_match and stage3_rule_match and chunks_output)\n    ready = bool(canonical_ready and retrieval_output and retrieval_rule_match)\n'''
-          new = '''    retrieval_rule_match = (not retrieval_rule_version) or str(quality.get("retrieval_rule_version") or "") == str(retrieval_rule_version)\n    canonical_ready = bool(stage2c_info.get("ready") and ready_status and signature_match and stage3_rule_match and chunks_output)\n    # Retrieval-rule versions describe query-time ranking/scoring behavior. They\n    # do not change canonical Stage 3 chunks or the embedded document text, so a\n    # ranking-only upgrade must not force text-index regeneration. Keep the\n    # version comparison below as diagnostics only.\n    ready = bool(canonical_ready and retrieval_output)\n'''
-          if s.count(old) != 1:
-              raise SystemExit(f'pipeline ready block count={s.count(old)}')
-          s = s.replace(old, new)
-          old = '''    elif not retrieval_output:\n        reason = "retrieval_index_missing"\n    elif not retrieval_rule_match:\n        reason = "retrieval_rules_stale"\n'''
-          new = '''    elif not retrieval_output:\n        reason = "retrieval_index_missing"\n'''
-          if s.count(old) != 1:
-              raise SystemExit(f'pipeline reason block count={s.count(old)}')
-          s = s.replace(old, new)
-          old = '''        "retrieval_rule_version": retrieval_rule_version,\n        "recorded_retrieval_rule_version": quality.get("retrieval_rule_version"),\n'''
-          new = '''        "retrieval_rule_version": retrieval_rule_version,\n        "recorded_retrieval_rule_version": quality.get("retrieval_rule_version"),\n        "retrieval_rule_match": retrieval_rule_match,\n        "ranking_only_version_drift": bool(retrieval_output and not retrieval_rule_match),\n'''
-          if s.count(old) != 1:
-              raise SystemExit(f'pipeline diagnostic block count={s.count(old)}')
-          p.write_text(s)
-
-          # 2) Embedding freshness must be based on the text actually embedded,
-          # not retrieval_index.jsonl mtime. If only metadata/timestamps changed,
-          # the stored vectors are still valid.
-          p = Path('app/hybrid_retrieval.py')
-          s = p.read_text()
-          old = '''    signature = _source_signature(index_path)\n    if meta.get("schema") != _SCHEMA: base["reason"] = "embedding_schema_mismatch"; return base\n    if str(meta.get("model") or "") != str(model): base["reason"] = "embedding_model_mismatch"; return base\n    if str(meta.get("document_prefix") or "") != str(document_prefix or ""): base["reason"] = "embedding_profile_mismatch"; return base\n    if int(meta.get("source_size") or -1) != signature["size"] or int(meta.get("source_mtime_ns") or -1) != signature["mtime_ns"]:\n        base["reason"] = "embedding_index_stale"; return base\n    rows = int(meta.get("rows") or 0); dim = int(meta.get("dim") or 0); expected_bytes = rows * dim * 4\n'''
-          new = '''    signature = _source_signature(index_path)\n    if meta.get("schema") != _SCHEMA: base["reason"] = "embedding_schema_mismatch"; return base\n    if str(meta.get("model") or "") != str(model): base["reason"] = "embedding_model_mismatch"; return base\n    if str(meta.get("document_prefix") or "") != str(document_prefix or ""): base["reason"] = "embedding_profile_mismatch"; return base\n    source_signature_match = (\n        int(meta.get("source_size") or -1) == signature["size"]\n        and int(meta.get("source_mtime_ns") or -1) == signature["mtime_ns"]\n    )\n    if not source_signature_match:\n        current_rows = _load_index(index_path)\n        current_fingerprint = _fingerprint_rows(current_rows, model, document_prefix)\n        if str(meta.get("corpus_fingerprint") or "") != current_fingerprint:\n            base["reason"] = "embedding_index_stale"; return base\n    rows = int(meta.get("rows") or 0); dim = int(meta.get("dim") or 0); expected_bytes = rows * dim * 4\n'''
-          if s.count(old) != 1:
-              raise SystemExit(f'book embedding status block count={s.count(old)}')
-          s = s.replace(old, new)
-          old = '''    if str(meta.get("document_prefix") or "") != str(document_prefix or ""):\n        base["reason"] = "embedding_profile_mismatch"\n        return base\n    expected_signatures = _equipment_source_signatures([Path(path) for path in index_paths])\n    if meta.get("source_signatures") != expected_signatures:\n        base["reason"] = "equipment_embedding_index_stale"\n        return base\n    expected_manual_types = {str(k): str(v) for k, v in sorted((manual_types or {}).items())}\n    if (meta.get("manual_types") or {}) != expected_manual_types:\n        base["reason"] = "equipment_manual_metadata_changed"\n        return base\n'''
-          new = '''    if str(meta.get("document_prefix") or "") != str(document_prefix or ""):\n        base["reason"] = "embedding_profile_mismatch"\n        return base\n    expected_manual_types = {str(k): str(v) for k, v in sorted((manual_types or {}).items())}\n    if (meta.get("manual_types") or {}) != expected_manual_types:\n        base["reason"] = "equipment_manual_metadata_changed"\n        return base\n    expected_signatures = _equipment_source_signatures([Path(path) for path in index_paths])\n    source_signature_match = meta.get("source_signatures") == expected_signatures\n    if not source_signature_match:\n        # mtime/size are a cheap fast-path only. A ranking-only refresh may\n        # rewrite retrieval_index.jsonl while leaving every embedded heading/text\n        # byte unchanged. In that case the semantic corpus fingerprint proves the\n        # existing vectors are still valid and avoids a pointless re-embed.\n        current_rows = _equipment_rows(index_paths, equipment_id, manual_types)\n        current_fingerprint = _equipment_fingerprint(\n            current_rows, equipment_id=equipment_id, model=model,\n            document_prefix=document_prefix, manual_types=manual_types,\n        )\n        if str(meta.get("corpus_fingerprint") or "") != current_fingerprint:\n            base["reason"] = "equipment_embedding_index_stale"\n            return base\n'''
-          if s.count(old) != 1:
-              raise SystemExit(f'equipment embedding status block count={s.count(old)}')
-          s = s.replace(old, new)
-          old = '''        "corpus_fingerprint": meta.get("corpus_fingerprint"),\n    })\n'''
-          new = '''        "corpus_fingerprint": meta.get("corpus_fingerprint"),\n        "source_signature_match": bool(source_signature_match),\n        "semantic_fingerprint_reused": bool(not source_signature_match),\n    })\n'''
-          # Only replace the equipment status return occurrence (there are other corpus_fingerprint blocks).
-          idx = s.find(old, s.find('def equipment_hybrid_index_status'))
-          if idx < 0:
-              raise SystemExit('equipment status return block not found')
-          s = s[:idx] + s[idx:].replace(old, new, 1)
-          p.write_text(s)
-
-          # 3) UI wording: an ordinary software/ranking upgrade should not tell
-          # users to rebuild Stage 3 or embeddings.
-          p = Path('app/static/retrieval.html')
-          s = p.read_text()
-          old = '<summary><span><strong>Stage 3 index maintenance</strong><small>Only needed after chunk/index changes or an upgrade. No model calls.</small></span></summary>'
-          new = '<summary><span><strong>Stage 3 index maintenance</strong><small>Only needed when chunk content or the index format changes. Ranking-only upgrades reuse existing text indexes and embeddings.</small></span></summary>'
-          if s.count(old) != 1:
-              raise SystemExit(f'maintenance copy count={s.count(old)}')
-          s = s.replace(old, new)
-          p.write_text(s)
-
-          # Permanent regression tests for the exact failure seen in production.
-          Path('tests/test_retrieval_freshness_reuse.py').write_text(r'''from __future__ import annotations
-
-import json
-import os
-from pathlib import Path
-
-import numpy as np
-
-from app.hybrid_retrieval import (
-    _EQUIPMENT_SCHEMA,
-    _equipment_fingerprint,
-    _equipment_meta_path,
-    _equipment_rows,
-    _equipment_rows_path,
-    _equipment_source_signatures,
-    _equipment_vectors_path,
-    equipment_hybrid_index_status,
-)
-from app.pipeline_state import stage3_freshness
-
-
-def test_ranking_rule_upgrade_does_not_make_stage3_stale(tmp_path: Path) -> None:
-    result_dir = tmp_path / "book__job1__run0"
-    result_dir.mkdir()
-    (result_dir / "chunks.jsonl").write_text("{}\n", encoding="utf-8")
-    (result_dir / "retrieval_index.jsonl").write_text("{}\n", encoding="utf-8")
-    (result_dir / "stage3_chunking.json").write_text(json.dumps({
-        "status": "completed", "stage2c_signature": "sig", "rule_version": "stage3-v1"
-    }), encoding="utf-8")
-    (result_dir / "retrieval_quality.json").write_text(json.dumps({
-        "retrieval_rule_version": "old-ranking-v1"
-    }), encoding="utf-8")
-
-    status = stage3_freshness(
-        result_dir,
-        {"ready": True, "output_signature": "sig"},
-        stage3_rule_version="stage3-v1",
-        retrieval_rule_version="new-ranking-v2",
-    )
-    assert status["ready"] is True
-    assert status["retrieval_rule_match"] is False
-    assert status["ranking_only_version_drift"] is True
-
-
-def test_equipment_embeddings_survive_metadata_only_index_rewrite(tmp_path: Path) -> None:
-    processed = tmp_path / "processed"
-    result_dir = processed / "book__job1__run0"
-    result_dir.mkdir(parents=True)
-    index_path = result_dir / "retrieval_index.jsonl"
-    row = {
-        "schema": "docling-retrieval-index/v1",
-        "postprocess_job_id": 1,
-        "source_filename": "manual.pdf",
-        "chunk_id": "CHK-1",
-        "chunk_index": 0,
-        "headings": ["Hydraulic system"],
-        "text": "Control pressure is 10 bar.",
-    }
-    index_path.write_text(json.dumps(row) + "\n", encoding="utf-8")
-    model = "test-model"
-    equipment_id = "eq-test"
-    manual_types = {1: "operation"}
-    rows = _equipment_rows([index_path], equipment_id, manual_types)
-    fingerprint = _equipment_fingerprint(
-        rows, equipment_id=equipment_id, model=model,
-        document_prefix="", manual_types=manual_types,
-    )
-    meta_path = _equipment_meta_path(processed, equipment_id, model)
-    vec_path = _equipment_vectors_path(processed, equipment_id, model)
-    rows_path = _equipment_rows_path(processed, equipment_id, model)
-    meta_path.parent.mkdir(parents=True)
-    np.asarray([[1.0, 0.0]], dtype="<f4").tofile(vec_path)
-    rows_path.write_text(json.dumps(rows[0]) + "\n", encoding="utf-8")
-    meta = {
-        "schema": _EQUIPMENT_SCHEMA,
-        "equipment_id": equipment_id,
-        "model": model,
-        "document_prefix": "",
-        "rows": 1,
-        "dim": 2,
-        "manual_types": {"1": "operation"},
-        "source_signatures": _equipment_source_signatures([index_path]),
-        "corpus_fingerprint": fingerprint,
-    }
-    meta_path.write_text(json.dumps(meta), encoding="utf-8")
-
-    # Simulate a ranking-only refresh: same embedded document content, new mtime.
-    stat = index_path.stat()
-    os.utime(index_path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 2_000_000_000))
-    status = equipment_hybrid_index_status(
-        processed, equipment_id, [index_path], model=model,
-        document_prefix="", manual_types=manual_types,
-    )
-    assert status["ready"] is True
-    assert status["source_signature_match"] is False
-    assert status["semantic_fingerprint_reused"] is True
-
-    # A real content change must still invalidate the vectors.
-    row["text"] = "Control pressure is 20 bar."
-    index_path.write_text(json.dumps(row) + "\n", encoding="utf-8")
-    stale = equipment_hybrid_index_status(
-        processed, equipment_id, [index_path], model=model,
-        document_prefix="", manual_types=manual_types,
-    )
-    assert stale["ready"] is False
-    assert stale["reason"] == "equipment_embedding_index_stale"
-''', encoding='utf-8')
-          PY
-
-      - name: Compile and test retrieval freshness
-        run: |
+          git apply --check .github/retrieval-freshness-reuse.patch
+          git apply .github/retrieval-freshness-reuse.patch
           python -m py_compile app/pipeline_state.py app/hybrid_retrieval.py
-          python -m pytest -q \
-            tests/test_retrieval.py \
-            tests/test_retrieval_scope_safety.py \
-            tests/test_hybrid_retrieval.py \
-            tests/test_retrieval_freshness_reuse.py
 
-      - name: Commit fix and remove one-shot workflow
-        shell: bash
+      - name: Run retrieval tests
+        run: |
+          python -m pytest -q tests/test_retrieval.py tests/test_retrieval_scope_safety.py tests/test_hybrid_retrieval.py tests/test_retrieval_freshness_reuse.py
+
+      - name: Commit validated fix
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/retrieval-freshness-reuse.patch
           git rm .github/workflows/fix-retrieval-freshness-reuse.yml
           git add app/pipeline_state.py app/hybrid_retrieval.py app/static/retrieval.html tests/test_retrieval_freshness_reuse.py
           git commit -m "Reuse embeddings across ranking-only retrieval upgrades"
