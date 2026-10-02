@@ -1,0 +1,116 @@
+name: Fix mixed S/V RAG evidence
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/fix-rag-mixed-evidence.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Apply provenance-safe mixed evidence fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if text.count(old) != 1:
+                  raise SystemExit(f"Expected exactly one match in {path}, got {text.count(old)}")
+              p.write_text(text.replace(old, new, 1))
+
+          # 1) RAG evidence scope: recover current book identity from stable
+          # result_dir/source provenance instead of trusting an old embedded job id.
+          replace_once(
+              'app/rag_generation.py',
+              '''    allowed_job_ids: set[int] | None = None,\n    equipment_name: str | None = None,\n''',
+              '''    allowed_job_ids: set[int] | None = None,\n    allowed_books: list[dict[str, Any]] | None = None,\n    equipment_name: str | None = None,\n'''
+          )
+          replace_once(
+              'app/rag_generation.py',
+              '''    results = list(results or [])\n    visuals = list(visual_results or [])\n    equipment_scoped = allowed_job_ids is not None\n    allowed_ids = {int(value) for value in (allowed_job_ids or set()) if int(value) > 0}\n\n    def in_equipment_scope(row: dict[str, Any]) -> bool:\n        if not equipment_scoped:\n            return True\n        try:\n            return int(row.get("postprocess_job_id") or 0) in allowed_ids\n        except (TypeError, ValueError):\n            return False\n\n    # Scope is a hard boundary, not a ranking hint. Filter before choosing the\n    # anchor so an unscoped top result can never sneak into the generation\n    # packet merely because it happened to be results[0].\n    if equipment_scoped:\n        results = [row for row in results if in_equipment_scope(row)]\n        visuals = [row for row in visuals if in_equipment_scope(row)]\n''',
+              '''    results = list(results or [])\n    visuals = list(visual_results or [])\n    had_text_results = bool(results)\n    equipment_scoped = allowed_job_ids is not None or allowed_books is not None\n    allowed_ids = {int(value) for value in (allowed_job_ids or set()) if int(value) > 0}\n    allowed_book_rows = [dict(row) for row in (allowed_books or []) if isinstance(row, dict)]\n    for book in allowed_book_rows:\n        try:\n            job_id = int(book.get("postprocess_job_id") or 0)\n        except (TypeError, ValueError):\n            job_id = 0\n        if job_id > 0:\n            allowed_ids.add(job_id)\n\n    def _basename(value: Any) -> str:\n        return str(value or "").replace("\\\\", "/").rstrip("/").rsplit("/", 1)[-1]\n\n    books_by_job: dict[int, dict[str, Any]] = {}\n    books_by_result_dir: dict[str, dict[str, Any]] = {}\n    books_by_source: dict[str, list[dict[str, Any]]] = {}\n    for book in allowed_book_rows:\n        try:\n            job_id = int(book.get("postprocess_job_id") or 0)\n        except (TypeError, ValueError):\n            job_id = 0\n        if job_id > 0:\n            books_by_job[job_id] = book\n        result_key = _basename(book.get("result_dir"))\n        if result_key:\n            books_by_result_dir[result_key] = book\n        source_key = str(book.get("source_filename") or "").strip().casefold()\n        if source_key:\n            books_by_source.setdefault(source_key, []).append(book)\n\n    def _scope_book(row: dict[str, Any]) -> dict[str, Any] | None:\n        if not equipment_scoped:\n            return {}\n        try:\n            row_job = int(row.get("postprocess_job_id") or 0)\n        except (TypeError, ValueError):\n            row_job = 0\n        if row_job > 0 and row_job in allowed_ids:\n            return books_by_job.get(row_job) or {"postprocess_job_id": row_job}\n        result_key = _basename(row.get("result_dir"))\n        if result_key and result_key in books_by_result_dir:\n            return books_by_result_dir[result_key]\n        source_key = str(row.get("source_filename") or "").strip().casefold()\n        matches = books_by_source.get(source_key) or []\n        if len(matches) == 1:\n            return matches[0]\n        return None\n\n    def in_equipment_scope(row: dict[str, Any]) -> bool:\n        return not equipment_scoped or _scope_book(row) is not None\n\n    def normalize_equipment_scope(row: dict[str, Any]) -> dict[str, Any]:\n        copy = dict(row)\n        book = _scope_book(copy)\n        if not equipment_scoped or not book:\n            return copy\n        try:\n            current_job = int(book.get("postprocess_job_id") or 0)\n        except (TypeError, ValueError):\n            current_job = 0\n        if current_job > 0:\n            copy["postprocess_job_id"] = current_job\n        if book.get("result_dir"):\n            copy["result_dir"] = str(book.get("result_dir"))\n        if book.get("source_filename"):\n            copy["source_filename"] = str(book.get("source_filename"))\n        return copy\n\n    # Scope is a hard boundary, not a ranking hint. Result-directory identity\n    # is accepted because Stage-3 result directories are already selected from\n    # the equipment's current book records. This repairs legacy/reset indexes\n    # whose embedded numeric job id no longer matches the current DB row.\n    if equipment_scoped:\n        results = [normalize_equipment_scope(row) for row in results if in_equipment_scope(row)]\n        visuals = [normalize_equipment_scope(row) for row in visuals if in_equipment_scope(row)]\n'''
+          )
+          replace_once(
+              'app/rag_generation.py',
+              '''    if not results and not visuals:\n        if equipment_scoped:\n''',
+              '''    if equipment_scoped and had_text_results and not results:\n        # Never silently turn a text+visual retrieval into a V-only generation\n        # packet because text provenance could not be reconciled. Failing closed\n        # is safer than producing an answer from the wrong modality.\n        return [], {\n            "mode": "equipment",\n            "equipment": equipment_name or "Selected equipment",\n            "allowed_postprocess_job_ids": sorted(allowed_ids),\n            "book": None,\n            "postprocess_job_id": None,\n            "includes_adjacent_context": False,\n            "text_evidence_count": 0,\n            "visual_evidence_count": 0,\n            "scope_error": "text_provenance_mismatch",\n        }\n    if not results and not visuals:\n        if equipment_scoped:\n'''
+          )
+
+          # 2) Pass the authoritative selected book records into both prompt
+          # export and generation evidence assembly.
+          main = Path('app/main.py')
+          text = main.read_text()
+          old = '''        allowed_job_ids=allowed_job_ids, equipment_name=scope.get("equipment_name"),\n    )'''
+          new = '''        allowed_job_ids=allowed_job_ids, allowed_books=selected_books,\n        equipment_name=scope.get("equipment_name"),\n    )'''
+          if text.count(old) != 2:
+              raise SystemExit(f"Expected two generation-source call sites, got {text.count(old)}")
+          text = text.replace(old, new)
+          main.write_text(text)
+
+          # 3) Retrieval-only refresh accepts authoritative current identity.
+          replace_once(
+              'app/retrieval.py',
+              '''def refresh_retrieval_artifacts(result_dir: Path, *, max_tokens: int = 256) -> dict[str, Any]:''',
+              '''def refresh_retrieval_artifacts(\n    result_dir: Path,\n    *,\n    max_tokens: int = 256,\n    postprocess_job_id: int | None = None,\n    source_filename: str | None = None,\n) -> dict[str, Any]:'''
+          )
+          replace_once(
+              'app/retrieval.py',
+              '''    match = re.search(r"__job(\\d+)", result_dir.name)\n    postprocess_job_id = int(match.group(1)) if match else None\n    source_filename = str(manifest.get("source_filename") or result_dir.name)\n''',
+              '''    if postprocess_job_id is None:\n        match = re.search(r"__job(\\d+)", result_dir.name)\n        postprocess_job_id = int(match.group(1)) if match else None\n    source_filename = str(source_filename or manifest.get("source_filename") or result_dir.name)\n'''
+          )
+          replace_once(
+              'app/main.py',
+              '''                result_dir,\n                max_tokens=runtime.config.stage3_chunk_max_tokens,\n            )''',
+              '''                result_dir,\n                max_tokens=runtime.config.stage3_chunk_max_tokens,\n                postprocess_job_id=int(book.get("postprocess_job_id") or 0),\n                source_filename=str(book.get("source_filename") or ""),\n            )'''
+          )
+
+          # 4) Deterministic Stage-3 maintenance prefers the persisted current
+          # Stage-3 identity before the legacy directory-name fallback.
+          replace_once(
+              'app/stage3.py',
+              '''        job_match = re.search(r"__job(\\d+)", result_dir.name)\n        job_id = int(job_match.group(1)) if job_match else None\n        optimized, retrieval_rows, retrieval_quality = annotate_retrieval_rows(\n''',
+              '''        job_id = None\n        status_path = result_dir / "stage3_chunking.json"\n        if status_path.is_file():\n            try:\n                persisted_status = json.loads(status_path.read_text(encoding="utf-8"))\n                job_id = int(persisted_status.get("postprocess_job_id") or 0) or None\n            except (OSError, json.JSONDecodeError, TypeError, ValueError):\n                job_id = None\n        if job_id is None:\n            job_match = re.search(r"__job(\\d+)", result_dir.name)\n            job_id = int(job_match.group(1)) if job_match else None\n        optimized, retrieval_rows, retrieval_quality = annotate_retrieval_rows(\n'''
+          )
+
+          # 5) Regression reproducing stale text id + current visual id.
+          p = Path('tests/test_rag_generation.py')
+          text = p.read_text()
+          test = r'''\n\ndef test_equipment_scope_recovers_stale_text_job_id_and_keeps_mixed_s_v_evidence():\n    from app.rag_generation import prepare_generation_sources\n\n    books = [{\n        "postprocess_job_id": 21,\n        "source_filename": "Fire alarm panel",\n        "result_dir": "Fire alarm panel__job12__run0",\n    }]\n    rows = [{\n        "postprocess_job_id": 12,  # stale id embedded in an older retrieval index\n        "source_filename": "Fire alarm panel",\n        "result_dir": "Fire alarm panel__job12__run0",\n        "chunk_id": "CHK-000171",\n        "page_numbers": [47],\n        "text": "The HC100 is a conventional heat detector. The sensor is a thermistor that reacts to changes in temperature.",\n    }]\n    visuals = [{\n        "postprocess_job_id": 21,\n        "source_filename": "Fire alarm panel",\n        "result_dir": "Fire alarm panel__job12__run0",\n        "visual_evidence_id": "VE-1",\n        "page_numbers": [23],\n        "picture_index": 57,\n        "category": "electrical_schematic",\n        "visible_text": ["Last detector", "End of line resistor"],\n        "summary": "Detector wiring schematic",\n    }]\n    sources, scope = prepare_generation_sources(\n        rows,\n        "What sensor does the HC100 heat detector use?",\n        visual_results=visuals,\n        max_sources=5,\n        allowed_job_ids={21},\n        allowed_books=books,\n        equipment_name="Fire alarm panel",\n    )\n    labels = [source["label"] for source in sources]\n    assert "S1" in labels and "V1" in labels\n    assert scope["text_evidence_count"] == 1\n    assert scope["visual_evidence_count"] == 1\n    s1 = next(source for source in sources if source["label"] == "S1")\n    assert s1["postprocess_job_id"] == 21\n    assert "thermistor" in s1["text"]\n\n\ndef test_equipment_scope_fails_closed_instead_of_silently_sending_visual_only():\n    from app.rag_generation import prepare_generation_sources\n\n    rows = [{\n        "postprocess_job_id": 999,\n        "source_filename": "Unrelated manual",\n        "result_dir": "wrong__job999__run0",\n        "chunk_id": "BAD",\n        "text": "Unrelated text.",\n    }]\n    visuals = [{\n        "postprocess_job_id": 21,\n        "source_filename": "Fire alarm panel",\n        "result_dir": "Fire alarm panel__job12__run0",\n        "visual_evidence_id": "VE-1",\n        "visible_text": ["detector"],\n        "summary": "Detector wiring",\n    }]\n    sources, scope = prepare_generation_sources(\n        rows,\n        "What sensor is used?",\n        visual_results=visuals,\n        max_sources=5,\n        allowed_job_ids={21},\n        allowed_books=[{\n            "postprocess_job_id": 21,\n            "source_filename": "Fire alarm panel",\n            "result_dir": "Fire alarm panel__job12__run0",\n        }],\n        equipment_name="Fire alarm panel",\n    )\n    assert sources == []\n    assert scope["scope_error"] == "text_provenance_mismatch"\n'''
+          if 'test_equipment_scope_recovers_stale_text_job_id_and_keeps_mixed_s_v_evidence' in text:
+              raise SystemExit('Regression test already exists')
+          p.write_text(text.rstrip() + test + '\n')
+          PY
+
+      - name: Compile and test retrieval/RAG
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile app/rag_generation.py app/main.py app/retrieval.py app/stage3.py
+          PYTHONPATH=. pytest -q \
+            tests/test_rag_generation.py \
+            tests/test_retrieval.py \
+            tests/test_retrieval_scope_safety.py \
+            tests/test_hybrid_retrieval.py
+
+      - name: Commit validated fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/fix-rag-mixed-evidence.yml
+          git add app/rag_generation.py app/main.py app/retrieval.py app/stage3.py tests/test_rag_generation.py
+          git commit -m "Fix mixed text and visual RAG evidence provenance"
+          git push origin HEAD:main
