@@ -430,7 +430,11 @@ def stage3_freshness(
     quality = load_json(result_dir / "retrieval_quality.json")
     retrieval_rule_match = (not retrieval_rule_version) or str(quality.get("retrieval_rule_version") or "") == str(retrieval_rule_version)
     canonical_ready = bool(stage2c_info.get("ready") and ready_status and signature_match and stage3_rule_match and chunks_output)
-    ready = bool(canonical_ready and retrieval_output and retrieval_rule_match)
+    # Retrieval-rule versions describe query-time ranking/scoring behavior. They
+    # do not change canonical Stage 3 chunks or the embedded document text, so a
+    # ranking-only upgrade must not force text-index regeneration. Keep the
+    # comparison as diagnostics only.
+    ready = bool(canonical_ready and retrieval_output)
     reason = None
     if not stage2c_info.get("ready"):
         reason = "stage2c_not_current"
@@ -446,8 +450,6 @@ def stage3_freshness(
         reason = "stage3_chunks_missing"
     elif not retrieval_output:
         reason = "retrieval_index_missing"
-    elif not retrieval_rule_match:
-        reason = "retrieval_rules_stale"
     return {
         "ready": ready,
         "reason": reason,
@@ -460,6 +462,8 @@ def stage3_freshness(
         "canonical_ready": canonical_ready,
         "retrieval_rule_version": retrieval_rule_version,
         "recorded_retrieval_rule_version": quality.get("retrieval_rule_version"),
+        "retrieval_rule_match": retrieval_rule_match,
+        "ranking_only_version_drift": bool(retrieval_output and not retrieval_rule_match),
         "chunks_available": chunks_output,
         "retrieval_index_available": retrieval_output,
     }

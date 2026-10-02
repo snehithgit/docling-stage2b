@@ -218,8 +218,15 @@ def hybrid_index_status(index_path: Path, *, model: str, document_prefix: str = 
     if meta.get("schema") != _SCHEMA: base["reason"] = "embedding_schema_mismatch"; return base
     if str(meta.get("model") or "") != str(model): base["reason"] = "embedding_model_mismatch"; return base
     if str(meta.get("document_prefix") or "") != str(document_prefix or ""): base["reason"] = "embedding_profile_mismatch"; return base
-    if int(meta.get("source_size") or -1) != signature["size"] or int(meta.get("source_mtime_ns") or -1) != signature["mtime_ns"]:
-        base["reason"] = "embedding_index_stale"; return base
+    source_signature_match = (
+        int(meta.get("source_size") or -1) == signature["size"]
+        and int(meta.get("source_mtime_ns") or -1) == signature["mtime_ns"]
+    )
+    if not source_signature_match:
+        current_rows = _load_index(index_path)
+        current_fingerprint = _fingerprint_rows(current_rows, model, document_prefix)
+        if str(meta.get("corpus_fingerprint") or "") != current_fingerprint:
+            base["reason"] = "embedding_index_stale"; return base
     rows = int(meta.get("rows") or 0); dim = int(meta.get("dim") or 0); expected_bytes = rows * dim * 4
     try: actual_bytes = int(vec_path.stat().st_size)
     except OSError: base["reason"] = "embedding_vectors_missing"; return base
@@ -601,14 +608,27 @@ def equipment_hybrid_index_status(
     if str(meta.get("document_prefix") or "") != str(document_prefix or ""):
         base["reason"] = "embedding_profile_mismatch"
         return base
-    expected_signatures = _equipment_source_signatures([Path(path) for path in index_paths])
-    if meta.get("source_signatures") != expected_signatures:
-        base["reason"] = "equipment_embedding_index_stale"
-        return base
     expected_manual_types = {str(k): str(v) for k, v in sorted((manual_types or {}).items())}
     if (meta.get("manual_types") or {}) != expected_manual_types:
         base["reason"] = "equipment_manual_metadata_changed"
         return base
+    expected_signatures = _equipment_source_signatures([Path(path) for path in index_paths])
+    source_signature_match = meta.get("source_signatures") == expected_signatures
+    if not source_signature_match:
+        # File mtime/size are only a cheap fast-path. Ranking-only refreshes may
+        # rewrite retrieval_index.jsonl while leaving every embedded heading/text
+        # unchanged. The semantic fingerprint is authoritative for vector reuse.
+        current_rows = _equipment_rows(index_paths, equipment_id, manual_types)
+        current_fingerprint = _equipment_fingerprint(
+            current_rows,
+            equipment_id=equipment_id,
+            model=model,
+            document_prefix=document_prefix,
+            manual_types=manual_types,
+        )
+        if str(meta.get("corpus_fingerprint") or "") != current_fingerprint:
+            base["reason"] = "equipment_embedding_index_stale"
+            return base
     row_count = int(meta.get("rows") or 0)
     dim = int(meta.get("dim") or 0)
     try:
@@ -628,6 +648,8 @@ def equipment_hybrid_index_status(
         "manual_count": len(expected_signatures),
         "created_at_epoch": meta.get("created_at_epoch"),
         "corpus_fingerprint": meta.get("corpus_fingerprint"),
+        "source_signature_match": bool(source_signature_match),
+        "semantic_fingerprint_reused": bool(not source_signature_match),
     })
     return base
 
