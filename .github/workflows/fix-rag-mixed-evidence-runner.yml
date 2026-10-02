@@ -36,14 +36,27 @@ jobs:
           ' .github/workflows/fix-rag-mixed-evidence.yml > /tmp/apply_mixed_evidence.py
           test -s /tmp/apply_mixed_evidence.py
           python /tmp/apply_mixed_evidence.py
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("tests/test_rag_generation.py")
+          text = p.read_text()
+          marker = r'\n\ndef test_equipment_scope_recovers_stale_text_job_id_and_keeps_mixed_s_v_evidence():'
+          index = text.find(marker)
+          if index < 0:
+              raise SystemExit("Appended mixed-evidence regression marker was not found")
+          p.write_text(text[:index] + text[index:].replace(r'\n', '\n'))
+          PY
       - name: Compile and run focused regression suite
         run: |
-          python -m py_compile app/rag_generation.py app/main.py app/retrieval.py app/stage3.py
+          set -euo pipefail
+          python -m py_compile app/rag_generation.py app/main.py app/retrieval.py app/stage3.py tests/test_rag_generation.py
           PYTHONPATH=. pytest -q \
             tests/test_rag_generation.py \
             tests/test_retrieval.py \
             tests/test_retrieval_scope_safety.py \
             tests/test_hybrid_retrieval.py
+      - name: Run complete test suite
+        run: PYTHONPATH=. pytest -q
       - name: Commit validated fix and remove temporary workflows
         run: |
           set -euo pipefail
