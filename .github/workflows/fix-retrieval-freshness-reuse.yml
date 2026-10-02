@@ -29,10 +29,9 @@ jobs:
           sudo mkdir -p /data/db /data/input /data/output /data/processed
           sudo chown -R "$(id -u):$(id -g)" /data
 
-      - name: Apply patch
+      - name: Apply freshness migration
         run: |
-          git apply --check .github/retrieval-freshness-reuse.patch
-          git apply .github/retrieval-freshness-reuse.patch
+          python .github/retrieval-freshness-reuse.py
           python -m py_compile app/pipeline_state.py app/hybrid_retrieval.py
 
       - name: Run retrieval tests
@@ -44,6 +43,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/retrieval-freshness-reuse.patch
+          git rm .github/retrieval-freshness-reuse.py
           git rm .github/workflows/fix-retrieval-freshness-reuse.yml
           git add app/pipeline_state.py app/hybrid_retrieval.py app/static/retrieval.html tests/test_retrieval_freshness_reuse.py
           git commit -m "Reuse embeddings across ranking-only retrieval upgrades"
