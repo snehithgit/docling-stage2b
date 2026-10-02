@@ -1,0 +1,54 @@
+name: Apply embedding compatibility migration fix
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/apply-embedding-compat-migration.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Install test requirements
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Prepare runtime directories
+        run: |
+          sudo mkdir -p /data/db /data/input /data/output /data/processed
+          sudo chown -R "$(id -u):$(id -g)" /data
+
+      - name: Apply compatibility migration source change
+        run: |
+          python .github/embedding-compat-migration.py
+          python -m py_compile app/hybrid_retrieval.py
+
+      - name: Run retrieval and migration regressions
+        run: |
+          python -m pytest -q \
+            tests/test_retrieval.py \
+            tests/test_retrieval_scope_safety.py \
+            tests/test_hybrid_retrieval.py \
+            tests/test_retrieval_freshness_reuse.py \
+            tests/test_embedding_compat_migration.py
+
+      - name: Commit validated fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/embedding-compat-migration.py
+          git rm .github/workflows/apply-embedding-compat-migration.yml
+          git add app/hybrid_retrieval.py tests/test_embedding_compat_migration.py
+          git commit -m "Auto-migrate reusable legacy RAG embeddings"
+          git push origin HEAD:main
