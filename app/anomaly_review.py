@@ -69,6 +69,11 @@ def detect_anomaly_types(entry: dict[str, Any], review_type: str) -> list[str]:
         anomalies.append("LOW_AI_REVIEW_CONFIDENCE")
 
     if kind == "text":
+        if review and not isinstance(review.get("source_validation"), dict) and recommendation in {"KEEP_ORIGINAL", "APPLY_PROPOSED", "EDIT_SUGGESTED"}:
+            anomalies.append("UNVERIFIED_AI_TEXT_REVIEW")
+        audit = entry.get("anomaly_review")
+        if isinstance(audit, dict) and not isinstance(audit.get("source_validation"), dict) and audit.get("verdict") in {"KEEP_ORIGINAL", "CONFIRM_CURRENT", "USE_PRIMARY_PROPOSAL", "REPLACE_TEXT"}:
+            anomalies.append("UNVERIFIED_ANOMALY_TEXT_AUDIT")
         if review and _text_disagreement(entry, review):
             anomalies.append("VERIFIER_REVIEWER_DISAGREEMENT")
         if recommendation == "EDIT_SUGGESTED":
@@ -156,6 +161,10 @@ def anomaly_prompt_context(entry: dict[str, Any], review_type: str, anomaly_type
         "human_review": entry.get("human_review"),
     }
     if kind == "text":
+        previous = base.get("ai_review_assistant")
+        if isinstance(previous, dict) and not isinstance(previous.get("source_validation"), dict):
+            # Do not feed an unsupported legacy explanation back as evidence.
+            base["ai_review_assistant"] = {"recommendation": previous.get("recommendation"), "evidence_status": "legacy_unverified", "reason": "No validated source transcription was stored. Ignore the previous narrative and independently read the source crop."}
         base.update({
             "docling_original": entry.get("original_text") or "",
             "primary_proposed": entry.get("proposed_text") or "",

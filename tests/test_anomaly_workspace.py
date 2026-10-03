@@ -181,7 +181,7 @@ def test_colab_rereview_stores_new_audit_and_history_without_changing_human(work
         monkeypatch.setattr(stage2b, '_render_source_target', lambda *a: (b'crop', 'image/png', {'target': 0}))
         inspect = AsyncMock(return_value={'choices': [{'message': {'content': json.dumps({
             'verdict': 'REPLACE_TEXT', 'confidence': .9, 'reason': 'source differs',
-            'corrected_text': 'PUMP PRESSURE NEW', 'anomaly_types_confirmed': [],
+            'corrected_text': 'PUMP PRESSURE NEW', 'source_readable': True, 'source_transcription': 'PUMP PRESSURE NEW', 'anomaly_types_confirmed': [],
         })}}]})
         monkeypatch.setattr(stage2b, 'OpenAICompatibleVerifier', lambda *a, **k: SimpleNamespace(inspect_image=inspect))
         result = await worker.run_anomaly_review_job(worker_id='colab-1', postprocess_job_id=21,
@@ -282,4 +282,18 @@ def test_human_write_waits_for_book_lifecycle_and_rechecks_deleted_book(workspac
             await task
         assert exc.value.status_code == 404
         assert path.read_bytes() == original
+    asyncio.run(run())
+
+
+def test_legacy_anomaly_without_transcription_is_not_presented_as_current(workspace):
+    async def run():
+        rt, _, ledger, path = workspace
+        entry = ledger['entries'][0]
+        entry['anomaly_review'] = {'stored': True, 'verdict': 'KEEP_ORIGINAL', 'evidence_signature': anomaly_evidence_signature(entry, 'text')}
+        path.write_text(json.dumps(ledger))
+        await rt.review_assistant_store.initialize()
+        data = await main.anomaly_review_queue()
+        assert data['items'][0]['state'] == 'needs_decision'
+        assert data['items'][0]['anomaly_review_stale'] is True
+        assert 'UNVERIFIED_ANOMALY_TEXT_AUDIT' in data['items'][0]['anomaly_types']
     asyncio.run(run())

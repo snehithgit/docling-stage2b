@@ -39,9 +39,10 @@ function humanLink(item) {
 function aiReviewBlock(item) {
   const ai = item.ai_review_assistant;
   if (!ai || typeof ai !== "object") return '<p class="format-note">No normal Review Assistant result is stored.</p>';
-  const confidence = Number(ai.confidence);
+  const legacy = item.review_type === "text" && !ai.source_validation;
+  const confidence = legacy || ai.confidence == null ? NaN : Number(ai.confidence);
   const conf = Number.isFinite(confidence) ? `${Math.round(confidence * 100)}%` : "—";
-  return `<div class="vision-audit-kv"><span>Review Assistant</span><strong>${esc(prettyLabel(ai.recommendation || "—"))}</strong><span>Confidence</span><strong>${esc(conf)}</strong><span>Worker</span><strong>${esc(ai.worker_name || ai.worker_id || "Colab worker")}</strong></div>${ai.reason ? `<p class="vision-audit-summary-text"><strong>Reason:</strong> ${esc(ai.reason)}</p>` : ""}`;
+  return `<div class="vision-audit-kv"><span>Review Assistant</span><strong>${esc(prettyLabel(legacy ? "SOURCE_RE_REVIEW_REQUIRED" : ai.recommendation || "—"))}</strong><span>Confidence</span><strong>${esc(conf)}</strong><span>Worker</span><strong>${esc(ai.worker_name || ai.worker_id || "Colab worker")}</strong></div>${ai.reason ? `<p class="vision-audit-summary-text"><strong>Reason:</strong> ${esc(legacy ? "This older review has no validated source transcription. Re-review the upright crop before relying on its recommendation." : ai.reason)}</p>` : ""}`;
 }
 
 function structuralResultBlock(item, audit) {
@@ -62,10 +63,11 @@ function structuralEvidenceBlock(item) {
 function anomalyResultBlock(item) {
   const a = item.anomaly_review;
   if (!a || typeof a !== "object") return "";
-  const confidence = Number(a.confidence);
+  const legacy = item.review_type === "text" && !a.source_validation;
+  const confidence = legacy || a.confidence == null ? NaN : Number(a.confidence);
   const conf = Number.isFinite(confidence) ? `${Math.round(confidence * 100)}%` : "—";
   const confirmed = Array.isArray(a.anomaly_types_confirmed) ? a.anomaly_types_confirmed : [];
-  return `<section class="ai-review-assistant-inline"><div class="vision-audit-section-label">Latest Colab anomaly audit</div><div class="vision-audit-kv"><span>Verdict</span><strong>${esc(prettyLabel(a.verdict || "—"))}</strong><span>Confidence</span><strong>${esc(conf)}</strong><span>Worker</span><strong>${esc(a.worker_name || a.worker_id || "Colab worker")}</strong></div>${confirmed.length ? `<p class="format-note"><strong>Confirmed:</strong> ${confirmed.map(prettyLabel).map(esc).join(" · ")}</p>` : ""}${a.reason ? `<p class="vision-audit-summary-text"><strong>Reason:</strong> ${esc(a.reason)}</p>` : ""}${a.corrected_text ? `<p class="vision-audit-summary-text"><strong>Corrected text proposal:</strong> ${esc(a.corrected_text)}</p>` : ""}${structuralResultBlock(item, a)}${a.corrected_summary ? `<p class="vision-audit-summary-text"><strong>Corrected visual summary:</strong> ${esc(a.corrected_summary)}</p>` : ""}<p class="format-note"><strong>Advisory only.</strong> Open the human review page to accept, reject or edit this proposal.</p></section>`;
+  return `<section class="ai-review-assistant-inline"><div class="vision-audit-section-label">Latest Colab anomaly audit</div><div class="vision-audit-kv"><span>Verdict</span><strong>${esc(prettyLabel(legacy ? "SOURCE_RE_REVIEW_REQUIRED" : a.verdict || "—"))}</strong><span>Confidence</span><strong>${esc(conf)}</strong><span>Worker</span><strong>${esc(a.worker_name || a.worker_id || "Colab worker")}</strong></div>${confirmed.length ? `<p class="format-note"><strong>Confirmed:</strong> ${confirmed.map(prettyLabel).map(esc).join(" · ")}</p>` : ""}${a.reason ? `<p class="vision-audit-summary-text"><strong>Reason:</strong> ${esc(a.reason)}</p>` : ""}${a.corrected_text ? `<p class="vision-audit-summary-text"><strong>Corrected text proposal:</strong> ${esc(a.corrected_text)}</p>` : ""}${structuralResultBlock(item, a)}${a.corrected_summary ? `<p class="vision-audit-summary-text"><strong>Corrected visual summary:</strong> ${esc(a.corrected_summary)}</p>` : ""}<p class="format-note"><strong>Advisory only.</strong> Open the human review page to accept, reject or edit this proposal.</p></section>`;
 }
 
 function actionBlock(item) {

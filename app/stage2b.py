@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 from .archive import select_docling_document
 from .anomaly_review import anomaly_evidence_signature, anomaly_prompt_context, detect_anomaly_types
+from .text_review_validation import orient_text_crop, validate_text_review
 from .artifact_sweep import build_artifact_sweep_plan
 from .book_lifecycle_lock import LifecycleLockGetter
 from .verifier_checkpoint import CheckpointVerifier
@@ -693,7 +694,7 @@ def _render_source_target(
                     "native_text_chars": len(native_text.strip()),
                     "neighbor_gap_recovery": recovered_from_gap or crop_mode == "neighbor_gap_bbox_recovery",
                 }
-                return rendered.tobytes("png"), "image/png", meta
+                return orient_text_crop(rendered.tobytes("png"), "image/png", meta)
 
         if source.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".bmp"}:
             with Image.open(source) as opened:
@@ -747,7 +748,7 @@ def _render_source_target(
                     "target_bbox_available": bbox_available,
                     "full_page_fallback": crop_mode == "full_page_explicit_fallback",
                 }
-                return buffer.getvalue(), "image/png", meta
+                return orient_text_crop(buffer.getvalue(), "image/png", meta)
     except (OSError, RuntimeError, ValueError):
         return None
     return None
@@ -1274,7 +1275,8 @@ async def _oneplus_text_crosscheck(
         "improve grammar. Do not replace technical words with more likely words. Do not accidentally repeat a "
         "word; if the source visibly repeats a word, preserve that repetition exactly. Preserve visible spelling, "
         "capitalization, punctuation, symbols, numbers, units and identifiers exactly. If characters in the "
-        "target cannot be read reliably, return [UNREADABLE]. Never reproduce BEFORE or AFTER."
+        "target cannot be read reliably, return [UNREADABLE]. Never reproduce BEFORE or AFTER. "
+        "If orientation panels are shown, they are the SAME crop: choose its upright view and transcribe it ONCE. Never include panel labels."
     )
     if provider == "groq":
         prompt = (
@@ -1299,6 +1301,7 @@ async def _oneplus_text_crosscheck(
             "pictures/diagrams. BEFORE and AFTER are imperfect OCR boundary hints only: use them to recognize accidental "
             "neighbor text, but NEVER copy either hint into the answer. If the entire target cannot be transcribed "
             "reliably, return exactly [UNREADABLE] rather than guessing. "
+            "If orientation panels are shown, choose the upright view of the SAME crop, transcribe ONCE and ignore panel labels. "
             "Return ONLY the target transcription as plain text. No JSON, labels, markdown, reasoning or commentary.\n\n"
             f"BEFORE CONTEXT (boundary hint only):\n{before_text[:2400]}\n\n"
             f"AFTER CONTEXT (boundary hint only):\n{after_text[:2400]}"
@@ -5438,6 +5441,17 @@ class Stage2BWorker:
         return wrapped
 
     @staticmethod
+    def _text_review_anchors(doc, entry, page):
+        try:
+            if entry.get("source_type") == "table_cell":
+                _, before, after = _table_cell_context_parts(doc, int(entry["table_index"]), int(entry["cell_index"]))
+            else:
+                _, before, after = _text_context_parts(doc, int(entry["source_index"]), page)
+            return before, after
+        except (IndexError, KeyError, TypeError, ValueError):
+            return [], []
+
+    @staticmethod
     def _review_entry_still_needs_assistance(ledger: dict[str, Any], entry_id: str, review_type: str) -> bool:
         entries = [item for item in (ledger.get("entries") or []) if item.get("status") != "superseded"]
         if review_type == "text":
@@ -5551,12 +5565,19 @@ class Stage2BWorker:
                 prompt = (
                     "You are an AI review assistant for a marine technical manual. A HUMAN remains the final authority. "
                     "Inspect ONLY the supplied source crop. Compare Docling original text and the proposed reconstruction. "
-                    "Return one JSON object only with keys recommendation, suggested_text, confidence, reason. "
+                    "First transcribe the source crop literally, then compare it to the immutable Docling string. "
+                    "If orientation panels are shown, choose the upright view of the SAME crop and transcribe it ONCE without panel labels. "
+                    "Return one JSON object only with keys source_readable (boolean), source_transcription, recommendation, suggested_text, confidence, reason. "
                     "recommendation must be APPLY_PROPOSED, KEEP_ORIGINAL, EDIT_SUGGESTED, or NEEDS_HUMAN. "
+                    "KEEP_ORIGINAL means the Docling STRING matches your source_transcription, not merely that the PDF is readable. "
+                    "If no proposal is supplied, do not describe an imaginary proposal. Preserve source spelling; do not paraphrase. "
+                    "If the target cannot be read, source_readable=false and source_transcription is empty. "
                     "Do not invent text outside the crop. confidence is 0 to 1.\n\n"
                     f"DOCLING ORIGINAL:\n{str(entry.get('original_text') or '')[:5000]}\n\n"
-                    f"PROPOSED:\n{str(entry.get('proposed_text') or '')[:5000]}"
+                    f"PROPOSED:\n{str(entry.get('proposed_text') or '[NO PROPOSAL STORED]')[:5000]}"
                 )
+                before, after = self._text_review_anchors(doc, entry, page)
+                prompt += "\nREAD-ONLY BOUNDARY HINTS (never copy these into the target):\n" + json.dumps({"before": before, "after": after}, ensure_ascii=False)
                 source_meta = {"page": page, "crop": crop_meta}
             else:
                 picture_index = entry.get("picture_index")
@@ -5603,6 +5624,9 @@ class Stage2BWorker:
             if _response_finish_reason(response) == "length":
                 raise ValueError(f"AI review response truncated at {review_max_tokens} tokens")
             parsed = _json_from_model_response(response)
+            if review_type == "text":
+                before, after = self._text_review_anchors(doc, entry, page)
+                parsed = validate_text_review(parsed, entry, anomaly=False, before=before, after=after)
             recommendation = str(parsed.get("recommendation") or "NEEDS_HUMAN").upper().strip()
             allowed = ({"APPLY_PROPOSED", "KEEP_ORIGINAL", "EDIT_SUGGESTED", "NEEDS_HUMAN"} if review_type == "text" else {"TECHNICAL", "DECORATIVE", "USEFUL", "NOT_USEFUL", "NEEDS_HUMAN"})
             if recommendation not in allowed:
@@ -5618,6 +5642,10 @@ class Stage2BWorker:
                 "recommendation": recommendation,
                 "confidence": parsed.get("confidence"),
                 "reason": str(parsed.get("reason") or "")[:2000],
+                "source_transcription": parsed.get("source_transcription") if review_type == "text" else None,
+                "source_validation": parsed.get("source_validation") if review_type == "text" else None,
+                "model_recommendation": parsed.get("model_recommendation"),
+                "model_reason": parsed.get("model_reason"),
                 "suggested_text": str(parsed.get("suggested_text") or "")[:10000] if review_type == "text" else None,
                 "corrected_summary": str(parsed.get("corrected_summary") or "")[:4000] if review_type == "vision" else None,
                 "visible_text": list(parsed.get("visible_text") or [])[:100] if review_type == "vision" else None,
@@ -5768,13 +5796,20 @@ class Stage2BWorker:
                     "The supplied SOURCE CROP is ground truth. Prior AI and human decisions are context, not truth. "
                     "Re-read the crop character-by-character, with special care for part numbers, terminals, alarm codes, "
                     "units, decimal points and look-alike glyphs (0/O, 1/I/l, 5/S, 8/B). "
-                    "Return ONE JSON object only with keys verdict, confidence, reason, anomaly_types_confirmed, corrected_text. "
+                    "First provide source_readable (boolean) and source_transcription: literal text from the crop, not your interpretation. "
+                    "If orientation panels are shown, choose the upright view of the SAME crop and transcribe it ONCE without panel labels. "
+                    "Return ONE JSON object only with keys source_readable, source_transcription, verdict, confidence, reason, anomaly_types_confirmed, corrected_text. "
                     "verdict must be CONFIRM_CURRENT, KEEP_ORIGINAL, USE_PRIMARY_PROPOSAL, REPLACE_TEXT, or NEEDS_HUMAN. "
+                    "KEEP_ORIGINAL means the immutable DOCLING STRING matches the source transcription, not that the PDF itself is readable. "
+                    "When the PDF is readable but the Docling string is garbled, provide REPLACE_TEXT and the literal source transcription. "
+                    "Do not invent a primary proposal when none exists. If unreadable, source_readable=false and source_transcription is empty. "
                     "corrected_text must contain only text visible in this crop and is required only for REPLACE_TEXT. "
                     "Never invent missing text. A previous HUMAN decision is authoritative unless the human explicitly chooses "
                     "to replace it after reading this audit.\n\nAUDIT CONTEXT:\n"
                     + json.dumps(context, ensure_ascii=False)[:12000]
                 )
+                before, after = self._text_review_anchors(doc, entry, page)
+                prompt += "\nREAD-ONLY BOUNDARY HINTS (never copy these into the target):\n" + json.dumps({"before": before, "after": after}, ensure_ascii=False)
                 source_meta = {"page": page, "crop": crop_meta}
             else:
                 picture_index = entry.get("picture_index")
@@ -5809,9 +5844,14 @@ class Stage2BWorker:
             async with self._device_locks[provider]:
                 response = await client.inspect_image(
                     image_bytes, prompt, mime_type=mime,
-                    model=str(worker.get("model") or "koboldcpp"), max_tokens=1024,
+                    model=str(worker.get("model") or "koboldcpp"), max_tokens=(4096 if review_type == "text" else 1024),
                 )
+            if _response_finish_reason(response) == "length":
+                raise ValueError("Anomaly review response was truncated; no partial transcription was published")
             parsed = _json_from_model_response(response)
+            if review_type == "text":
+                before, after = self._text_review_anchors(doc, entry, page)
+                parsed = validate_text_review(parsed, entry, anomaly=True, before=before, after=after)
             verdict = str(parsed.get("verdict") or "NEEDS_HUMAN").upper().strip()
             allowed = (
                 {"CONFIRM_CURRENT", "KEEP_ORIGINAL", "USE_PRIMARY_PROPOSAL", "REPLACE_TEXT", "NEEDS_HUMAN"}
@@ -5840,6 +5880,10 @@ class Stage2BWorker:
                 "verdict": verdict,
                 "confidence": parsed.get("confidence"),
                 "reason": str(parsed.get("reason") or "")[:3000],
+                "source_transcription": parsed.get("source_transcription") if review_type == "text" else None,
+                "source_validation": parsed.get("source_validation") if review_type == "text" else None,
+                "model_verdict": parsed.get("model_verdict"),
+                "model_reason": parsed.get("model_reason"),
                 "corrected_text": (
                     str(parsed.get("corrected_text") or "")[:12000] if review_type == "text" else None
                 ),
