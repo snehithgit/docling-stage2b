@@ -33,7 +33,7 @@ from .colab_provider import read_colab_api_key
 from .postprocess_store import PostprocessStore
 from .pipeline_state import verification_rows_for_stage2c, verification_signature
 from .stage2b_store import HUMAN_VISUAL_RECOVERY_CODE, Stage2BStore
-from .verifier_clients import GroqStructuredVerifier, GroqVisionVerifier, OpenAICompatibleVerifier
+from .verifier_clients import GroqStructuredVerifier, GroqVisionVerifier, OpenAICompatibleVerifier, ReviewWorkerBusyError
 from .worker_registry import WorkerRegistry
 from .stage2c import (
     ALL_DIAGRAM_CATEGORIES, DECORATIVE_IMAGE_CATEGORIES, TECHNICAL_DIAGRAM_CATEGORIES,
@@ -5503,7 +5503,7 @@ class Stage2BWorker:
             raise ValueError("Selected Colab review worker is not configured")
         owner = f"{provider}:review:{postprocess_job_id}:{entry_id}"
         if not await self._reserve_provider(provider, owner):
-            raise RuntimeError("Selected Colab review worker is busy")
+            raise ReviewWorkerBusyError("Selected Colab review worker is busy")
         try:
             post_job = await self._postprocess_store.get_job(int(postprocess_job_id))
             if not post_job or not post_job.get("result_dir"):
@@ -5524,6 +5524,7 @@ class Stage2BWorker:
                 return self._discarded_review_result(
                     review_type, worker_id, "Human review was already resolved before AI assistance started"
                 )
+            expected_signature = anomaly_evidence_signature(entry, review_type)
 
             config = self._config_getter()
             conversion = await self._postprocess_store.get_conversion_job(int(post_job.get("conversion_job_id") or 0))
@@ -5634,10 +5635,11 @@ class Stage2BWorker:
                 current_entry = next((item for item in (current.get("entries") or []) if str(item.get("entry_id")) == str(entry_id) and item.get("status") != "superseded"), None)
                 if not current_entry:
                     raise ValueError("Human-review entry changed while AI review was running")
-                if not self._review_entry_still_needs_assistance(current, entry_id, review_type):
+                if (not self._review_entry_still_needs_assistance(current, entry_id, review_type)
+                        or anomaly_evidence_signature(current_entry, review_type) != expected_signature):
                     suggestion["stored"] = False
                     suggestion["discarded"] = True
-                    suggestion["discard_reason"] = "Human review was resolved while AI assistance was running"
+                    suggestion["discard_reason"] = "Review evidence or human decision changed while AI assistance was running"
                     self._events.notify("review_assistant_stale_result_discarded")
                     return suggestion
                 suggestion["stored"] = True
@@ -5691,7 +5693,7 @@ class Stage2BWorker:
 
         owner = f"{provider}:anomaly:{postprocess_job_id}:{entry_id}"
         if not await self._reserve_provider(provider, owner):
-            raise RuntimeError("Selected Colab anomaly worker is busy")
+            raise ReviewWorkerBusyError("Selected Colab anomaly worker is busy")
         try:
             post_job = await self._postprocess_store.get_job(postprocess_job_id)
             if not post_job or not post_job.get("result_dir"):

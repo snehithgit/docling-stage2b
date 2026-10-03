@@ -1,4 +1,4 @@
-name: AH5 validation
+name: Backend and frontend validation
 
 on:
   pull_request:
@@ -29,5 +29,7 @@ jobs:
         run: python -m compileall -q app
       - name: JavaScript syntax
         run: find app/static -name '*.js' -print0 | xargs -0 -n1 node --check
+      - name: Frontend behavior regressions
+        run: node --test tests/frontend/*.test.cjs
       - name: Test suite
         run: PYTHONPATH=. pytest -q

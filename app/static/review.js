@@ -575,6 +575,9 @@ async function save(action) {
       currentEntry.status = "rejected";
       renderDiff();
     }
+    currentEntry.human_verified = true;
+    currentEntry.status_reason = "HUMAN_VERIFIED";
+    currentEntry.human_review = {action, before_text:original, after_text:text, saved_at_epoch:Date.now()/1000};
     updateMeta(currentEntry);
     const queueEntry = reviewQueue[reviewIndex];
     if (queueEntry) { queueEntry.human_verified = true; queueEntry.status = currentEntry.status; }

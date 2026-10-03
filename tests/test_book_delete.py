@@ -67,7 +67,13 @@ def test_delete_book_records_removes_all_three_pipeline_tables_atomically(tmp_pa
     ))
     assert asyncio.run(verify.list_book_jobs_raw(post_id))
 
+    from app.review_workers import ReviewAssistantStore
+    reviews = ReviewAssistantStore(str(db))
+    asyncio.run(reviews.initialize())
+    asyncio.run(reviews.queue_manual_anomaly(post_id, "book", {"entry_id": "text:R1"}, "anomaly_text"))
+    assert asyncio.run(reviews.list_jobs())
     deleted = asyncio.run(post.delete_book_records(post_id))
+    assert asyncio.run(reviews.list_jobs()) == []
     assert deleted is not None
     assert asyncio.run(post.get_job(post_id)) is None
     assert asyncio.run(post.get_conversion_job(conversion_id)) is None

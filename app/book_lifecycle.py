@@ -47,58 +47,58 @@ def quarantine_book_artifacts(config: Any, book: dict[str, Any]) -> dict[str, An
     prefix = f"{stamp}__book{job_id}__conversion{conversion_job_id}"
     moves: list[dict[str, str]] = []
 
-    source_kind = str(book.get("conversion_source_kind") or book.get("source_kind") or "watcher")
-    source_name = str(book.get("conversion_filename") or book.get("source_filename") or "").strip()
-    if source_kind != "converted_folder" and source_name:
-        moved = _move(
-            Path(config.input_dir) / Path(source_name).name,
-            Path(config.input_dir) / "_deleted_books",
-            prefix=prefix,
-        )
-        if moved:
-            moves.append(moved)
-
-    output_name = str(book.get("conversion_output_filename") or book.get("output_filename") or "").strip()
-    if output_name:
-        moved = _move(
-            Path(config.output_dir) / Path(output_name).name,
-            Path(config.output_dir) / "_deleted_books",
-            prefix=prefix,
-        )
-        if moved:
-            moves.append(moved)
-
-    result_dir_name = str(book.get("result_dir") or "").strip()
-    if result_dir_name:
-        moved = _move(
-            Path(config.processed_dir) / Path(result_dir_name).name,
-            Path(config.processed_dir) / "_deleted_books",
-            prefix=prefix,
-        )
-        if moved:
-            moves.append(moved)
-
-    manifest_dir = Path(config.processed_dir) / "_deleted_books"
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    manifest = {
-        "schema": "docling-deleted-book/v1",
-        "deleted_at": datetime.now(UTC).isoformat(),
-        "postprocess_job_id": job_id,
-        "conversion_job_id": conversion_job_id,
-        "source_filename": book.get("source_filename") or source_name,
-        "source_kind": source_kind,
-        "output_filename": output_name,
-        "result_dir": result_dir_name,
-        "moves": moves,
-        "note": "Book removed from the active pipeline. Files were quarantined, not destroyed.",
-    }
-    manifest_path = _unique_target(manifest_dir, f"{prefix}__deletion.json")
     try:
+        source_kind = str(book.get("conversion_source_kind") or book.get("source_kind") or "watcher")
+        source_name = str(book.get("conversion_filename") or book.get("source_filename") or "").strip()
+        if source_kind != "converted_folder" and source_name:
+            moved = _move(
+                Path(config.input_dir) / Path(source_name).name,
+                Path(config.input_dir) / "_deleted_books",
+                prefix=prefix,
+            )
+            if moved:
+                moves.append(moved)
+
+        output_name = str(book.get("conversion_output_filename") or book.get("output_filename") or "").strip()
+        if output_name:
+            moved = _move(
+                Path(config.output_dir) / Path(output_name).name,
+                Path(config.output_dir) / "_deleted_books",
+                prefix=prefix,
+            )
+            if moved:
+                moves.append(moved)
+
+        result_dir_name = str(book.get("result_dir") or "").strip()
+        if result_dir_name:
+            moved = _move(
+                Path(config.processed_dir) / Path(result_dir_name).name,
+                Path(config.processed_dir) / "_deleted_books",
+                prefix=prefix,
+            )
+            if moved:
+                moves.append(moved)
+
+        manifest_dir = Path(config.processed_dir) / "_deleted_books"
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        manifest = {
+            "schema": "docling-deleted-book/v1",
+            "deleted_at": datetime.now(UTC).isoformat(),
+            "postprocess_job_id": job_id,
+            "conversion_job_id": conversion_job_id,
+            "source_filename": book.get("source_filename") or source_name,
+            "source_kind": source_kind,
+            "output_filename": output_name,
+            "result_dir": result_dir_name,
+            "moves": moves,
+            "note": "Book removed from the active pipeline. Files were quarantined, not destroyed.",
+        }
+        manifest_path = _unique_target(manifest_dir, f"{prefix}__deletion.json")
         manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        return {"moves": moves, "manifest": str(manifest_path)}
     except OSError:
         restore_quarantined_artifacts({"moves": moves, "manifest": ""})
         raise
-    return {"moves": moves, "manifest": str(manifest_path)}
 
 
 def quarantine_conversion_job(config: Any, job: dict[str, Any]) -> dict[str, Any]:
@@ -114,45 +114,49 @@ def quarantine_conversion_job(config: Any, job: dict[str, Any]) -> dict[str, Any
     prefix = f"{stamp}__conversion{job_id}"
     moves: list[dict[str, str]] = []
 
-    source_kind = str(job.get("source_kind") or "watcher")
-    source_name = str(job.get("filename") or "").strip()
-    if source_kind != "converted_folder" and source_name:
-        moved = _move(
-            Path(config.input_dir) / Path(source_name).name,
-            Path(config.input_dir) / "_deleted_books",
-            prefix=prefix,
-        )
-        if moved:
-            moves.append(moved)
+    try:
+        source_kind = str(job.get("source_kind") or "watcher")
+        source_name = str(job.get("filename") or "").strip()
+        if source_kind != "converted_folder" and source_name:
+            moved = _move(
+                Path(config.input_dir) / Path(source_name).name,
+                Path(config.input_dir) / "_deleted_books",
+                prefix=prefix,
+            )
+            if moved:
+                moves.append(moved)
 
-    output_name = str(job.get("output_filename") or "").strip()
-    if output_name:
-        moved = _move(
-            Path(config.output_dir) / Path(output_name).name,
-            Path(config.output_dir) / "_deleted_books",
-            prefix=prefix,
-        )
-        if moved:
-            moves.append(moved)
+        output_name = str(job.get("output_filename") or "").strip()
+        if output_name:
+            moved = _move(
+                Path(config.output_dir) / Path(output_name).name,
+                Path(config.output_dir) / "_deleted_books",
+                prefix=prefix,
+            )
+            if moved:
+                moves.append(moved)
 
-    manifest_dir = Path(config.processed_dir) / "_deleted_books"
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    manifest = {
-        "schema": "docling-deleted-conversion/v1",
-        "deleted_at": datetime.now(UTC).isoformat(),
-        "conversion_job_id": job_id,
-        "source_filename": source_name,
-        "source_kind": source_kind,
-        "output_filename": output_name,
-        "status": job.get("status"),
-        "error_type": job.get("error_type"),
-        "error_message": job.get("error_message"),
-        "moves": moves,
-        "note": "Terminal conversion queue item removed. Existing files were quarantined, not destroyed.",
-    }
-    manifest_path = _unique_target(manifest_dir, f"{prefix}__deletion.json")
-    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    return {"moves": moves, "manifest": str(manifest_path)}
+        manifest_dir = Path(config.processed_dir) / "_deleted_books"
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        manifest = {
+            "schema": "docling-deleted-conversion/v1",
+            "deleted_at": datetime.now(UTC).isoformat(),
+            "conversion_job_id": job_id,
+            "source_filename": source_name,
+            "source_kind": source_kind,
+            "output_filename": output_name,
+            "status": job.get("status"),
+            "error_type": job.get("error_type"),
+            "error_message": job.get("error_message"),
+            "moves": moves,
+            "note": "Terminal conversion queue item removed. Existing files were quarantined, not destroyed.",
+        }
+        manifest_path = _unique_target(manifest_dir, f"{prefix}__deletion.json")
+        manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        return {"moves": moves, "manifest": str(manifest_path)}
+    except OSError:
+        restore_quarantined_artifacts({"moves": moves, "manifest": ""})
+        raise
 
 
 def restore_quarantined_artifacts(quarantine: dict[str, Any]) -> list[str]:

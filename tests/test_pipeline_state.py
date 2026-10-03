@@ -138,7 +138,7 @@ def test_stage2c_rule_version_change_marks_old_output_stale(tmp_path: Path):
     assert state["reason"] == "stage2c_rule_version_stale"
 
 
-def test_retrieval_rule_version_change_marks_only_retrieval_stale(tmp_path: Path):
+def test_retrieval_rule_version_change_is_diagnostic_only(tmp_path: Path):
     result_dir = tmp_path / "book"
     rows = [_verification_row()]
     _write_current_stage2c(result_dir, rows)
@@ -148,9 +148,10 @@ def test_retrieval_rule_version_change_marks_only_retrieval_stale(tmp_path: Path
     (result_dir / "retrieval_quality.json").write_text(json.dumps({"retrieval_rule_version":"old"}), encoding="utf-8")
     (result_dir / "stage3_chunking.json").write_text(json.dumps({"status":"completed", "stage2c_signature":s2c["output_signature"]}), encoding="utf-8")
     state = stage3_freshness(result_dir, s2c, retrieval_rule_version="new")
-    assert state["ready"] is False
+    assert state["ready"] is True
     assert state["canonical_ready"] is True
-    assert state["reason"] == "retrieval_rules_stale"
+    assert state["reason"] is None
+    assert state["ranking_only_version_drift"] is True
 
 
 def test_identity_metadata_repair_uses_result_directory_job_id(tmp_path: Path):

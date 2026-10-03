@@ -95,8 +95,23 @@ def stage2c_output_signature(result_dir: Path) -> str:
         result_dir / "docling_page_repairs.json",
     ]
     return _sha256_parts(
-        [f"{path.name}:{file_signature(path)}".encode("utf-8") for path in paths]
+        [f"{path.name}:{_ledger_content_signature(path) if path.name == 'correction_ledger.json' else file_signature(path)}".encode("utf-8") for path in paths]
     )
+
+
+def _ledger_content_signature(path: Path) -> str:
+    """Advisory AI audits do not change accepted Stage 3 input."""
+    ledger = load_json(path)
+    if not ledger:
+        return file_signature(path)
+    ledger.pop("updated_at_epoch", None)
+    advisory = {"ai_review_assistant", "anomaly_review", "anomaly_review_history", "anomaly_review_decision"}
+    ledger["entries"] = [
+        {key: value for key, value in entry.items() if key not in advisory}
+        if isinstance(entry, dict) else entry
+        for entry in ledger.get("entries") or []
+    ]
+    return hashlib.sha256(json.dumps(ledger, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
 def load_json(path: Path) -> dict[str, Any]:

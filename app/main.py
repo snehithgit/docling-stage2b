@@ -3758,6 +3758,11 @@ async def stage2b_vision_audit(postprocess_job_id: int | None = None, limit: int
 
 @app.post("/api/postprocess/jobs/{job_id}/vision-audit/{entry_id}/decision")
 async def vision_audit_human_decision(job_id: int, entry_id: str, request: VisualAuditDecisionRequest) -> dict:
+    async with runtime.book_lifecycle_locks.get(int(job_id)):
+        return await _vision_audit_human_decision_locked(job_id, entry_id, request)
+
+
+async def _vision_audit_human_decision_locked(job_id: int, entry_id: str, request: VisualAuditDecisionRequest) -> dict:
     job = await runtime.postprocess_store.get_job(job_id)
     if not job or not job.get("result_dir"):
         raise HTTPException(status_code=404, detail="Post-process job not found.")
@@ -4099,6 +4104,11 @@ async def verifier_audit_gate_status(job_id: int) -> dict:
 
 @app.post("/api/postprocess/jobs/{job_id}/verifier-audit/bypass")
 async def verifier_audit_bypass(job_id: int, request: AuditBypassRequest) -> dict:
+    async with runtime.book_lifecycle_locks.get(int(job_id)):
+        return await _verifier_audit_bypass_locked(job_id, request)
+
+
+async def _verifier_audit_bypass_locked(job_id: int, request: AuditBypassRequest) -> dict:
     job = await runtime.postprocess_store.get_job(job_id)
     if not job or not job.get("result_dir"):
         raise HTTPException(status_code=404, detail="Post-process job not found.")
@@ -4418,7 +4428,20 @@ async def review_worker_status() -> dict:
     return await runtime.review_assistant.status()
 
 
+@app.post("/api/review-workers/jobs/{job_id}/retry")
+async def retry_review_worker_job(job_id: int) -> dict:
+    if not await runtime.review_assistant_store.retry_failed(job_id):
+        raise HTTPException(status_code=409, detail="Only a current failed review job can be retried.")
+    runtime.events.notify("review_assistant_manual_retry")
+    return {"queued": True, "job_id": job_id, "human_authority_preserved": True}
+
+
 async def _queue_manual_anomaly_review(job_id: int, entry_id: str, review_type: str) -> dict:
+    async with runtime.book_lifecycle_locks.get(int(job_id)):
+        return await _queue_manual_anomaly_review_locked(job_id, entry_id, review_type)
+
+
+async def _queue_manual_anomaly_review_locked(job_id: int, entry_id: str, review_type: str) -> dict:
     job = await runtime.postprocess_store.get_job(int(job_id))
     if not job or not job.get("result_dir"):
         raise HTTPException(status_code=404, detail="Post-process job not found.")
@@ -4450,22 +4473,21 @@ async def _queue_manual_anomaly_review(job_id: int, entry_id: str, review_type: 
         # Compatibility with an earlier AH5 draft that allowed per-item No.
         # A new batch Yes supersedes only that anomaly-page choice; it never
         # changes human_verified or human_visual_decision.
-        async with runtime.book_lifecycle_locks.get(int(job_id)):
-            async with runtime.stage2b_worker._stage2c_ledger_lock:
-                ledger = await asyncio.to_thread(_load_json_file, result_dir / "correction_ledger.json")
-                current_entry = next(
-                    (item for item in (ledger.get("entries") or [])
-                     if str(item.get("entry_id") or "") == str(entry_id) and item.get("status") != "superseded"),
-                    None,
-                )
-                if not isinstance(current_entry, dict):
-                    raise HTTPException(status_code=404, detail="Current review ledger entry was not found.")
-                current_entry.pop("anomaly_review_decision", None)
-                await asyncio.to_thread(
-                    upsert_ledger_entry, result_dir,
-                    str(ledger.get("source_zip_sha256") or ""), current_entry,
-                )
-                entry = current_entry
+        async with runtime.stage2b_worker._stage2c_ledger_lock:
+            ledger = await asyncio.to_thread(_load_json_file, result_dir / "correction_ledger.json")
+            current_entry = next(
+                (item for item in (ledger.get("entries") or [])
+                 if str(item.get("entry_id") or "") == str(entry_id) and item.get("status") != "superseded"),
+                None,
+            )
+            if not isinstance(current_entry, dict):
+                raise HTTPException(status_code=404, detail="Current review ledger entry was not found.")
+            current_entry.pop("anomaly_review_decision", None)
+            await asyncio.to_thread(
+                upsert_ledger_entry, result_dir,
+                str(ledger.get("source_zip_sha256") or ""), current_entry,
+            )
+            entry = current_entry
     queued = await runtime.review_assistant_store.queue_manual_anomaly(
         int(job_id), result_dir_name, entry,
         "anomaly_text" if review_type == "text" else "anomaly_vision",
@@ -6613,6 +6635,11 @@ async def human_correction_docling_context(job_id: int, entry_id: str):
 
 @app.post("/api/postprocess/jobs/{job_id}/corrections/{entry_id}")
 async def update_human_correction(job_id: int, entry_id: str, update: HumanCorrectionUpdate):
+    async with runtime.book_lifecycle_locks.get(int(job_id)):
+        return await _update_human_correction_locked(job_id, entry_id, update)
+
+
+async def _update_human_correction_locked(job_id: int, entry_id: str, update: HumanCorrectionUpdate):
     job = await runtime.postprocess_store.get_job(job_id)
     if not job or not job.get("result_dir"):
         raise HTTPException(status_code=404, detail="Post-process job not found.")
@@ -6628,7 +6655,12 @@ async def update_human_correction(job_id: int, entry_id: str, update: HumanCorre
         entry = next((item for item in ledger.get("entries", []) if str(item.get("entry_id")) == entry_id), None)
         if not entry:
             raise HTTPException(status_code=404, detail="Correction entry not found.")
-        apply_human_correction_to_entry(entry, text=update.text, action=update.action)
+        if entry.get("status") == "superseded":
+            raise HTTPException(status_code=409, detail="This correction was superseded. Review the current entry instead.")
+        try:
+            apply_human_correction_to_entry(entry, text=update.text, action=update.action)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         await asyncio.to_thread(
             upsert_ledger_entry, result_dir, str(ledger.get("source_zip_sha256") or ""), entry
         )
