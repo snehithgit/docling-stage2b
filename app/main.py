@@ -82,6 +82,7 @@ from .worker import ConversionWorker
 from .worker_registry import WorkerRegistry
 from .review_workers import ReviewAssistantStore, ReviewAssistantService
 from .anomaly_review import anomaly_evidence_signature, detect_anomaly_types
+from .structural_anomaly import structural_entries
 from .version import APP_VERSION
 from .table_repair import (
     TABLE_ROW_COLLAPSE_CODE, ensure_collapse_scan, table_repair_context, parse_tsv_matrix,
@@ -4448,14 +4449,15 @@ async def _queue_manual_anomaly_review_locked(job_id: int, entry_id: str, review
     result_dir_name = Path(str(job["result_dir"])).name
     result_dir = Path(runtime.config.processed_dir) / result_dir_name
     ledger = await asyncio.to_thread(_load_json_file, result_dir / "correction_ledger.json")
+    available_entries = await asyncio.to_thread(structural_entries, result_dir) if review_type == "structural" else ledger.get("entries") or []
     entry = next(
-        (item for item in (ledger.get("entries") or [])
+        (item for item in available_entries
          if str(item.get("entry_id") or "") == str(entry_id) and item.get("status") != "superseded"),
         None,
     )
     if not isinstance(entry, dict):
         raise HTTPException(status_code=404, detail="Current review ledger entry was not found.")
-    expected_types = {"text_correction", "table_cell_correction"} if review_type == "text" else {"vision_enrichment"}
+    expected_types = ({"text_correction", "table_cell_correction"} if review_type == "text" else {"structural_anomaly"} if review_type == "structural" else {"vision_enrichment"})
     if str(entry.get("entry_type") or "") not in expected_types:
         raise HTTPException(status_code=409, detail="Review entry type does not match this anomaly-review action.")
 
@@ -4490,7 +4492,7 @@ async def _queue_manual_anomaly_review_locked(job_id: int, entry_id: str, review
             entry = current_entry
     queued = await runtime.review_assistant_store.queue_manual_anomaly(
         int(job_id), result_dir_name, entry,
-        "anomaly_text" if review_type == "text" else "anomaly_vision",
+        "anomaly_" + review_type,
     )
     runtime.events.notify(
         "anomaly_review_manual_queued",
@@ -4512,6 +4514,11 @@ async def queue_text_anomaly_review(job_id: int, entry_id: str) -> dict:
 @app.post("/api/postprocess/jobs/{job_id}/vision-audit/{entry_id}/anomaly-review")
 async def queue_vision_anomaly_review(job_id: int, entry_id: str) -> dict:
     return await _queue_manual_anomaly_review(job_id, entry_id, "vision")
+
+
+@app.post("/api/postprocess/jobs/{job_id}/structural-review/{entry_id}/anomaly-review")
+async def queue_structural_anomaly_review(job_id: int, entry_id: str) -> dict:
+    return await _queue_manual_anomaly_review(job_id, entry_id, "structural")
 
 
 def _anomaly_human_decision_epoch(entry: dict) -> float:
@@ -4556,7 +4563,7 @@ def _anomaly_decision_is_current(entry: dict, evidence_signature: str) -> bool:
 
 @app.get("/api/anomaly-review")
 async def anomaly_review_queue() -> dict:
-    """Dedicated, advisory anomaly workspace built from current Stage 2C ledgers."""
+    """Advisory workspace combining current Stage 2C ledgers and Stage 2A human routes."""
     # Use the same current-book authority as the Review Assistant itself so
     # historical post-process runs cannot reappear as duplicate anomalies.
     books = await runtime.stage2b_store.list_books()
@@ -4564,9 +4571,9 @@ async def anomaly_review_queue() -> dict:
     queue_map: dict[tuple[int, str, str], dict] = {}
     for row in queue_rows:
         review_type = str(row.get("review_type") or "")
-        if review_type not in {"anomaly_text", "anomaly_vision"}:
+        if review_type not in {"anomaly_text", "anomaly_vision", "anomaly_structural"}:
             continue
-        base_type = "text" if review_type == "anomaly_text" else "vision"
+        base_type = review_type.removeprefix("anomaly_")
         queue_map[(int(row.get("postprocess_job_id") or 0), str(row.get("entry_id") or ""), base_type)] = row
 
     registry = await asyncio.to_thread(runtime.worker_registry.snapshot, runtime.config)
@@ -4589,8 +4596,7 @@ async def anomaly_review_queue() -> dict:
             continue
         result_dir = Path(runtime.config.processed_dir) / result_dir_name
         ledger = await asyncio.to_thread(_load_json_file, result_dir / "correction_ledger.json")
-        if not ledger:
-            continue
+        structural = await asyncio.to_thread(structural_entries, result_dir)
         book_name = str(
             job.get("source_filename") or job.get("output_filename") or result_dir_name
         )
@@ -4600,11 +4606,15 @@ async def anomaly_review_queue() -> dict:
             entry for entry in (ledger.get("entries") or [])
             if isinstance(entry, dict) and str(entry.get("status") or "") != "superseded"
         ]
+        current_entries.extend(structural)
         visual_seen: set[str] = set()
         for raw_entry in current_entries:
             entry_type = str(raw_entry.get("entry_type") or "")
             if entry_type in {"text_correction", "table_cell_correction"}:
                 review_type = "text"
+                entry = raw_entry
+            elif entry_type == "structural_anomaly":
+                review_type = "structural"
                 entry = raw_entry
             elif entry_type == "vision_enrichment":
                 try:
@@ -4670,6 +4680,10 @@ async def anomaly_review_queue() -> dict:
                 "source_type": entry.get("source_type"),
                 "source_index": entry.get("source_index"),
                 "picture_index": entry.get("picture_index"),
+                "route_id": entry.get("route_id"),
+                "pages": entry.get("pages") or [],
+                "structural_code": entry.get("structural_code"),
+                "structural_evidence": entry.get("_structural_evidence") if review_type == "structural" else None,
                 "original_text": entry.get("original_text") if review_type == "text" else None,
                 "proposed_text": entry.get("proposed_text") if review_type == "text" else None,
                 "verification_verdict": entry.get("verification_verdict"),
@@ -4769,7 +4783,7 @@ async def reverify_all_anomalies(confirm: bool = False) -> dict:
             str(item.get("entry_id") or ""),
             str(item.get("review_type") or ""),
         )
-        if not key[0] or not key[1] or key[2] not in {"text", "vision"} or key in seen:
+        if not key[0] or not key[1] or key[2] not in {"text", "vision", "structural"} or key in seen:
             skipped += 1
             continue
         seen.add(key)

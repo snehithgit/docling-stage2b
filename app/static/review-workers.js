@@ -20,7 +20,7 @@ function renderAssignments(){
     <div class="review-assignment-options">
       <label class="review-role-option"><input type="checkbox" data-role="text" value="${esc(w.id)}" ${settings.text_worker_ids?.includes(w.id)?'checked':''}/><span><strong>Text review</strong><small>Re-check uncertain OCR/text suggestions.</small></span></label>
       <label class="review-role-option"><input type="checkbox" data-role="vision" value="${esc(w.id)}" ${settings.vision_worker_ids?.includes(w.id)?'checked':''}/><span><strong>Vision review</strong><small>Re-check technical visual evidence.</small></span></label>
-      <label class="review-role-option"><input type="checkbox" data-role="anomaly" value="${esc(w.id)}" ${settings.anomaly_worker_ids?.includes(w.id)?'checked':''}/><span><strong>Anomaly review</strong><small>Third-pass audit of disagreements, truncation, low confidence and suspicious rewrites.</small></span></label>
+      <label class="review-role-option"><input type="checkbox" data-role="anomaly" value="${esc(w.id)}" ${settings.anomaly_worker_ids?.includes(w.id)?'checked':''}/><span><strong>Anomaly review</strong><small>Audit text, vision, table structure and document anomalies.</small></span></label>
     </div>
   </article>`).join('');
 }
@@ -52,14 +52,14 @@ async function loadStatus(){
     $('review-machine-gate').textContent=st.machine_work_complete?'Primary machine workload complete · review workers may run.':`${blockers.toLocaleString()} primary job${blockers===1?'':'s'} still block this phase.`;
     const textRemaining=(c.text_pending||0)+(c.text_processing||0);
     const visionRemaining=(c.vision_pending||0)+(c.vision_processing||0);
-    const anomalyPending=(c.anomaly_text_pending||0)+(c.anomaly_vision_pending||0);
-    const anomalyProcessing=(c.anomaly_text_processing||0)+(c.anomaly_vision_processing||0);
+    const anomalyPending=(c.anomaly_text_pending||0)+(c.anomaly_vision_pending||0)+(c.anomaly_structural_pending||0);
+    const anomalyProcessing=(c.anomaly_text_processing||0)+(c.anomaly_vision_processing||0)+(c.anomaly_structural_processing||0);
     $('review-text-pending').textContent=textRemaining;
     $('review-vision-pending').textContent=visionRemaining;
     $('review-anomaly-pending').textContent=anomalyPending+anomalyProcessing;
     $('review-processing').textContent=(c.text_processing||0)+(c.vision_processing||0)+anomalyProcessing;
     $('review-failed').textContent=Number(c.failed||0).toLocaleString();
-    $('review-completed').textContent=(c.text_completed||0)+(c.vision_completed||0)+(c.anomaly_text_completed||0)+(c.anomaly_vision_completed||0);
+    $('review-completed').textContent=(c.text_completed||0)+(c.vision_completed||0)+(c.anomaly_text_completed||0)+(c.anomaly_vision_completed||0)+(c.anomaly_structural_completed||0);
     const rows=(st.jobs||[]).map(j=>`<tr><td data-label="Type">${esc(j.review_type)}</td><td data-label="Book"><a href="/book?job=${Number(j.postprocess_job_id)}">#${Number(j.postprocess_job_id)}</a></td><td data-label="Entry"><code>${esc(j.entry_id)}</code></td><td data-label="Status"><span class="status ${esc(j.status)}">${esc(j.status)}</span></td><td data-label="Worker">${esc(j.claimed_by||'—')}</td><td data-label="Attempt">${Number(j.attempt_count||0)}</td><td data-label="Last retry">${esc(j.error_message||j.error_type||'—')}</td><td data-label="Time">${fmt(j.processing_seconds)}</td><td data-label="Action">${j.status==='failed'?`<button class="mini-action" type="button" data-review-retry="${Number(j.id)}">Retry review</button>`:'—'}</td></tr>`).join('')||'<tr><td colspan="9" class="empty-state">No review-assistant jobs yet.</td></tr>';
     const body=$('review-jobs');
     if(body.dataset.signature!==rows){body.innerHTML=rows;body.dataset.signature=rows;}

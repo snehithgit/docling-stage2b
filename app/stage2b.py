@@ -5656,7 +5656,7 @@ class Stage2BWorker:
         self, *, worker_id: str, postprocess_job_id: int, entry_id: str,
         review_type: str, manual_requested: bool = False,
     ) -> dict[str, Any]:
-        """Run a third-pass Colab audit over a suspicious Text/Vision ledger entry.
+        """Run an advisory Colab audit over text, vision or a structural route.
 
         The anomaly audit is always advisory. It may propose corrected text or
         corrected visual evidence, including after an existing human decision,
@@ -5680,6 +5680,10 @@ class Stage2BWorker:
         self, *, worker_id: str, postprocess_job_id: int, entry_id: str,
         review_type: str, manual_requested: bool,
     ) -> dict[str, Any]:
+        if review_type == "structural":
+            from .structural_anomaly import run_structural_audit
+            return await run_structural_audit(self, worker_id=worker_id, postprocess_job_id=postprocess_job_id,
+                                              entry_id=entry_id, manual_requested=manual_requested)
         if review_type not in {"text", "vision"}:
             raise ValueError("Anomaly review type must be text or vision")
         if self._worker_registry is None:

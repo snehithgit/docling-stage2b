@@ -1283,3 +1283,5 @@ button.mini-action { cursor: pointer; }
   .review-toggle-card { align-items:stretch; flex-direction:column; }
   .review-master-toggle { justify-content:center; width:100%; }
 }
+
+#ar-results pre { max-height: 320px; max-width: 100%; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; font-size: 11px; }

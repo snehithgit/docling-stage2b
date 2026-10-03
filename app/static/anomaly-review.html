@@ -4,8 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Anomaly Review · Docling Auto-Convert</title>
-<link rel="stylesheet" href="/assets/styles.css?v=2026.10.03.40.11AH7" />
-<link rel="stylesheet" href="/assets/workflow.css?v=2026.10.03.40.11AH7" />
+<link rel="stylesheet" href="/assets/styles.css?v=2026.10.03.40.11AH8" />
+<link rel="stylesheet" href="/assets/workflow.css?v=2026.10.03.40.11AH8" />
 </head>
 <body class="ui29">
 <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -29,7 +29,7 @@
       <div>
         <p class="eyebrow">Source evidence audit</p>
         <h1>Anomaly Review</h1>
-        <p class="subtle">Inspect suspicious Text/Vision ledger states. When ready, one global action can send the full current anomaly set to the assigned Colab anomaly workers.</p>
+        <p class="subtle">Inspect text, vision, table and structural findings. When ready, one global action can send the full current anomaly set to the assigned Colab anomaly workers.</p>
       </div>
       <button class="secondary-button" id="ar-refresh" type="button">Refresh</button>
     </header>
@@ -51,7 +51,7 @@
         <div><span class="eyebrow">BATCH ANOMALY AUDIT</span><h2>Re-verify all current anomalies with Colab?</h2></div>
         <span class="status-pill suggestion-pill">Human authority preserved</span>
       </div>
-      <p class="field-note"><strong>Yes</strong> queues every detected Text + Vision anomaly, including anomalies on already human-reviewed entries. <strong>No</strong> queues nothing. Requested audits run after primary verification is complete and may run while other entries await normal AI review.</p>
+      <p class="field-note"><strong>Yes</strong> queues every detected text, vision, table and structural anomaly, including anomalies on already human-reviewed entries. <strong>No</strong> queues nothing. Requested audits run after primary verification is complete and may run while other entries await normal AI review.</p>
       <div class="review-actions">
         <button id="ar-batch-yes" class="primary-button" type="button">Yes · re-verify all anomalies</button>
         <button id="ar-batch-no" class="secondary-button" type="button">No · do not queue</button>
@@ -62,7 +62,7 @@
     <section class="panel vision-audit-filter-panel">
       <div class="vision-audit-filters">
         <label>Book<select id="ar-book"><option value="">All books</option></select></label>
-        <label>Type<select id="ar-type"><option value="">Text + Vision</option><option value="text">Text</option><option value="vision">Vision</option></select></label>
+        <label>Type<select id="ar-type"><option value="">All types</option><option value="text">Text</option><option value="vision">Vision</option><option value="structural">Structure (including tables)</option><option value="table">Tables</option></select></label>
         <label>State<select id="ar-state"><option value="">All states</option><option value="needs_decision">Detected / not queued</option><option value="queued">Queued</option><option value="processing">Processing</option><option value="failed">Colab failed</option><option value="reviewed">Reviewed by Colab</option></select></label>
         <label>Human state<select id="ar-human-state"><option value="">All</option><option value="reviewed">Human reviewed</option><option value="unreviewed">Not human reviewed</option></select></label>
         <label>Anomaly<select id="ar-anomaly"><option value="">All anomaly types</option></select></label>
@@ -76,7 +76,7 @@
     <section id="ar-results" class="vision-audit-results" aria-live="polite"><div class="empty-state">Loading anomaly candidates…</div></section>
   </main>
 </div>
-<script src="/assets/nav.js?v=2026.10.03.40.11AH7"></script>
-<script src="/assets/anomaly-review.js?v=2026.10.03.40.11AH7"></script>
+<script src="/assets/nav.js?v=2026.10.03.40.11AH8"></script>
+<script src="/assets/anomaly-review.js?v=2026.10.03.40.11AH8"></script>
 </body>
 </html>
