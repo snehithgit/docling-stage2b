@@ -12,11 +12,11 @@ idle. Otherwise create a new worker. Do not register the same physical runtime
 as both a manual and imported worker. Manual workers remain independently
 editable and are never refreshed by the runner integration.
 
-Monitoring polls authenticated `GET /accounts` and each linked, ready account's
+Monitoring polls authenticated `GET /accounts` and each linked account's
 `GET /accounts/{id}/endpoint` every ten seconds. It requires `running`, `healthy`,
 `routable`, and an unexpired configured budget before allowing new jobs. The
 backend saves the fetched URL and key and refreshes them after runtime changes.
-Credential rotation waits until active requests finish. Missing, stale (45s),
+Credential fetching is independent of routing readiness: a known endpoint can be saved while the account is starting or its notebook statistics are stale. Manual Fetch works with monitoring disabled and retains the fetched status, but jobs remain blocked until monitoring and routing readiness are restored. Credential rotation waits until active requests finish. Missing, stale (45s),
 invalid, or inaccessible status blocks both verification and review dispatch;
 it does not consume a queued review attempt. Imported workers require monitoring
 to be enabled, including after Docling restarts.

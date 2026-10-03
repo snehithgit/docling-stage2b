@@ -106,12 +106,15 @@ class ColabRunner:
                     continue
                 account = accounts.get(account_id, {})
                 status = {**account, 'observed_at_epoch': self.observed_at, 'ready': False}
+                status['waiting_reason'] = self.waiting_reason(account)
                 self.registry.runner_status[worker['id']] = status
                 ready = account.get('state') == 'running' and account.get('healthy') is True and account.get('routable') is True and not account.get('login_required')
                 remaining = account.get('remaining_s')
                 ready = ready and (remaining is None or isinstance(remaining, (int, float)) and remaining > 0)
                 provider = 'colab:' + worker['id']
-                if ready:
+                # Fetch credentials independently of health/routing. The runner
+                # exposes known endpoints even while stats are stale or starting.
+                if account:
                     try:
                         endpoint = await self.request('GET', '/accounts/' + quote(account_id, safe='') + '/endpoint')
                         if not isinstance(endpoint, dict):
@@ -119,21 +122,41 @@ class ColabRunner:
                         url = normalize_colab_url(endpoint.get('url') or endpoint.get('base_url') or '')
                         key = validate_colab_api_key(endpoint.get('api_key') or '')
                         parts = urlsplit(url)
-                        if not key or parts.scheme not in {'http', 'https'} or not parts.hostname or parts.username or parts.password or endpoint.get('healthy') is not True:
+                        if not key or parts.scheme not in {'http', 'https'} or not parts.hostname or parts.username or parts.password:
                             raise ValueError('Runner endpoint is not ready')
                         existing_key = self.registry.read_api_key(worker['id'])
                         if worker.get('url') != url or existing_key != key:
                             await self.dispatcher.update_colab_worker_admin(worker['id'], {'url': url}, api_key=key)
                             self.dispatcher.reset_provider_connection(provider)
-                        status['ready'] = bool(self.config().get('enabled'))
-                        self.recovery.pop(account_id, None)
-                    except (ValueError, RuntimeError):
+                        status['ready'] = bool(ready and endpoint.get('healthy') is True and self.config().get('enabled'))
+                        if status['ready']:
+                            self.recovery.pop(account_id, None)
+                    except (ValueError, RuntimeError) as exc:
                         status['ready'] = False
+                        status['waiting_reason'] = 'Credential refresh deferred until the current request finishes' if isinstance(exc, RuntimeError) else 'Endpoint credentials unavailable; waiting for the runner'
                 if not status['ready']:
                     await self._recover(worker, account)
         except (ValueError, KeyError, TypeError):
             self.error = 'Runner unavailable; check its URL, token, and service status.'
             self.registry.runner_status.clear()
+
+    def waiting_reason(self, account):
+        if not self.config().get('enabled'):
+            return 'Monitoring disabled; enable monitoring for automatic refresh and jobs'
+        if not account:
+            return 'Account not found in runner'
+        if account.get('login_required'):
+            return 'Google login required in runner'
+        if account.get('state') != 'running':
+            return 'Runner state: ' + str(account.get('state') or 'unknown')
+        if account.get('healthy') is not True:
+            return 'Runner endpoint unhealthy'
+        if account.get('routable') is not True:
+            return 'Runner not routable; check notebook statistics freshness in runner'
+        remaining = account.get('remaining_s')
+        if remaining is not None and (not isinstance(remaining, (int, float)) or remaining <= 0):
+            return 'Configured session budget expired or unavailable'
+        return ''
 
     async def _recover(self, worker, account):
         if not self.config().get('enabled') or not self.config().get('auto_restart') or not worker.get('enabled') or worker.get('paused') or account.get('login_required'):
@@ -219,5 +242,9 @@ class ColabRunner:
                     self.error = 'Runner monitoring failed; retrying on the next poll.'
                     self.registry.runner_status.clear()
             else:
-                self.registry.runner_status.clear()
+                # Preserve the last fetched account information for the UI.
+                # Disabled monitoring must still prevent new dispatch.
+                for status in self.registry.runner_status.values():
+                    status['ready'] = False
+                    status['waiting_reason'] = 'Monitoring disabled; enable monitoring for automatic refresh and jobs'
             await asyncio.sleep(10)
