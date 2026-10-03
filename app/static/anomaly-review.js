@@ -22,6 +22,11 @@ function statusClass(state) {
 }
 
 function humanLink(item) {
+  if (item.review_type === "structural") {
+    const params = new URLSearchParams({job:String(item.postprocess_job_id), route:String(item.route_id)});
+    const page = item.structural_code === "TABLE_ROW_COLLAPSE" ? "table-repair" : item.structural_code === "READING_ORDER_ANOMALY" ? "reading-order-review" : "structural-review";
+    return `/${page}?${params}`;
+  }
   if (item.review_type === "text") {
     const params = new URLSearchParams({job:String(item.postprocess_job_id), entry:String(item.entry_id)});
     if (item.page != null) params.set("page", String(item.page));
@@ -39,13 +44,28 @@ function aiReviewBlock(item) {
   return `<div class="vision-audit-kv"><span>Review Assistant</span><strong>${esc(prettyLabel(ai.recommendation || "—"))}</strong><span>Confidence</span><strong>${esc(conf)}</strong><span>Worker</span><strong>${esc(ai.worker_name || ai.worker_id || "Colab worker")}</strong></div>${ai.reason ? `<p class="vision-audit-summary-text"><strong>Reason:</strong> ${esc(ai.reason)}</p>` : ""}`;
 }
 
+function structuralResultBlock(item, audit) {
+  if (item.review_type !== "structural") return "";
+  const index = anomalyItems.indexOf(item);
+  const pages = (audit.page_audits || []).map(a => `<div><strong>${a.page ? `Page ${Number(a.page)}` : 'Diagnostics only · source not verified'}</strong><p>${esc(a.suggested_action || a.reason || prettyLabel(a.verdict))}</p></div>`).join("");
+  const proposals = (audit.table_proposals || []).map((p, pi) => `<details><summary>Table ${Number(p.table_index)} proposal · page ${Number(p.page)} · ${Number(p.header_rows)} header rows</summary><pre>${esc(p.tsv || '')}</pre><button class="mini-action" type="button" data-copy-table="${index}:${pi}">Copy proposed TSV</button><p class="field-note">Compare every cell with the PDF. Open human review to save an approved repair.</p></details>`).join("");
+  return `${pages}${proposals}`;
+}
+
+function structuralEvidenceBlock(item) {
+  if (item.review_type !== "structural") return "";
+  const evidence = item.structural_evidence || {};
+  const links = (item.pages || []).map(p => `<a class="mini-action" href="/docling-review?job=${Number(item.postprocess_job_id)}&page=${Number(p)}">Source page ${Number(p)}</a>`).join(" ");
+  return `<section><div class="vision-audit-section-label">Structural evidence · ${esc(prettyLabel(item.structural_code))}</div><p>Human route: ${esc(prettyLabel(item.status))}. Colab proposals require human approval.</p>${links}<details><summary>Diagnostic evidence and current repairs</summary><pre>${esc(JSON.stringify(evidence, null, 2))}</pre></details></section>`;
+}
+
 function anomalyResultBlock(item) {
   const a = item.anomaly_review;
   if (!a || typeof a !== "object") return "";
   const confidence = Number(a.confidence);
   const conf = Number.isFinite(confidence) ? `${Math.round(confidence * 100)}%` : "—";
   const confirmed = Array.isArray(a.anomaly_types_confirmed) ? a.anomaly_types_confirmed : [];
-  return `<section class="ai-review-assistant-inline"><div class="vision-audit-section-label">Latest Colab anomaly audit</div><div class="vision-audit-kv"><span>Verdict</span><strong>${esc(prettyLabel(a.verdict || "—"))}</strong><span>Confidence</span><strong>${esc(conf)}</strong><span>Worker</span><strong>${esc(a.worker_name || a.worker_id || "Colab worker")}</strong></div>${confirmed.length ? `<p class="format-note"><strong>Confirmed:</strong> ${confirmed.map(prettyLabel).map(esc).join(" · ")}</p>` : ""}${a.reason ? `<p class="vision-audit-summary-text"><strong>Reason:</strong> ${esc(a.reason)}</p>` : ""}${a.corrected_text ? `<p class="vision-audit-summary-text"><strong>Corrected text proposal:</strong> ${esc(a.corrected_text)}</p>` : ""}${a.corrected_summary ? `<p class="vision-audit-summary-text"><strong>Corrected visual summary:</strong> ${esc(a.corrected_summary)}</p>` : ""}<p class="format-note"><strong>Advisory only.</strong> Open the human review page to accept, reject or edit this proposal.</p></section>`;
+  return `<section class="ai-review-assistant-inline"><div class="vision-audit-section-label">Latest Colab anomaly audit</div><div class="vision-audit-kv"><span>Verdict</span><strong>${esc(prettyLabel(a.verdict || "—"))}</strong><span>Confidence</span><strong>${esc(conf)}</strong><span>Worker</span><strong>${esc(a.worker_name || a.worker_id || "Colab worker")}</strong></div>${confirmed.length ? `<p class="format-note"><strong>Confirmed:</strong> ${confirmed.map(prettyLabel).map(esc).join(" · ")}</p>` : ""}${a.reason ? `<p class="vision-audit-summary-text"><strong>Reason:</strong> ${esc(a.reason)}</p>` : ""}${a.corrected_text ? `<p class="vision-audit-summary-text"><strong>Corrected text proposal:</strong> ${esc(a.corrected_text)}</p>` : ""}${structuralResultBlock(item, a)}${a.corrected_summary ? `<p class="vision-audit-summary-text"><strong>Corrected visual summary:</strong> ${esc(a.corrected_summary)}</p>` : ""}<p class="format-note"><strong>Advisory only.</strong> Open the human review page to accept, reject or edit this proposal.</p></section>`;
 }
 
 function actionBlock(item) {
@@ -76,6 +96,7 @@ function renderItem(item) {
       <section><div class="vision-audit-section-label">Primary verifier</div><div class="vision-audit-kv"><span>Verdict</span><strong>${esc(prettyLabel(item.verification_verdict || item.status || "—"))}</strong><span>Human state</span><strong>${item.human_reviewed ? "Authoritative human decision stored" : "Not human reviewed"}</strong></div></section>
       ${item.review_type === "text" ? `<section><div class="vision-audit-section-label">Text evidence state</div><div class="vision-audit-kv"><span>Docling original</span><strong>${esc(original || "—")}</strong><span>Primary proposal</span><strong>${esc(proposed || "—")}</strong></div></section>` : ""}
       <section><div class="vision-audit-section-label">Normal AI review</div>${aiReviewBlock(item)}</section>
+      ${structuralEvidenceBlock(item)}
       ${anomalyResultBlock(item)}
       ${q.error_message ? `<p class="queue-error"><strong>Colab error:</strong> ${esc(q.error_message)}</p>` : ""}
       ${actionBlock(item)}
@@ -103,7 +124,8 @@ function applyFilters() {
   const query = $("ar-search").value.trim().toLowerCase();
   anomalyFiltered = anomalyItems.filter(item => {
     if (book && item.book !== book) return false;
-    if (type && item.review_type !== type) return false;
+    if (type === "table" && item.source_type !== "table_structure" && item.source_type !== "table_cell") return false;
+    if (type && type !== "table" && item.review_type !== type) return false;
     if (state && item.state !== state) return false;
     if (human === "reviewed" && !item.human_reviewed) return false;
     if (human === "unreviewed" && item.human_reviewed) return false;
@@ -198,7 +220,7 @@ async function reverifyItem(item, button) {
   if (!item || !anomalyWorkersAvailable) return;
   button.disabled = true;
   try {
-    const lane = item.review_type === "text" ? "corrections" : "vision-audit";
+    const lane = item.review_type === "text" ? "corrections" : item.review_type === "structural" ? "structural-review" : "vision-audit";
     const response = await fetch(`/api/postprocess/jobs/${item.postprocess_job_id}/${lane}/${encodeURIComponent(item.entry_id)}/anomaly-review`, {method:"POST", cache:"no-store"});
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
@@ -211,7 +233,17 @@ async function reverifyItem(item, button) {
   }
 }
 
-$("ar-results").addEventListener("click", event => {
+$("ar-results").addEventListener("click", async event => {
+  const copy = event.target.closest("[data-copy-table]");
+  if (copy) {
+    const [itemIndex, proposalIndex] = copy.dataset.copyTable.split(":").map(Number);
+    const proposal = anomalyItems[itemIndex]?.anomaly_review?.table_proposals?.[proposalIndex];
+    if (proposal) {
+      try { await navigator.clipboard.writeText(proposal.tsv || ""); feedback("Proposed TSV copied. Verify it against the source before saving a human repair.", "success"); }
+      catch (error) { feedback(`Could not copy proposal: ${error.message}`, "warning"); }
+    }
+    return;
+  }
   const button = event.target.closest("[data-anomaly-review]");
   if (button && !button.disabled) reverifyItem(anomalyItems[Number(button.dataset.anomalyReview)], button);
 });

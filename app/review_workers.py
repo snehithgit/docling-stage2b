@@ -34,7 +34,7 @@ def _load_ledger_sync(path: Path) -> dict[str, Any]:
 
 def _signature(entry: dict[str, Any], review_type: str) -> str:
     if str(review_type).startswith("anomaly_"):
-        base_type = "text" if str(review_type).endswith("text") else "vision"
+        base_type = str(review_type).removeprefix("anomaly_")
         return "auto:" + anomaly_evidence_signature(entry, base_type)
     if review_type == "text":
         payload = {
@@ -127,7 +127,7 @@ class ReviewAssistantStore:
             return
         with self._conn() as conn:
             if str(review_type).startswith("anomaly_"):
-                base_type = "text" if str(review_type).endswith("text") else "vision"
+                base_type = str(review_type).removeprefix("anomaly_")
                 evidence_sig = anomaly_evidence_signature(entry, base_type)
                 manual = conn.execute(
                     """SELECT entry_signature FROM review_assistant_jobs
@@ -164,12 +164,12 @@ class ReviewAssistantStore:
     def _queue_manual_anomaly_sync(
         self, postprocess_job_id: int, result_dir: str, entry: dict[str, Any], review_type: str
     ) -> dict[str, Any]:
-        if review_type not in {"anomaly_text", "anomaly_vision"}:
-            raise ValueError("Manual anomaly review type must be anomaly_text or anomaly_vision")
+        if review_type not in {"anomaly_text", "anomaly_vision", "anomaly_structural"}:
+            raise ValueError("Manual anomaly review type must be anomaly_text, anomaly_vision or anomaly_structural")
         entry_id = str(entry.get("entry_id") or "")
         if not entry_id:
             raise ValueError("Review entry has no stable entry_id")
-        base_type = "text" if review_type == "anomaly_text" else "vision"
+        base_type = review_type.removeprefix("anomaly_")
         evidence_sig = anomaly_evidence_signature(entry, base_type)
         signature = f"manual:{evidence_sig}:{uuid.uuid4().hex}"
         with self._conn() as conn:
@@ -234,7 +234,7 @@ class ReviewAssistantStore:
                 WHERE is_current=1 AND status='pending' AND review_type IN ({placeholders})
                   AND (next_attempt_at IS NULL OR next_attempt_at<=?)
                 ORDER BY CASE WHEN entry_signature LIKE 'manual:%'
-                    AND review_type IN ('anomaly_text','anomaly_vision') THEN 0 ELSE 1 END,
+                    AND review_type IN ('anomaly_text','anomaly_vision','anomaly_structural') THEN 0 ELSE 1 END,
                     CASE review_type
                     WHEN 'text' THEN 0 WHEN 'vision' THEN 1
                     WHEN 'anomaly_text' THEN 2 WHEN 'anomaly_vision' THEN 3 ELSE 4
@@ -320,6 +320,7 @@ class ReviewAssistantStore:
                 "vision_pending":0,"vision_processing":0,"vision_completed":0,
                 "anomaly_text_pending":0,"anomaly_text_processing":0,"anomaly_text_completed":0,
                 "anomaly_vision_pending":0,"anomaly_vision_processing":0,"anomaly_vision_completed":0,
+                "anomaly_structural_pending":0,"anomaly_structural_processing":0,"anomaly_structural_completed":0,
                 "failed":0,
             }
             for r in rows:
@@ -406,7 +407,7 @@ class ReviewAssistantService:
                         worker_id=worker_id,
                         postprocess_job_id=int(job["postprocess_job_id"]),
                         entry_id=str(job["entry_id"]),
-                        review_type=("text" if review_type=="anomaly_text" else "vision"),
+                        review_type=review_type.removeprefix("anomaly_"),
                         manual_requested=str(job.get("entry_signature") or "").startswith("manual:"),
                     )
                 else:
@@ -457,7 +458,7 @@ class ReviewAssistantService:
                         # still await normal AI review. The primary machine gate
                         # and physical-worker reservation remain in force.
                         if wid in anomaly:
-                            allowed.update({"anomaly_text","anomaly_vision"})
+                            allowed.update({"anomaly_text","anomaly_vision","anomaly_structural"})
                         if not allowed:
                             continue
                         self._active[wid]=asyncio.create_task(self._run_one(wid,allowed), name=f"review-assistant-{wid}")

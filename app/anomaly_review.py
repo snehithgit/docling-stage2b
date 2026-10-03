@@ -54,6 +54,8 @@ def detect_anomaly_types(entry: dict[str, Any], review_type: str) -> list[str]:
     classifiable, but the automatic review supervisor deliberately excludes
     them; they enter anomaly review only through the explicit re-review action.
     """
+    if review_type in {"structural", "anomaly_structural"}:
+        return [str(entry["structural_code"])] if entry.get("structural_code") else []
     kind = "text" if str(review_type).lower() in {"text", "anomaly_text"} else "vision"
     review = entry.get("ai_review_assistant")
     review = review if isinstance(review, dict) else {}
@@ -100,6 +102,9 @@ def anomaly_evidence_signature(entry: dict[str, Any], review_type: str) -> str:
     an audit result cannot schedule itself again. Human decisions are included:
     an explicit human change makes an older anomaly result stale.
     """
+    if review_type in {"structural", "anomaly_structural"}:
+        from .structural_anomaly import structural_signature
+        return structural_signature(entry)
     kind = "text" if str(review_type).lower() in {"text", "anomaly_text"} else "vision"
     ai_review = entry.get("ai_review_assistant")
     ai_review = ai_review if isinstance(ai_review, dict) else {}
