@@ -114,7 +114,10 @@ def test_equipment_embedding_status_goes_stale_when_machine_manual_changes(tmp_p
     monkeypatch.setattr("app.hybrid_retrieval.embed_texts", lambda url, texts, timeout_seconds: [[1.0,0.0] for _ in texts])
     build_equipment_embedding_index(tmp_path, "eq-1", [a], base_url="http://tei", model="model-x", manual_types={1:"hydraulic"})
     assert equipment_hybrid_index_status(tmp_path, "eq-1", [a], model="model-x", manual_types={1:"hydraulic"})["ready"] is True
-    assert equipment_hybrid_index_status(tmp_path, "eq-1", [a], model="model-x", manual_types={1:"maintenance"})["reason"] == "equipment_manual_metadata_changed"
+    relabeled = equipment_hybrid_index_status(tmp_path, "eq-1", [a], model="model-x", manual_types={1:"maintenance"})
+    assert relabeled["ready"] is True
+    assert relabeled["semantic_fingerprint_reused"] is True
+    assert json.loads(Path(relabeled["metadata_path"]).read_text())["manual_types"] == {"1": "maintenance"}
     _write_index(a, [
         {"chunk_id":"A1","postprocess_job_id":1,"source_filename":"A.pdf","chunk_index":1,"text":"pump","headings":[],"quality_score":100},
         {"chunk_id":"A2","postprocess_job_id":1,"source_filename":"A.pdf","chunk_index":2,"text":"new","headings":[],"quality_score":100},

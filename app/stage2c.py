@@ -1117,16 +1117,17 @@ def _logical_entry_source_key(entry: dict[str, Any]) -> tuple[Any, ...] | None:
 
 def _human_decision_epoch(entry: dict[str, Any]) -> float:
     review = entry.get("human_review") if isinstance(entry.get("human_review"), dict) else {}
+    epochs = []
     for value in (
         entry.get("human_visual_decided_at_epoch"),
         review.get("saved_at_epoch"),
         entry.get("created_at_epoch"),
     ):
         try:
-            return float(value or 0.0)
+            epochs.append(float(value or 0.0))
         except (TypeError, ValueError):
             continue
-    return 0.0
+    return max(epochs or [0.0])
 
 
 def _supersede_for_reconciliation(entry: dict[str, Any], winner: dict[str, Any], reason: str) -> bool:

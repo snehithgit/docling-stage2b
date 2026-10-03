@@ -5,12 +5,14 @@ import hashlib
 import json
 import sqlite3
 import time
+import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from .anomaly_review import anomaly_evidence_signature, detect_anomaly_types
+from .verifier_clients import ReviewWorkerBusyError
 from .stage2c import _authoritative_visual_subjects, _vision_requires_human
 
 
@@ -24,7 +26,8 @@ def _utc_after(seconds: int) -> str:
 
 def _load_ledger_sync(path: Path) -> dict[str, Any]:
     try:
-        return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        data = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        return data if isinstance(data, dict) else {}
     except Exception:
         return {}
 
@@ -147,6 +150,9 @@ class ReviewAssistantStore:
                          (postprocess_job_id,result_dir,entry_id,review_type,entry_signature,status,is_current,created_at)
                          VALUES (?,?,?,?,?,'pending',1,?)""",
                          (postprocess_job_id, result_dir, entry_id, review_type, sig, _utcnow()))
+            conn.execute("""UPDATE review_assistant_jobs SET is_current=1, result_dir=?
+                         WHERE postprocess_job_id=? AND entry_id=? AND review_type=? AND entry_signature=?""",
+                         (result_dir, postprocess_job_id, entry_id, review_type, sig))
 
     async def queue_manual_anomaly(
         self, postprocess_job_id: int, result_dir: str, entry: dict[str, Any], review_type: str
@@ -165,8 +171,9 @@ class ReviewAssistantStore:
             raise ValueError("Review entry has no stable entry_id")
         base_type = "text" if review_type == "anomaly_text" else "vision"
         evidence_sig = anomaly_evidence_signature(entry, base_type)
-        signature = f"manual:{evidence_sig}:{time.time_ns()}"
+        signature = f"manual:{evidence_sig}:{uuid.uuid4().hex}"
         with self._conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             existing = conn.execute(
                 """SELECT * FROM review_assistant_jobs
                    WHERE postprocess_job_id=? AND entry_id=? AND review_type=?
@@ -267,6 +274,25 @@ class ReviewAssistantStore:
                          error_type=?, error_message=? WHERE id=?""",
                          (_utc_after(delay), etype, message[:2000], job_id))
 
+    async def defer_busy(self, job_id: int, delay: int = 30) -> None:
+        await self._run(self._defer_busy_sync, job_id, delay)
+
+    def _defer_busy_sync(self, job_id: int, delay: int) -> None:
+        with self._conn() as conn:
+            conn.execute("""UPDATE review_assistant_jobs SET status='pending',
+                attempt_count=MAX(0,attempt_count-1), claimed_by=NULL, started_at=NULL,
+                next_attempt_at=? WHERE id=? AND status='processing'""", (_utc_after(delay), job_id))
+
+    async def retry_failed(self, job_id: int) -> bool:
+        return await self._run(self._retry_failed_sync, job_id)
+
+    def _retry_failed_sync(self, job_id: int) -> bool:
+        with self._conn() as conn:
+            return bool(conn.execute("""UPDATE review_assistant_jobs
+                SET status='pending', attempt_count=0, claimed_by=NULL, started_at=NULL,
+                    completed_at=NULL, next_attempt_at=NULL, processing_seconds=NULL, result_json=NULL
+                WHERE id=? AND is_current=1 AND status='failed'""", (job_id,)).rowcount)
+
     async def list_jobs(self, limit: int = 500) -> list[dict[str, Any]]:
         return await self._run(self._list_sync, limit)
 
@@ -312,6 +338,9 @@ class ReviewAssistantService:
         self._machine_blockers = 0
 
     async def start(self) -> None:
+        if self._task and not self._task.done():
+            return
+        self._stop.clear()
         await self._store.initialize(); await self._store.recover_interrupted()
         self._task=asyncio.create_task(self._loop(), name="review-assistant-supervisor")
 
@@ -349,10 +378,11 @@ class ReviewAssistantService:
         ledgers = await asyncio.gather(*(asyncio.to_thread(_load_ledger_sync, path) for _, _, path in candidates))
         for (jid, result_dir_name, _path), ledger in zip(candidates, ledgers):
             for entry in ledger.get("entries") or []:
+                if not isinstance(entry, dict): continue
                 if entry.get("status")=="superseded": continue
                 if entry.get("entry_type")=="text_correction" and not entry.get("human_verified") and str(entry.get("verification_verdict") or "").upper() in {"LIKELY_CORRUPT","UNCERTAIN"}:
                     key=(jid,str(entry.get("entry_id")),"text"); valid.add(key); await self._store.sync_candidate(jid,result_dir_name,entry,"text")
-            vision=[e for e in (ledger.get("entries") or []) if e.get("entry_type")=="vision_enrichment" and e.get("status")!="superseded"]
+            vision=[e for e in (ledger.get("entries") or []) if isinstance(e,dict) and e.get("entry_type")=="vision_enrichment" and e.get("status")!="superseded"]
             for entry in _authoritative_visual_subjects(vision):
                 if _vision_requires_human(entry):
                     key=(jid,str(entry.get("entry_id")),"vision"); valid.add(key); await self._store.sync_candidate(jid,result_dir_name,entry,"vision")
@@ -388,6 +418,9 @@ class ReviewAssistantService:
                 self._events.notify("review_assistant_job_completed")
             except asyncio.CancelledError:
                 raise
+            except ReviewWorkerBusyError:
+                await self._store.defer_busy(int(job["id"]))
+                self._events.notify("review_assistant_provider_busy")
             except Exception as exc:
                 await self._store.mark_retryable(int(job["id"]),exc,30)
                 self._events.notify("review_assistant_job_retry")

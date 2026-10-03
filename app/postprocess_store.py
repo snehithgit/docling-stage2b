@@ -446,6 +446,9 @@ class PostprocessStore:
                 raise RuntimeError("Book has active verification work. Stop/wait for it before deleting the book.")
 
             conversion_job_id = int(row["conversion_job_id"])
+            # Older databases may not yet have the optional review queue table.
+            if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='review_assistant_jobs'").fetchone():
+                connection.execute("DELETE FROM review_assistant_jobs WHERE postprocess_job_id=?", (job_id,))
             connection.execute("DELETE FROM verification_jobs WHERE postprocess_job_id=?", (job_id,))
             connection.execute("DELETE FROM postprocess_jobs WHERE id=?", (job_id,))
             connection.execute("DELETE FROM jobs WHERE id=?", (conversion_job_id,))

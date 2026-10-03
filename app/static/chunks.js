@@ -7,6 +7,8 @@
   let requestedJob = Number(params.get('job') || 0) || null;
   let requestedChunk = params.get('chunk') || '';
   let status = null;
+  let searchRequestId = 0;
+  let detailRequestId = 0;
   let currentDetail = null;
   let currentNav = {previous:null, next:null};
 
@@ -77,6 +79,7 @@
   }
 
   async function searchChunks({openRequested=false}={}) {
+    const requestId = ++searchRequestId;
     const scope = scopeRequest();
     if (!scope.equipment_id && !scope.postprocess_job_id) { feedback('Choose a machine or manual first.', 'warning'); return; }
     const qs = scopeQueryString(scope);
@@ -88,6 +91,7 @@
     try {
       const response = await fetch(`/api/chunks?${qs.toString()}`, {cache:'no-store'});
       const data = await response.json();
+      if (requestId !== searchRequestId) return;
       if (!response.ok) throw new Error(data.detail || 'Chunk search failed');
       renderResults(data);
       feedback(`${Number(data.total || 0).toLocaleString()} current chunk${data.total === 1 ? '' : 's'} matched this scope.`, 'success');
@@ -97,7 +101,7 @@
         else feedback(`The requested chunk ${requestedChunk} is not in the current filtered window. Search by its chunk ID.`, 'warning');
         requestedChunk = '';
       }
-    } catch (error) { feedback(error.message, 'error'); }
+    } catch (error) { if (requestId === searchRequestId) feedback(error.message, 'error'); }
   }
 
   function provenanceItem(label, value) {
@@ -106,10 +110,12 @@
   }
 
   async function openChunk(jobId, chunkId) {
+    const requestId = ++detailRequestId;
     feedback(`Loading ${chunkId}…`);
     try {
       const response = await fetch(`/api/chunks/${encodeURIComponent(jobId)}/${encodeURIComponent(chunkId)}`, {cache:'no-store'});
       const data = await response.json();
+      if (requestId !== detailRequestId) return;
       if (!response.ok) throw new Error(data.detail || 'Could not load chunk');
       currentDetail = data.chunk; currentNav = {previous:data.previous, next:data.next};
       $('chunk-detail-empty').hidden = true; $('chunk-detail').hidden = false;
@@ -138,9 +144,10 @@
       pageSelect.innerHTML = pages.length ? pages.map(page => `<option value="${page}">Page ${page}</option>`).join('') : '<option value="">No source page</option>';
       pageSelect.disabled = !pages.length;
       await loadPage();
+      if (requestId !== detailRequestId) return;
       feedback(`${currentDetail.chunk_id} loaded. Compare the Stage 3 text with the source page before marking retrieval quality.`, 'success');
       history.replaceState(null, '', chunkViewerUrl(currentDetail));
-    } catch (error) { feedback(error.message, 'error'); }
+    } catch (error) { if (requestId === detailRequestId) feedback(error.message, 'error'); }
   }
 
   function chunkViewerUrl(row) {
@@ -170,7 +177,7 @@
     if (target) await openChunk(Number(target.postprocess_job_id), target.chunk_id);
   }
 
-  $('chunk-scope').addEventListener('change', () => { updateControls(); requestedChunk = ''; searchChunks(); });
+  $('chunk-scope').addEventListener('change', () => { ++detailRequestId; currentDetail = null; currentNav = {previous:null, next:null}; $('chunk-detail').hidden = true; $('chunk-detail-empty').hidden = false; $('chunk-prev').disabled = true; $('chunk-next').disabled = true; updateControls(); requestedChunk = ''; searchChunks(); });
   $('chunk-search-form').addEventListener('submit', event => { event.preventDefault(); searchChunks(); });
   $('chunk-page-select').addEventListener('change', loadPage);
   $('chunk-prev').addEventListener('click', () => openAdjacent('previous'));

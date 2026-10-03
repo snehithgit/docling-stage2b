@@ -14,6 +14,10 @@ import httpx
 from .groq_quota import CloudQuotaPausedError, GroqQuotaGuard
 
 
+class ReviewWorkerBusyError(RuntimeError):
+    """No inference started because another task holds the review provider."""
+
+
 @dataclass
 class EndpointHealth:
     reachable: bool

@@ -219,3 +219,67 @@ def test_human_reviewed_vision_disagreement_is_listed_and_can_be_queued(workspac
         assert queued['job']['review_type'] == 'anomaly_vision'
         assert json.loads(path.read_text(encoding='utf-8')) == ledger
     asyncio.run(run())
+
+
+def test_normal_review_discards_changed_source_evidence(workspace, monkeypatch):
+    from app import stage2b
+    from app.config import AppConfig
+    async def run():
+        rt, registry, ledger, path = workspace
+        entry = ledger['entries'][0]
+        entry['human_verified'] = False
+        entry.pop('human_review')
+        path.write_text(json.dumps(ledger))
+        worker_info = {**registry['colab_workers'][0], 'url': 'https://colab.example', 'model': 'test'}
+        fake_registry = SimpleNamespace(get_colab=lambda wid: worker_info, read_api_key=lambda wid: 'test-key')
+        post = SimpleNamespace(get_job=AsyncMock(return_value={'result_dir': 'book', 'conversion_job_id': 1, 'output_filename': 'book.zip'}), get_conversion_job=AsyncMock(return_value={'filename': 'book.pdf'}))
+        worker = stage2b.Stage2BWorker(lambda: AppConfig(processed_dir=rt.config.processed_dir), None, post, rt.events, worker_registry=fake_registry)
+        worker._document_for = AsyncMock(return_value={})
+        monkeypatch.setattr(stage2b, '_render_source_target', lambda *a: (b'crop', 'image/png', {}))
+        async def inspect(*args, **kwargs):
+            changed = json.loads(path.read_text())
+            changed['entries'][0]['proposed_text'] = 'new evidence while inference runs'
+            path.write_text(json.dumps(changed))
+            return {'choices': [{'message': {'content': json.dumps({'recommendation': 'APPLY_PROPOSED', 'confidence': .9})}}]}
+        monkeypatch.setattr(stage2b, 'OpenAICompatibleVerifier', lambda *a, **k: SimpleNamespace(inspect_image=inspect))
+        result = await worker.run_review_assistant_job(worker_id='colab-1', postprocess_job_id=21, entry_id=entry['entry_id'], review_type='text')
+        assert result['discarded'] is True
+        assert result['stored'] is False
+        saved = json.loads(path.read_text())['entries'][0]
+        assert saved['proposed_text'] == 'new evidence while inference runs'
+        assert 'ai_review_assistant' not in saved
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("superseded, text, expected", [(True, "valid", 409), (False, "   ", 422)])
+def test_human_correction_rejects_stale_entry_and_blank_text(workspace, superseded, text, expected):
+    async def run():
+        rt, _, ledger, path = workspace
+        if superseded:
+            ledger['entries'][0]['status'] = 'superseded'
+            path.write_text(json.dumps(ledger))
+        original = path.read_bytes()
+        with pytest.raises(main.HTTPException) as exc:
+            await main.update_human_correction(21, ledger['entries'][0]['entry_id'], main.HumanCorrectionUpdate(text=text))
+        assert exc.value.status_code == expected
+        assert path.read_bytes() == original
+    asyncio.run(run())
+
+
+def test_human_write_waits_for_book_lifecycle_and_rechecks_deleted_book(workspace):
+    async def run():
+        rt, _, ledger, path = workspace
+        lock = asyncio.Lock()
+        rt.book_lifecycle_locks.get = lambda job: lock
+        await lock.acquire()
+        task = asyncio.create_task(main.update_human_correction(21, ledger['entries'][0]['entry_id'], main.HumanCorrectionUpdate(text='new')))
+        await asyncio.sleep(0)
+        assert not task.done()
+        rt.postprocess_store.get_job.return_value = None
+        original = path.read_bytes()
+        lock.release()
+        with pytest.raises(main.HTTPException) as exc:
+            await task
+        assert exc.value.status_code == 404
+        assert path.read_bytes() == original
+    asyncio.run(run())
