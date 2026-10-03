@@ -236,3 +236,37 @@ async def test_link_existing_worker_preserves_assignments_and_rejects_busy(setup
     assert linked['id'] == worker['id']
     assert len(registry.snapshot()['colab_workers']) == 1
     assert registry.snapshot()['review']['text_worker_ids'] == [worker['id']]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('state,healthy,routable', [('running', True, False), ('starting', False, False)])
+async def test_fetches_known_credentials_even_when_not_routable(setup, state, healthy, routable):
+    runner, registry, _, account, endpoint, _ = setup
+    account.update(state=state, healthy=healthy, routable=routable)
+    endpoint['healthy'] = healthy
+    worker = await runner.import_account('account/one')
+    current = registry.get_colab(worker['id'])
+    assert current['url'] == 'https://tunnel.example'
+    assert registry.read_api_key(worker['id']) == 'kobold-secret-123456'
+    assert not current['runner_ready']
+    assert current['runner_status']['waiting_reason']
+    assert not registry.configured_colabs()
+
+
+@pytest.mark.asyncio
+async def test_manual_fetch_disabled_monitor_keeps_status_and_credentials(setup):
+    runner, registry, _, _, _, _ = setup
+    await runner.configure('http://runner:8000', None, False, False)
+    worker = await runner.import_account('account/one')
+    # Drive exactly one disabled-monitor loop iteration.
+    task = asyncio.create_task(runner._loop())
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    current = registry.get_colab(worker['id'])
+    assert current['url'] == 'https://tunnel.example'
+    assert registry.read_api_key(worker['id'])
+    assert current['runner_status']['state'] == 'running'
+    assert 'Monitoring disabled' in current['runner_status']['waiting_reason']
+    assert not current['runner_ready']
