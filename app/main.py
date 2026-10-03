@@ -80,6 +80,7 @@ from .telegram_bot import TelegramBotService
 from .stage2b_store import HUMAN_VISUAL_RECOVERY_CODE, Stage2BStore
 from .worker import ConversionWorker
 from .worker_registry import WorkerRegistry
+from .colab_runner import ColabRunner
 from .review_workers import ReviewAssistantStore, ReviewAssistantService
 from .anomaly_review import anomaly_evidence_signature, detect_anomaly_types
 from .structural_anomaly import structural_entries
@@ -399,6 +400,18 @@ class LocalWorkerUpdate(BaseModel):
 
 class ColabWorkerCreate(BaseModel):
     name: str = Field(default="", max_length=80)
+
+
+class RunnerSettings(BaseModel):
+    url: str = Field(max_length=2000)
+    token: str | None = Field(default=None, max_length=2000)
+    enabled: bool = True
+    auto_restart: bool = False
+
+
+class RunnerImport(BaseModel):
+    account_id: str = Field(min_length=1, max_length=200)
+    worker_id: str | None = Field(default=None, max_length=40)
 
 
 class ColabWorkerUpdate(BaseModel):
@@ -896,6 +909,7 @@ class Runtime:
             lifecycle_lock_getter=self.book_lifecycle_locks.get,
             worker_registry=self.worker_registry,
         )
+        self.colab_runner = ColabRunner(self.worker_registry, self.stage2b_worker)
         self.review_assistant_store = ReviewAssistantStore(self.config.database_path)
         self.review_assistant = ReviewAssistantService(
             lambda: self.config, self.worker_registry, self.review_assistant_store,
@@ -2184,6 +2198,7 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    await runtime.colab_runner.start()
     await runtime.worker.start()
     await runtime.postprocess_worker.start()
     await runtime.stage2b_worker.start()
@@ -2191,6 +2206,7 @@ async def lifespan(_: FastAPI):
     await runtime.start_pipeline_sequence()
     await runtime.telegram_bot.start()
     yield
+    await runtime.colab_runner.stop()
     await runtime.telegram_bot.stop()
     await runtime.stop_pipeline_sequence()
     await runtime.stop_safety_refresh()
@@ -4288,11 +4304,46 @@ def _worker_registry_public() -> dict:
             "state": state,
         })
     return {
+        "runner": runtime.colab_runner.public(),
         "local": local,
         "colab_workers": colabs,
         "review": snap.get("review") or {},
         "interlock_mode": runtime.stage2b_interlock_mode(),
     }
+
+
+@app.put("/api/workers/runner")
+async def configure_colab_runner(settings: RunnerSettings) -> dict:
+    try:
+        await runtime.colab_runner.configure(**settings.model_dump())
+        return await runtime.colab_runner.sync()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/workers/runner/sync")
+async def sync_colab_runner() -> dict:
+    return await runtime.colab_runner.sync()
+
+
+@app.post("/api/workers/runner/import")
+async def import_colab_runner_account(request: RunnerImport) -> dict:
+    try:
+        return await runtime.colab_runner.import_account(request.account_id, request.worker_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/workers/colab/{worker_id}/runner/{action}")
+async def control_colab_runner(worker_id: str, action: str) -> dict:
+    try:
+        return await runtime.colab_runner.control(worker_id, action)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/api/workers")
