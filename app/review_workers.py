@@ -225,7 +225,7 @@ class ReviewAssistantStore:
                 return None
             jid = int(row["id"])
             cur = conn.execute("""UPDATE review_assistant_jobs SET status='processing', claimed_by=?, started_at=?,
-                               attempt_count=attempt_count+1, next_attempt_at=NULL, error_type=NULL, error_message=NULL
+                               attempt_count=attempt_count+1, next_attempt_at=NULL
                                WHERE id=? AND is_current=1 AND status='pending'""", (worker_id, _utcnow(), jid))
             if not cur.rowcount:
                 return None
@@ -246,8 +246,14 @@ class ReviewAssistantStore:
 
     def _retry_sync(self, job_id: int, etype: str, message: str, delay: int) -> None:
         with self._conn() as conn:
-            conn.execute("""UPDATE review_assistant_jobs SET status='pending', claimed_by=NULL, started_at=NULL,
-                         next_attempt_at=?, error_type=?, error_message=? WHERE id=?""",
+            # A bad crop or consistently malformed model response must not
+            # monopolize the oldest queue positions forever. Failed reviews
+            # remain visible for attention and never imply human approval.
+            conn.execute("""UPDATE review_assistant_jobs
+                         SET status=CASE WHEN attempt_count>=3 THEN 'failed' ELSE 'pending' END,
+                         claimed_by=NULL, started_at=NULL,
+                         next_attempt_at=CASE WHEN attempt_count>=3 THEN NULL ELSE ? END,
+                         error_type=?, error_message=? WHERE id=?""",
                          (_utc_after(delay), etype, message[:2000], job_id))
 
     async def list_jobs(self, limit: int = 500) -> list[dict[str, Any]]:
@@ -256,7 +262,8 @@ class ReviewAssistantStore:
     def _list_sync(self, limit: int) -> list[dict[str, Any]]:
         with self._conn() as conn:
             rows = conn.execute("""SELECT * FROM review_assistant_jobs WHERE is_current=1
-                                 ORDER BY CASE status WHEN 'processing' THEN 0 WHEN 'pending' THEN 1 WHEN 'failed' THEN 2 ELSE 3 END, id DESC LIMIT ?""", (max(1, int(limit)),)).fetchall()
+                                 ORDER BY CASE status WHEN 'processing' THEN 0 WHEN 'failed' THEN 1 WHEN 'pending' THEN 2 ELSE 3 END,
+                                 CASE WHEN error_message IS NOT NULL THEN 0 ELSE 1 END, id DESC LIMIT ?""", (max(1, int(limit)),)).fetchall()
             out=[]
             for row in rows:
                 item=dict(row)

@@ -5587,10 +5587,20 @@ class Stage2BWorker:
             client = OpenAICompatibleVerifier(endpoint, timeout_seconds=int(config.colab_timeout_seconds), api_key=api_key)
             self._ensure_provider_state(provider)
             started = time.monotonic()
+            # EDIT_SUGGESTED may reproduce the entire target paragraph.
+            # Leave room for that text plus the JSON and explanation.
+            review_max_tokens = 1024
+            if review_type == "text":
+                target_length = max(len(str(entry.get("original_text") or "")),
+                                    len(str(entry.get("proposed_text") or "")))
+                review_max_tokens = max(1024, min(4096, target_length + 512))
             async with self._device_locks[provider]:
                 response = await client.inspect_image(
-                    image_bytes, prompt, mime_type=mime, model=str(worker.get("model") or "koboldcpp"), max_tokens=512
+                    image_bytes, prompt, mime_type=mime, model=str(worker.get("model") or "koboldcpp"),
+                    max_tokens=review_max_tokens,
                 )
+            if _response_finish_reason(response) == "length":
+                raise ValueError(f"AI review response truncated at {review_max_tokens} tokens")
             parsed = _json_from_model_response(response)
             recommendation = str(parsed.get("recommendation") or "NEEDS_HUMAN").upper().strip()
             allowed = ({"APPLY_PROPOSED", "KEEP_ORIGINAL", "EDIT_SUGGESTED", "NEEDS_HUMAN"} if review_type == "text" else {"TECHNICAL", "DECORATIVE", "USEFUL", "NOT_USEFUL", "NEEDS_HUMAN"})
