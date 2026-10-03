@@ -64,3 +64,11 @@ def test_horizontal_crop_remains_unchanged():
 def test_legacy_false_keep_original_is_detected_for_rereview():
     entry = {"original_text": "te  o e   s t  e  e  tet ed t e", "anomaly_review": {"verdict": "KEEP_ORIGINAL", "confidence": .999}}
     assert "UNVERIFIED_ANOMALY_TEXT_AUDIT" in detect_anomaly_types(entry,"text")
+
+
+def test_legacy_narrative_is_not_reused_as_source_evidence():
+    from app.anomaly_review import anomaly_prompt_context
+    entry = {"original_text": "garbled", "ai_review_assistant": {"recommendation": "NEEDS_HUMAN", "confidence": .99, "reason": "A coherent imaginary warning was proposed"}}
+    context = anomaly_prompt_context(entry, "text", ["AI_REVIEW_NEEDS_HUMAN"])
+    assert context["ai_review_assistant"]["evidence_status"] == "legacy_unverified"
+    assert "imaginary" not in context["ai_review_assistant"]["reason"]

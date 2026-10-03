@@ -161,6 +161,10 @@ def anomaly_prompt_context(entry: dict[str, Any], review_type: str, anomaly_type
         "human_review": entry.get("human_review"),
     }
     if kind == "text":
+        previous = base.get("ai_review_assistant")
+        if isinstance(previous, dict) and not isinstance(previous.get("source_validation"), dict):
+            # Do not feed an unsupported legacy explanation back as evidence.
+            base["ai_review_assistant"] = {"recommendation": previous.get("recommendation"), "evidence_status": "legacy_unverified", "reason": "No validated source transcription was stored. Ignore the previous narrative and independently read the source crop."}
         base.update({
             "docling_original": entry.get("original_text") or "",
             "primary_proposed": entry.get("proposed_text") or "",
