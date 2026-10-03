@@ -2,6 +2,7 @@ let anomalyItems = [];
 let anomalyFiltered = [];
 let anomalyInFlight = false;
 let anomalyTimer = null;
+let anomalyWorkersAvailable = false;
 
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
@@ -54,8 +55,10 @@ function actionBlock(item) {
       ? "Queued for Colab"
       : item.state === "reviewed"
         ? "Latest Colab anomaly audit stored"
-        : "Detected anomaly";
-  return `<div class="document-actions"><span class="status ${esc(statusClass(item.state))}">${esc(status)}</span><a class="mini-action" href="${esc(humanLink(item))}">Open human review</a></div>`;
+        : item.state === "failed" ? "Colab audit failed" : "Detected anomaly";
+  const index = anomalyItems.indexOf(item);
+  const busy = item.state === "queued" || item.state === "processing";
+  return `<div class="document-actions"><span class="status ${esc(statusClass(item.state))}">${esc(status)}</span><button class="mini-action" type="button" data-anomaly-review="${index}" ${busy || !anomalyWorkersAvailable ? "disabled" : ""}>${item.human_reviewed || item.anomaly_review || item.state === "failed" ? "Re-review with Colab" : "Review with Colab"}</button><a class="mini-action" href="${esc(humanLink(item))}">Open human review</a></div>`;
 }
 
 function renderItem(item) {
@@ -74,7 +77,7 @@ function renderItem(item) {
       ${item.review_type === "text" ? `<section><div class="vision-audit-section-label">Text evidence state</div><div class="vision-audit-kv"><span>Docling original</span><strong>${esc(original || "—")}</strong><span>Primary proposal</span><strong>${esc(proposed || "—")}</strong></div></section>` : ""}
       <section><div class="vision-audit-section-label">Normal AI review</div>${aiReviewBlock(item)}</section>
       ${anomalyResultBlock(item)}
-      ${q.error_message ? `<p class="queue-error"><strong>Previous retry:</strong> ${esc(q.error_message)}</p>` : ""}
+      ${q.error_message ? `<p class="queue-error"><strong>Colab error:</strong> ${esc(q.error_message)}</p>` : ""}
       ${actionBlock(item)}
     </div>
   </article>`;
@@ -124,13 +127,14 @@ function renderSummary(data) {
   $("ar-human").textContent = Number(c.human_reviewed || 0).toLocaleString();
 
   const workers = data.workers || {};
-  const available = Boolean(workers.enabled && (workers.anomaly_workers || []).length);
+  const available = Boolean(workers.enabled && (workers.anomaly_workers || []).some(worker => worker.enabled && !worker.paused));
+  anomalyWorkersAvailable = available;
   const yes = $("ar-batch-yes");
   if (yes) yes.disabled = !available || detected === 0;
   const note = $("ar-worker-note");
   if (!available) {
     note.hidden = false;
-    note.innerHTML = '<strong>No anomaly Colab worker is assigned.</strong><p>Open Review workers and assign at least one enabled Colab worker to Anomaly review before choosing Yes.</p><a class="mini-action" href="/review-workers">Open Review workers</a>';
+    note.innerHTML = '<strong>No enabled, running anomaly Colab worker is assigned.</strong><p>Open Review workers, enable reviews, assign a Colab worker to Anomaly review, and resume it before queueing an audit.</p><a class="mini-action" href="/review-workers">Open Review workers</a>';
   } else {
     note.hidden = true;
     note.innerHTML = "";
@@ -148,7 +152,6 @@ async function loadAnomalies() {
     renderSummary(data);
     fillFilters(data);
     applyFilters();
-    feedback("");
   } catch (error) {
     feedback(`Could not load anomaly review: ${error.message}`, "warning");
   } finally {
@@ -171,12 +174,13 @@ async function reverifyAll() {
   button.textContent = "Queueing all anomalies…";
   $("ar-batch-status").textContent = `Queueing ${total.toLocaleString()} current anomalies for Colab…`;
   try {
-    const response = await fetch("/api/anomaly-review/reverify-all", {method:"POST", cache:"no-store"});
+    const response = await fetch("/api/anomaly-review/reverify-all?confirm=true", {method:"POST", cache:"no-store"});
     let data = {};
     try { data = await response.json(); } catch (_) { data = {}; }
     if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
-    const message = `Queued ${Number(data.queued || 0).toLocaleString()} anomalies. ${Number(data.already_running || 0).toLocaleString()} were already queued/processing. Human authority is unchanged.`;
-    feedback(message, "success");
+    const failed = Number(data.failed || 0);
+    const message = `Queued ${Number(data.queued || 0).toLocaleString()} anomalies. ${Number(data.already_running || 0).toLocaleString()} were already queued/processing. ${failed ? `${failed.toLocaleString()} could not be queued. ${data.errors?.[0]?.detail || ""} ` : ""}Human authority is unchanged.`;
+    feedback(message, failed ? "warning" : "success");
     $("ar-batch-status").textContent = message;
     await loadAnomalies();
   } catch (error) {
@@ -184,11 +188,33 @@ async function reverifyAll() {
     feedback(message, "warning");
     $("ar-batch-status").textContent = message;
   } finally {
-    button.disabled = false;
+    button.disabled = !anomalyWorkersAvailable;
     $("ar-batch-no").disabled = false;
     button.textContent = old;
   }
 }
+
+async function reverifyItem(item, button) {
+  if (!item || !anomalyWorkersAvailable) return;
+  button.disabled = true;
+  try {
+    const lane = item.review_type === "text" ? "corrections" : "vision-audit";
+    const response = await fetch(`/api/postprocess/jobs/${item.postprocess_job_id}/${lane}/${encodeURIComponent(item.entry_id)}/anomaly-review`, {method:"POST", cache:"no-store"});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+    feedback(data.message || "Colab anomaly audit queued.", "success");
+    await loadAnomalies();
+  } catch (error) {
+    feedback(`Could not queue Colab review: ${error.message}`, "warning");
+  } finally {
+    button.disabled = !anomalyWorkersAvailable;
+  }
+}
+
+$("ar-results").addEventListener("click", event => {
+  const button = event.target.closest("[data-anomaly-review]");
+  if (button && !button.disabled) reverifyItem(anomalyItems[Number(button.dataset.anomalyReview)], button);
+});
 
 function declineBulkRun() {
   $("ar-batch-status").textContent = "No selected — no anomaly jobs were queued or changed.";

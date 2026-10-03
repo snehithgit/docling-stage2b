@@ -4438,7 +4438,9 @@ async def _queue_manual_anomaly_review(job_id: int, entry_id: str, review_type: 
 
     registry = await asyncio.to_thread(runtime.worker_registry.snapshot, runtime.config)
     settings = registry.get("review") or {}
-    anomaly_workers = list(settings.get("anomaly_worker_ids") or [])
+    assigned = set(settings.get("anomaly_worker_ids") or [])
+    anomaly_workers = [worker for worker in registry.get("colab_workers") or []
+                       if worker.get("id") in assigned and worker.get("enabled") and not worker.get("paused")]
     if not settings.get("enabled") or not anomaly_workers:
         raise HTTPException(
             status_code=409,
@@ -4546,12 +4548,12 @@ async def anomaly_review_queue() -> dict:
         queue_map[(int(row.get("postprocess_job_id") or 0), str(row.get("entry_id") or ""), base_type)] = row
 
     registry = await asyncio.to_thread(runtime.worker_registry.snapshot, runtime.config)
-    worker_names = {
-        str(worker.get("id")): str(worker.get("name") or worker.get("id"))
-        for worker in (registry.get("colab_workers") or [])
-    }
+    worker_map = {str(worker.get("id")): worker for worker in (registry.get("colab_workers") or [])}
     anomaly_workers = [
-        {"id": str(worker_id), "name": worker_names.get(str(worker_id), str(worker_id))}
+        {"id": str(worker_id),
+         "name": str(worker_map.get(str(worker_id), {}).get("name") or worker_id),
+         "enabled": bool(worker_map.get(str(worker_id), {}).get("enabled")),
+         "paused": bool(worker_map.get(str(worker_id), {}).get("paused"))}
         for worker_id in (registry.get("review") or {}).get("anomaly_worker_ids") or []
     ]
 
@@ -4559,7 +4561,7 @@ async def anomaly_review_queue() -> dict:
     book_names: set[str] = set()
     anomaly_types_seen: set[str] = set()
     for job in books:
-        job_id = int(job.get("id") or 0)
+        job_id = int(job.get("postprocess_job_id") or 0)
         result_dir_name = Path(str(job.get("result_dir") or "")).name
         if not job_id or not result_dir_name:
             continue
@@ -4604,11 +4606,9 @@ async def anomaly_review_queue() -> dict:
             if not entry_id:
                 continue
             evidence_signature = anomaly_evidence_signature(entry, review_type)
-            anomaly_types = (
-                detect_anomaly_types(entry, review_type)
-                if isinstance(entry.get("ai_review_assistant"), dict)
-                else []
-            )
+            # Verifier truncation and suspicious rewrites are detectable even
+            # when normal AI review was skipped after a human decision.
+            anomaly_types = detect_anomaly_types(entry, review_type)
             anomaly_types_seen.update(anomaly_types)
             queue_row = queue_map.get((job_id, entry_id, review_type))
             result_current = _anomaly_result_is_current(entry, evidence_signature)
@@ -4626,6 +4626,8 @@ async def anomaly_review_queue() -> dict:
                 state = "processing"
             elif queue_status == "pending":
                 state = "queued"
+            elif queue_status == "failed":
+                state = "failed"
             elif decision_current:
                 state = "dismissed"
             elif result_current:
@@ -4669,7 +4671,7 @@ async def anomaly_review_queue() -> dict:
                 "anomaly_review_decision": entry.get("anomaly_review_decision") if decision_current else None,
             })
 
-    state_order = {"processing": 0, "queued": 1, "needs_decision": 2, "reviewed": 3, "dismissed": 4}
+    state_order = {"processing": 0, "queued": 1, "failed": 2, "needs_decision": 3, "reviewed": 4, "dismissed": 5}
     items.sort(key=lambda item: (
         state_order.get(str(item.get("state")), 9),
         0 if item.get("human_reviewed") else 1,
@@ -4684,6 +4686,7 @@ async def anomaly_review_queue() -> dict:
         "processing": sum(1 for item in items if item["state"] == "processing"),
         "reviewed": sum(1 for item in items if item["state"] == "reviewed"),
         "dismissed": sum(1 for item in items if item["state"] == "dismissed"),
+        "failed": sum(1 for item in items if item["state"] == "failed"),
         "human_reviewed": sum(1 for item in items if item.get("human_reviewed")),
     }
     return {
@@ -4718,9 +4721,9 @@ async def reverify_all_anomalies(confirm: bool = False) -> dict:
 
     registry = await asyncio.to_thread(runtime.worker_registry.snapshot, runtime.config)
     settings = registry.get("review") or {}
-    anomaly_workers = [
-        str(worker_id) for worker_id in (settings.get("anomaly_worker_ids") or [])
-    ]
+    assigned = set(settings.get("anomaly_worker_ids") or [])
+    anomaly_workers = [worker for worker in registry.get("colab_workers") or []
+                       if worker.get("id") in assigned and worker.get("enabled") and not worker.get("paused")]
     if not settings.get("enabled") or not anomaly_workers:
         raise HTTPException(
             status_code=409,

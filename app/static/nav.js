@@ -72,7 +72,7 @@
 })();
 
 (() => {
-  const version = "2026.09.30.40.11AH5";
+  const version = "2026.10.03.40.11AH6";
   const sidebar = document.querySelector('.sidebar');
   if (!sidebar) return;
   const badge = document.createElement('div');
@@ -157,7 +157,7 @@
     '/verification': ['Stage 2B verification', 'Run and retry verification here. Physical worker configuration and Artifact participation live on the Workers page.', 'Clear pending and failed checks'],
     '/workers': ['Inference workers', 'Stop/resume each physical device independently, manage multiple Colab workers, and choose Artifact sweep participants.', 'Configure worker participation'],
     '/review-workers': ['AI review workers', 'After Text, Vision, and Artifact machine work finishes, assigned Colab workers can prepare second-opinion suggestions for the human review queue. Human decisions remain authoritative.', 'Assign review workers'],
-    '/anomaly-review': ['Anomaly review', 'Inspect the automatic third-pass Colab audit of suspicious Text/Vision states. Use the single global re-review action only when you want every current anomaly checked again.', 'Inspect anomaly results'],
+    '/anomaly-review': ['Anomaly review', 'Inspect suspicious Text/Vision states and request Colab audits individually or as a batch, including after human review.', 'Inspect anomaly results'],
     '/artifact-audit': ['Technical visual audit', 'Inspect technical pictures produced by verification. Rerunning a visual verification makes downstream Stage 2C/Stage 3/machine embeddings stale.', 'Resolve visual evidence'],
     '/text-audit': ['Text verification audit', 'Inspect verifier decisions and source-image transcription. Human corrections take precedence and trigger downstream rebuilding.', 'Resolve questionable text'],
     '/vision-audit': ['Vision evidence audit', 'Review what the vision verifier extracted before it becomes RAG visual evidence.', 'Confirm evidence quality'],
