@@ -445,7 +445,7 @@ class ReviewAssistantService:
                         continue
                     for wid in sorted(text|vision|anomaly):
                         worker=worker_map.get(wid)
-                        if not worker or not worker.get("enabled") or worker.get("paused"): continue
+                        if not worker or not worker.get("enabled") or worker.get("paused") or (worker.get("runner_account_id") and not worker.get("runner_ready")): continue
                         provider=f"colab:{wid}"
                         if provider in self._worker.dispatch_reservations: continue
                         task=self._active.get(wid)

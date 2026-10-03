@@ -28,6 +28,7 @@ class WorkerRegistry:
         self.path = db_dir / "worker_registry.json"
         self.secret_dir = db_dir / "colab_workers"
         self._lock = threading.RLock()
+        self.runner_status: dict[str, dict[str, Any]] = {}
 
     def _default(self) -> dict[str, Any]:
         return {
@@ -75,6 +76,7 @@ class WorkerRegistry:
                 continue
             workers.append({
                 "id": worker_id,
+                "runner_account_id": str(raw.get("runner_account_id") or ""),
                 "name": str(raw.get("name") or worker_id).strip()[:80] or worker_id,
                 "enabled": bool(raw.get("enabled", False)),
                 "paused": bool(raw.get("paused", False)),
@@ -155,7 +157,15 @@ class WorkerRegistry:
         if config is not None:
             self.ensure_legacy_colab(config)
         with self._lock:
-            return self._read_unlocked()
+            return self._with_runner_status(self._read_unlocked())
+
+    def _with_runner_status(self, data):
+        for item in data["colab_workers"]:
+            if item.get("runner_account_id"):
+                status = dict(self.runner_status.get(item["id"]) or {})
+                item["runner_status"] = status
+                item["runner_ready"] = bool(status.get("ready") and time.time() - float(status.get("observed_at_epoch") or 0) < 45)
+        return data
 
     def snapshot_with_key_status(self, config: Any | None = None) -> dict[str, Any]:
         """Return one registry snapshot plus one key-file read per Colab worker.
@@ -167,7 +177,7 @@ class WorkerRegistry:
         if config is not None:
             self.ensure_legacy_colab(config)
         with self._lock:
-            data = self._read_unlocked()
+            data = self._with_runner_status(self._read_unlocked())
         key_status: dict[str, dict[str, Any]] = {}
         configured: list[dict[str, Any]] = []
         for item in data.get("colab_workers") or []:
@@ -251,7 +261,7 @@ class WorkerRegistry:
         with self._lock:
             for item in self._read_unlocked()["colab_workers"]:
                 if item["id"] == worker_id:
-                    return dict(item)
+                    return self._with_runner_status({"colab_workers": [dict(item)]})["colab_workers"][0]
         return None
 
     def update_colab(self, worker_id: str, updates: dict[str, Any]) -> dict[str, Any]:
@@ -272,6 +282,8 @@ class WorkerRegistry:
                 if item.get("remove_requested") and "remove_requested" not in updates:
                     raise ValueError("This Colab worker is already scheduled for removal after its current job")
                 found = dict(item)
+                if "runner_account_id" in updates:
+                    found["runner_account_id"] = str(updates["runner_account_id"] or "")
                 if "name" in updates:
                     found["name"] = str(updates["name"] or worker_id).strip()[:80] or worker_id
                 if "enabled" in updates:
@@ -407,6 +419,8 @@ class WorkerRegistry:
         result = []
         for item in data["colab_workers"]:
             if item.get("remove_requested"):
+                continue
+            if item.get("runner_account_id") and not item.get("runner_ready"):
                 continue
             if not item.get("enabled") or not item.get("url") or not self.read_api_key(item["id"]):
                 continue

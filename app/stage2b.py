@@ -2907,6 +2907,7 @@ class Stage2BWorker:
                 not worker
                 or worker.get("paused")
                 or worker.get("remove_requested")
+                or (worker.get("runner_account_id") and not worker.get("runner_ready"))
                 or not worker.get("enabled")
             )
         return False
@@ -2968,6 +2969,7 @@ class Stage2BWorker:
                         or not worker.get("enabled")
                         or worker.get("paused")
                         or worker.get("remove_requested")
+                        or (worker.get("runner_account_id") and not worker.get("runner_ready"))
                     ):
                         return False
             if provider in self._provider_reservations:
