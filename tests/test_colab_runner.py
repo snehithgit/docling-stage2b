@@ -270,3 +270,67 @@ async def test_manual_fetch_disabled_monitor_keeps_status_and_credentials(setup)
     assert current['runner_status']['state'] == 'running'
     assert 'Monitoring disabled' in current['runner_status']['waiting_reason']
     assert not current['runner_ready']
+
+
+@pytest.mark.asyncio
+async def test_healthy_refresh_preserves_ready_until_endpoint_response(setup):
+    runner, registry, _, account, _, _ = setup
+    worker = await runner.import_account('account/one')
+    original_request = runner.request
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def delayed(method, path):
+        if path.endswith('/endpoint'):
+            entered.set()
+            await release.wait()
+        return await original_request(method, path)
+
+    runner.request = delayed
+    previous_time = registry.runner_status[worker['id']]['observed_at_epoch']
+    task = asyncio.create_task(runner.sync())
+    await entered.wait()
+    assert registry.get_colab(worker['id'])['runner_ready']
+    assert registry.runner_status[worker['id']]['observed_at_epoch'] == previous_time
+    release.set()
+    await task
+
+    assert registry.get_colab(worker['id'])['runner_ready']
+    account['routable'] = False
+    entered.clear()
+    release.clear()
+    task = asyncio.create_task(runner.sync())
+    await entered.wait()
+    assert not registry.get_colab(worker['id'])['runner_ready']
+    release.set()
+    await task
+
+
+@pytest.mark.asyncio
+async def test_pool_health_tries_second_worker_after_first_probe_failure(setup, monkeypatch):
+    from types import SimpleNamespace
+    from app.postprocess import PostprocessWorker
+    from app.verifier_clients import EndpointHealth
+
+    _, registry, _, _, _, _ = setup
+    for url in ['https://failed.example', 'https://healthy.example']:
+        worker = registry.add_colab()
+        registry.update_colab(worker['id'], {'enabled': True, 'url': url})
+        registry.write_api_key(worker['id'], 'valid-key-12345678')
+    monitor = object.__new__(PostprocessWorker)
+    monitor._stopping = asyncio.Event()
+    monitor._worker_registry = registry
+    monitor._config_getter = lambda: SimpleNamespace(text_verifier_provider='colab', vision_verifier_provider='colab', verifier_health_interval_seconds=0)
+
+    class Verifier:
+        def __init__(self, url, **kwargs):
+            self.url = url
+
+        async def health(self):
+            monitor._stopping.set()
+            return EndpointHealth(self.url == 'https://healthy.example', model='kobold', detail='probe')
+
+    monkeypatch.setattr('app.postprocess.OpenAICompatibleVerifier', Verifier)
+    await monitor._verifier_health_loop()
+    for status in monitor.verifier_status.values():
+        assert status['reachable']
+        assert 'Colab pool · health checked on colab-2' in status['detail']

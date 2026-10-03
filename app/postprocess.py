@@ -2899,18 +2899,24 @@ class PostprocessWorker:
                 if self._worker_registry is not None:
                     workers = await asyncio.to_thread(self._worker_registry.configured_colabs, config)
                     if not workers:
-                        return EndpointHealth(False, model="Colab", detail="No enabled Colab worker is ready")
-                    worker = workers[0]
-                    worker_id = str(worker.get("id") or "colab")
-                    key = await asyncio.to_thread(self._worker_registry.read_api_key, worker_id)
-                    endpoint = str(worker.get("url") or "").strip()
-                    model = str(worker.get("model") or "koboldcpp")
-                    health = await OpenAICompatibleVerifier(
-                        endpoint, timeout_seconds=int(getattr(config, "colab_timeout_seconds", 600)), api_key=key
-                    ).health()
-                    if health.reachable:
-                        return EndpointHealth(True, model=health.model or model, detail=f"{worker_id} · {health.detail or 'reachable'}")
-                    return EndpointHealth(False, model=model, detail=f"{worker_id} · {health.detail or 'health probe failed'}")
+                        snapshot = await asyncio.to_thread(self._worker_registry.snapshot, config)
+                        reasons = [str(w.get("name") or w["id"]) + ": " + str((w.get("runner_status") or {}).get("waiting_reason") or "Runner status missing or stale")
+                                   for w in snapshot["colab_workers"] if w.get("enabled") and not w.get("paused") and w.get("runner_account_id")]
+                        detail = "No eligible Colab worker" + (" · " + "; ".join(reasons) if reasons else "; configure or resume a worker on Workers")
+                        return EndpointHealth(False, model="Colab", detail=detail)
+                    failures = []
+                    for worker in workers:
+                        worker_id = str(worker.get("id") or "colab")
+                        key = await asyncio.to_thread(self._worker_registry.read_api_key, worker_id)
+                        endpoint = str(worker.get("url") or "").strip()
+                        model = str(worker.get("model") or "koboldcpp")
+                        health = await OpenAICompatibleVerifier(
+                            endpoint, timeout_seconds=int(getattr(config, "colab_timeout_seconds", 600)), api_key=key
+                        ).health()
+                        if health.reachable:
+                            return EndpointHealth(True, model=health.model or model, detail=f"Colab pool · health checked on {worker_id} · {health.detail or 'reachable'}")
+                        failures.append(f"{worker_id} · {health.detail or 'health probe failed'}")
+                    return EndpointHealth(False, model="Colab", detail="; ".join(failures))
                 key = read_colab_api_key(config)
                 endpoint = str(getattr(config, "colab_url", "") or "").strip()
                 if not bool(getattr(config, "colab_enabled", False)):

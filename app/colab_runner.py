@@ -107,10 +107,13 @@ class ColabRunner:
                 account = accounts.get(account_id, {})
                 status = {**account, 'observed_at_epoch': self.observed_at, 'ready': False}
                 status['waiting_reason'] = self.waiting_reason(account)
-                self.registry.runner_status[worker['id']] = status
                 ready = account.get('state') == 'running' and account.get('healthy') is True and account.get('routable') is True and not account.get('login_required')
                 remaining = account.get('remaining_s')
                 ready = ready and (remaining is None or isinstance(remaining, (int, float)) and remaining > 0)
+                # Keep the previous verified snapshot (with its original TTL)
+                # during a healthy refresh. Publish genuine loss immediately.
+                if not ready or not self.config().get('enabled'):
+                    self.registry.runner_status[worker['id']] = status
                 provider = 'colab:' + worker['id']
                 # Fetch credentials independently of health/routing. The runner
                 # exposes known endpoints even while stats are stale or starting.
@@ -126,6 +129,7 @@ class ColabRunner:
                             raise ValueError('Runner endpoint is not ready')
                         existing_key = self.registry.read_api_key(worker['id'])
                         if worker.get('url') != url or existing_key != key:
+                            self.registry.runner_status[worker['id']] = status
                             await self.dispatcher.update_colab_worker_admin(worker['id'], {'url': url}, api_key=key)
                             self.dispatcher.reset_provider_connection(provider)
                         status['ready'] = bool(ready and endpoint.get('healthy') is True and self.config().get('enabled'))
@@ -134,6 +138,7 @@ class ColabRunner:
                     except (ValueError, RuntimeError) as exc:
                         status['ready'] = False
                         status['waiting_reason'] = 'Credential refresh deferred until the current request finishes' if isinstance(exc, RuntimeError) else 'Endpoint credentials unavailable; waiting for the runner'
+                self.registry.runner_status[worker['id']] = status
                 if not status['ready']:
                     await self._recover(worker, account)
         except (ValueError, KeyError, TypeError):

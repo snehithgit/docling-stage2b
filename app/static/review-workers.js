@@ -11,12 +11,13 @@ let settingsInFlight=false;
 
 function markDirty(){settingsDirty=true;$('review-unsaved').hidden=false;}
 function clearDirty(){settingsDirty=false;$('review-unsaved').hidden=true;}
-function workerState(w){return w.paused?'Stopped':w.connection_configured?'Configured':'Needs setup';}
+function workerState(w){return w.paused?'Stopped':w.runner_account_id&&!w.runner_ready?'Waiting':w.active?'Busy':w.connection_configured?'Ready':'Needs setup';}
+function refreshWorkerReadiness(current){for(const w of current){const badge=$(`worker-readiness-${w.id}`),reason=$(`worker-reason-${w.id}`);if(badge){badge.textContent=workerState(w);badge.className=`mode-badge ${workerState(w)==='Waiting'||w.paused?'paused':'auto'}`;}if(reason)reason.textContent=w.runner_account_id&&!w.runner_ready?(w.runner_status?.waiting_reason||'Runner status missing or stale'):w.active?'Processing a request':'Available for assigned review queues';}}
 function renderAssignments(){
   const box=$('review-worker-assignment');
   if(!workers.length){box.innerHTML='<div class="review-empty-state"><strong>No enabled Colab workers</strong><span>Add and configure a Colab worker on the Workers page, then return here.</span></div>';return;}
   box.innerHTML=workers.map(w=>`<article class="review-assignment-card">
-    <div class="review-assignment-head"><div><strong>${esc(w.name||w.id)}</strong><small>${esc(w.id)}</small></div><span class="mode-badge ${w.paused?'paused':w.connection_configured?'auto':'paused'}">${esc(workerState(w))}</span></div>
+    <div class="review-assignment-head"><div><strong>${esc(w.name||w.id)}</strong><small>${esc(w.id)}</small></div><span id="worker-readiness-${esc(w.id)}" class="mode-badge ${w.paused?'paused':w.connection_configured?'auto':'paused'}">${esc(workerState(w))}</span></div><small id="worker-reason-${esc(w.id)}">${esc(w.runner_account_id&&!w.runner_ready?(w.runner_status?.waiting_reason||"Runner status missing or stale"):"Available for assigned review queues")}</small>
     <div class="review-assignment-options">
       <label class="review-role-option"><input type="checkbox" data-role="text" value="${esc(w.id)}" ${settings.text_worker_ids?.includes(w.id)?'checked':''}/><span><strong>Text review</strong><small>Re-check uncertain OCR/text suggestions.</small></span></label>
       <label class="review-role-option"><input type="checkbox" data-role="vision" value="${esc(w.id)}" ${settings.vision_worker_ids?.includes(w.id)?'checked':''}/><span><strong>Vision review</strong><small>Re-check technical visual evidence.</small></span></label>
@@ -46,7 +47,8 @@ async function loadStatus(){
   if(statusInFlight)return;
   statusInFlight=true;
   try{
-    const st=await api('/api/review-workers/status');
+    const [st,pool]=await Promise.all([api('/api/review-workers/status'),api('/api/workers')]);
+    refreshWorkerReadiness(pool.colab_workers||[]);
     const c=st.counts||{};
     const blockers=Number(st.machine_blockers||0);
     $('review-machine-gate').textContent=st.machine_work_complete?'Primary machine workload complete · review workers may run.':`${blockers.toLocaleString()} primary job${blockers===1?'':'s'} still block this phase.`;
