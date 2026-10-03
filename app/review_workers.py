@@ -167,6 +167,15 @@ class ReviewAssistantStore:
         evidence_sig = anomaly_evidence_signature(entry, base_type)
         signature = f"manual:{evidence_sig}:{time.time_ns()}"
         with self._conn() as conn:
+            existing = conn.execute(
+                """SELECT * FROM review_assistant_jobs
+                   WHERE postprocess_job_id=? AND entry_id=? AND review_type=?
+                     AND is_current=1 AND status IN ('pending','processing')
+                   ORDER BY id DESC LIMIT 1""",
+                (int(postprocess_job_id), entry_id, review_type),
+            ).fetchone()
+            if existing and str(existing["entry_signature"]).startswith(f"manual:{evidence_sig}:"):
+                return dict(existing)
             conn.execute(
                 """UPDATE review_assistant_jobs SET is_current=0
                    WHERE postprocess_job_id=? AND entry_id=? AND review_type=? AND is_current=1""",
@@ -217,7 +226,9 @@ class ReviewAssistantStore:
             row = conn.execute(f"""SELECT * FROM review_assistant_jobs
                 WHERE is_current=1 AND status='pending' AND review_type IN ({placeholders})
                   AND (next_attempt_at IS NULL OR next_attempt_at<=?)
-                ORDER BY CASE review_type
+                ORDER BY CASE WHEN entry_signature LIKE 'manual:%'
+                    AND review_type IN ('anomaly_text','anomaly_vision') THEN 0 ELSE 1 END,
+                    CASE review_type
                     WHEN 'text' THEN 0 WHEN 'vision' THEN 1
                     WHEN 'anomaly_text' THEN 2 WHEN 'anomaly_vision' THEN 3 ELSE 4
                 END, id ASC LIMIT 1""", args).fetchone()
@@ -398,10 +409,6 @@ class ReviewAssistantService:
                     if not machine_clear:
                         await asyncio.sleep(max(2,int(getattr(config,"stage2b_poll_interval_seconds",3))))
                         continue
-                    counts=await self._store.counts()
-                    normal_review_remaining=sum(int(counts.get(key) or 0) for key in (
-                        "text_pending","text_processing","vision_pending","vision_processing"
-                    ))
                     for wid in sorted(text|vision|anomaly):
                         worker=worker_map.get(wid)
                         if not worker or not worker.get("enabled") or worker.get("paused"): continue
@@ -412,9 +419,11 @@ class ReviewAssistantService:
                         allowed=set();
                         if wid in text: allowed.add("text")
                         if wid in vision: allowed.add("vision")
-                        # Keep anomaly auditing as a true third pass. It starts
-                        # only after normal Text/Vision review queues are clear.
-                        if wid in anomaly and normal_review_remaining == 0:
+                        # Operator-requested anomaly audits may inspect existing
+                        # evidence (including human decisions) while other books
+                        # still await normal AI review. The primary machine gate
+                        # and physical-worker reservation remain in force.
+                        if wid in anomaly:
                             allowed.update({"anomaly_text","anomaly_vision"})
                         if not allowed:
                             continue
