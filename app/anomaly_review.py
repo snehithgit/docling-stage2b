@@ -69,6 +69,11 @@ def detect_anomaly_types(entry: dict[str, Any], review_type: str) -> list[str]:
         anomalies.append("LOW_AI_REVIEW_CONFIDENCE")
 
     if kind == "text":
+        if review and not isinstance(review.get("source_validation"), dict) and recommendation in {"KEEP_ORIGINAL", "APPLY_PROPOSED", "EDIT_SUGGESTED"}:
+            anomalies.append("UNVERIFIED_AI_TEXT_REVIEW")
+        audit = entry.get("anomaly_review")
+        if isinstance(audit, dict) and not isinstance(audit.get("source_validation"), dict) and audit.get("verdict") in {"KEEP_ORIGINAL", "CONFIRM_CURRENT", "USE_PRIMARY_PROPOSAL", "REPLACE_TEXT"}:
+            anomalies.append("UNVERIFIED_ANOMALY_TEXT_AUDIT")
         if review and _text_disagreement(entry, review):
             anomalies.append("VERIFIER_REVIEWER_DISAGREEMENT")
         if recommendation == "EDIT_SUGGESTED":

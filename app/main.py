@@ -4644,6 +4644,8 @@ async def anomaly_review_queue() -> dict:
             anomaly_types_seen.update(anomaly_types)
             queue_row = queue_map.get((job_id, entry_id, review_type))
             result_current = _anomaly_result_is_current(entry, evidence_signature)
+            if review_type == "text" and isinstance(entry.get("anomaly_review"), dict) and not isinstance(entry["anomaly_review"].get("source_validation"), dict):
+                result_current = False
             decision_current = _anomaly_decision_is_current(entry, evidence_signature)
             result = entry.get("anomaly_review") if isinstance(entry.get("anomaly_review"), dict) else None
 

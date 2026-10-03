@@ -135,17 +135,19 @@ function renderAiReviewAssistant(entry) {
     return;
   }
   card.hidden = false;
-  const recommendation = String(a.recommendation || "NEEDS_HUMAN").replaceAll("_", " ");
-  const confidence = Number(a.confidence);
+  const legacy = !a.source_validation;
+  const recommendation = legacy ? "SOURCE RE-REVIEW REQUIRED" : String(a.recommendation || "NEEDS_HUMAN").replaceAll("_", " ");
+  const confidence = legacy || a.confidence == null ? NaN : Number(a.confidence);
   const confidenceText = Number.isFinite(confidence) ? `${Math.round(confidence * 100)}% confidence` : "confidence not reported";
   const worker = String(a.worker_name || a.worker_id || "Colab worker");
   $("ai-review-assistant-meta").textContent = `${recommendation} · ${confidenceText} · ${worker}`;
-  $("ai-review-assistant-reason").textContent = String(a.reason || "No reason supplied.");
-  const suggested = String(a.suggested_text || "").trim();
+  $("ai-review-assistant-reason").textContent = legacy ? "This older review supplied no validated source transcription. Its explanation does not verify the Docling text. Re-review with Colab after updating the worker." : String(a.reason || "No reason supplied.");
+  const suggested = legacy ? "" : String(a.suggested_text || "").trim();
+  const sourceCandidate = legacy ? "" : String(a.source_transcription || "").trim();
   const textEl = $("ai-review-assistant-text");
   const useBtn = $("use-ai-review-assistant");
-  textEl.hidden = !suggested;
-  textEl.textContent = suggested;
+  textEl.hidden = !suggested && !sourceCandidate;
+  textEl.textContent = suggested || (sourceCandidate ? `Source candidate (requires human comparison): ${sourceCandidate}` : "");
   useBtn.hidden = !suggested;
   useBtn.disabled = !suggested;
 }
@@ -159,8 +161,9 @@ function renderAnomalyReview(entry) {
     return;
   }
   card.hidden = false;
-  const verdict = String(a.verdict || "NEEDS_HUMAN").replaceAll("_", " ");
-  const confidence = Number(a.confidence);
+  const legacy = !a.source_validation;
+  const verdict = legacy ? "SOURCE RE-REVIEW REQUIRED" : String(a.verdict || "NEEDS_HUMAN").replaceAll("_", " ");
+  const confidence = legacy || a.confidence == null ? NaN : Number(a.confidence);
   const confidenceText = Number.isFinite(confidence) ? `${Math.round(confidence * 100)}% confidence` : "confidence not reported";
   const worker = String(a.worker_name || a.worker_id || "Colab worker");
   $("anomaly-review-meta").textContent = `${verdict} · ${confidenceText} · ${worker}`;
@@ -168,12 +171,13 @@ function renderAnomalyReview(entry) {
     ? a.anomaly_types_confirmed
     : (Array.isArray(a.anomaly_types) ? a.anomaly_types : []);
   $("anomaly-review-types").textContent = types.length ? `Anomaly: ${types.map(x => String(x).replaceAll("_", " ")).join(" · ")}` : "No anomaly confirmed.";
-  $("anomaly-review-reason").textContent = String(a.reason || "No reason supplied.");
-  const corrected = String(a.corrected_text || "").trim();
+  $("anomaly-review-reason").textContent = legacy ? "This older audit supplied no validated source transcription. KEEP ORIGINAL does not establish that the garbled Docling string matches the PDF. Re-review with Colab after updating the worker." : String(a.reason || "No reason supplied.");
+  const corrected = legacy ? "" : String(a.corrected_text || "").trim();
+  const sourceCandidate = legacy ? "" : String(a.source_transcription || "").trim();
   const textEl = $("anomaly-review-text");
   const useBtn = $("use-anomaly-review");
-  textEl.hidden = !corrected;
-  textEl.textContent = corrected;
+  textEl.hidden = !corrected && !sourceCandidate;
+  textEl.textContent = corrected || (sourceCandidate ? `Source candidate (requires human comparison): ${sourceCandidate}` : "");
   useBtn.hidden = !corrected;
   useBtn.disabled = !corrected;
 }
