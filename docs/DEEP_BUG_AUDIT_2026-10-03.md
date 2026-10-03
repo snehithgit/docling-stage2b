@@ -63,6 +63,10 @@ git diff --check
 5. **Embedding files:** Compatibility reuse validates semantic identity and expected shapes. This audit does not provide disk-failure atomicity across all three embedding snapshot files or a checksum-based corruption recovery scheme.
 6. **Live Colab:** Actual crop quality, model JSON behavior, GPU memory exhaustion and tunnel expiry require a deployed smoke test. The source regressions use deterministic mocked inference. Human decisions remain authoritative; AI re-review is advisory.
 
+## GitHub Linux CI result
+
+[Validation run 37101119796](https://github.com/snehithgit/docling-stage2b/actions/runs/37101119796) passed for source commit `f15c6b3`: **696 Python tests passed**, **3 frontend behavior tests passed**, and all syntax checks passed. This includes both Unix permission assertions excluded locally. [PR #7](https://github.com/snehithgit/docling-stage2b/pull/7) contains the fixes.
+
 ## Post-merge verification
 
 After deploying AH7, check that failed reviews appear with a retry action; retry one failed text row and verify attempts restart at one. Queue an anomaly already reviewed by a human and confirm the new AI audit/history is stored without modifying the human decision. Confirm that saving an advisory audit leaves current Stage 3 chunks current, while an accepted human text change makes them stale. Change manual/chunk selections quickly and verify delayed responses cannot replace the active selection. The audit did not modify or restart the running service.
