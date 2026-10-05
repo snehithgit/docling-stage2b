@@ -2826,6 +2826,7 @@ async def documents() -> dict:
             "oneplus_pending": int(book.get("oneplus_pending") or 0),
             "oneplus_processing": int(book.get("oneplus_processing") or 0),
             "oneplus_failed": int(book.get("oneplus_failed") or 0),
+            **{f"{lane}_{status}": int(book.get(f"{lane}_{status}") or 0) for lane in ("text", "vision", "artifact") for status in ("pending", "processing", "completed", "failed")},
             **verification_counts(book),
             "total": int(book.get("total") or 0),
         }

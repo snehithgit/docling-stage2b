@@ -32,15 +32,15 @@
   function counts() {
     const v = book?.verification || {};
     return {
-      pending:Number(v.pending ?? (Number(v.pi5_pending||0)+Number(v.oneplus_pending||0))),
-      processing:Number(v.processing ?? (Number(v.pi5_processing||0)+Number(v.oneplus_processing||0))),
-      failed:Number(v.failed ?? (Number(v.pi5_failed||0)+Number(v.oneplus_failed||0))),
-      completed:Number(v.completed ?? (Number(v.pi5_completed||0)+Number(v.oneplus_completed||0))),
+      pending:Number(v.pending ?? (Number(v.text_pending ?? v.pi5_pending ?? 0)+Number(v.vision_pending ?? v.oneplus_pending ?? 0))),
+      processing:Number(v.processing ?? (Number(v.text_processing ?? v.pi5_processing ?? 0)+Number(v.vision_processing ?? v.oneplus_processing ?? 0))),
+      failed:Number(v.failed ?? (Number(v.text_failed ?? v.pi5_failed ?? 0)+Number(v.vision_failed ?? v.oneplus_failed ?? 0))),
+      completed:Number(v.completed ?? (Number(v.text_completed ?? v.pi5_completed ?? 0)+Number(v.vision_completed ?? v.oneplus_completed ?? 0))),
       total:Number(v.total||0),
-      piDone:Number(v.pi5_completed||0), oneDone:Number(v.oneplus_completed||0),
-      piPending:Number(v.pi5_pending||0)+Number(v.pi5_processing||0),
-      onePending:Number(v.oneplus_pending||0)+Number(v.oneplus_processing||0),
-      piFailed:Number(v.pi5_failed||0), oneFailed:Number(v.oneplus_failed||0),
+      piDone:Number(v.text_completed ?? v.pi5_completed ?? 0), oneDone:Number(v.vision_completed ?? v.oneplus_completed ?? 0),
+      piPending:Number(v.text_pending ?? v.pi5_pending ?? 0)+Number(v.text_processing ?? v.pi5_processing ?? 0),
+      onePending:Number(v.vision_pending ?? v.oneplus_pending ?? 0)+Number(v.vision_processing ?? v.oneplus_processing ?? 0),
+      piFailed:Number(v.text_failed ?? v.pi5_failed ?? 0), oneFailed:Number(v.vision_failed ?? v.oneplus_failed ?? 0),
     };
   }
   function statusBadge(state, label) { return `<span class="stage-state ${state}">${esc(label)}</span>`; }
@@ -132,7 +132,7 @@
       }
       else if (stage2bDone) { bState='done'; bLabel='Complete'; bActions=`<a class="secondary-button" href="/verification?job=${jobId}">Results & crossover checks</a>`; }
     }
-    cards.push(stageCard('2B', `${textVerifier} + ${visionVerifier}`, `${textVerifier} reconstructs routed OCR targets from source-image crops; ${visionVerifier} analyzes routed images. Each role can use Pi5, OnePlus, or Groq, and there is no automatic provider fallback.`, bState, bLabel, `<div class="device-progress-grid"><div><span>${esc(textVerifier)}</span><strong>${c.piDone}</strong><small>${c.piPending} waiting/running · ${c.piFailed} failed</small></div><div><span>${esc(visionVerifier)}</span><strong>${c.oneDone}</strong><small>${c.onePending} waiting/running · ${c.oneFailed} failed</small></div></div>`, bActions)); rail.push(bState==='done'?'done':bState);
+    cards.push(stageCard('2B', `${textVerifier} + ${visionVerifier}`, `${textVerifier} reconstructs routed OCR targets from source-image crops; ${visionVerifier} analyzes routed images. Each role can use the selected local device, Colab worker pool, or Groq, and there is no automatic provider fallback.`, bState, bLabel, `<div class="device-progress-grid"><div><span>${esc(textVerifier)}</span><strong>${c.piDone}</strong><small>${c.piPending} waiting/running · ${c.piFailed} failed</small></div><div><span>${esc(visionVerifier)}</span><strong>${c.oneDone}</strong><small>${c.onePending} waiting/running · ${c.oneFailed} failed</small></div></div>`, bActions)); rail.push(bState==='done'?'done':bState);
 
     let cState='blocked', cLabel='Waiting', cActions='';
     if (stage2bDone) {
