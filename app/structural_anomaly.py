@@ -44,10 +44,11 @@ def structural_entries(result_dir: Path) -> list[dict[str, Any]]:
     repairs = load_json(result_dir / "table_structure_repairs.json").get("repairs") or {}
     page_repairs = load_json(result_dir / "docling_page_repairs.json")
     entries = []
+    diagnostics = load_json(result_dir / "diagnostics.json")
     for route in stage2a_human_review_summary(result_dir)["routes"]:
         if route.get("status") == "superseded" or not route.get("route_id") or not route.get("code"):
             continue
-        context = stage2a_structural_review_context(result_dir, str(route["route_id"]))
+        context = stage2a_structural_review_context(result_dir, str(route["route_id"]), route=route, diagnostics=diagnostics)
         # A per-table route must not inherit findings belonging to other tables.
         table_index = (route.get("source") or {}).get("table_index")
         if table_index is not None:
@@ -176,7 +177,7 @@ async def run_structural_audit(worker, *, worker_id: str, postprocess_job_id: in
             if len(serialized) > 48000:
                 raise ValueError("Structural evidence exceeds this worker's safe prompt window; review this route manually")
             prompt = system + "\nAUDIT CONTEXT:\n" + serialized
-            async with worker._device_locks[provider]:
+            async with worker._review_inference_window(postprocess_job_id), worker._device_locks[provider]:
                 if page:
                     rendered = await asyncio.to_thread(_render_source_page, config, filename, page)
                     if not rendered:

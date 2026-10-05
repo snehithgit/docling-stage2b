@@ -41,6 +41,8 @@ class ColabRunner:
         tmp = path.with_suffix(path.suffix + '.tmp')
         tmp.write_text(value, encoding='utf-8')
         os.chmod(tmp, 0o600)
+        with tmp.open("r+b") as handle:
+            os.fsync(handle.fileno())
         tmp.replace(path)
         os.chmod(path, 0o600)
 
@@ -140,7 +142,10 @@ class ColabRunner:
                         status['waiting_reason'] = 'Credential refresh deferred until the current request finishes' if isinstance(exc, RuntimeError) else 'Endpoint credentials unavailable; waiting for the runner'
                 self.registry.runner_status[worker['id']] = status
                 if not status['ready']:
-                    await self._recover(worker, account)
+                    try:
+                        await self._recover(worker, account)
+                    except (ValueError, RuntimeError):
+                        self.recovery.setdefault(account_id, {})['last_error'] = 'Runtime recovery failed; retrying after backoff'
         except (ValueError, KeyError, TypeError):
             self.error = 'Runner unavailable; check its URL, token, and service status.'
             self.registry.runner_status.clear()
@@ -166,6 +171,9 @@ class ColabRunner:
     async def _recover(self, worker, account):
         if not self.config().get('enabled') or not self.config().get('auto_restart') or not worker.get('enabled') or worker.get('paused') or account.get('login_required'):
             return
+        remaining = account.get('remaining_s')
+        if isinstance(remaining, (int, float)) and remaining <= 0:
+            return
         state = account.get('state')
         if state not in {'error', 'idle', 'running'} or state == 'running' and account.get('healthy') is not False:
             return
@@ -173,16 +181,22 @@ class ColabRunner:
         recovery = self.recovery.setdefault(account_id, {'attempts': 0, 'next_retry_at_epoch': time.time() + 60})
         if recovery['attempts'] >= 3 or time.time() < recovery['next_retry_at_epoch']:
             return
-        # Same lock as queue reservations: never restart in-flight inference.
-        async with self.dispatcher._dispatch_lock:
-            provider = 'colab:' + worker['id']
-            self.dispatcher._ensure_provider_state(provider)
-            current = self.registry.get_colab(worker['id'])
-            if not current or current.get('paused') or current.get('remove_requested') or not current.get('enabled') or provider in self.dispatcher.dispatch_reservations or self.dispatcher._device_locks[provider].locked():
+        owner = 'runner:recover'
+        try:
+            current = await self.dispatcher.reserve_colab_worker_for_admin(worker['id'], owner)
+        except (RuntimeError, ValueError):
+            return
+        if not current:
+            return
+        try:
+            if current.get('paused') or not current.get('enabled'):
                 return
             recovery['attempts'] += 1
             recovery['next_retry_at_epoch'] = time.time() + 120 * 2 ** recovery['attempts']
             await self.request('POST', '/accounts/' + quote(account_id, safe='') + '/restart')
+            recovery.pop('last_error', None)
+        finally:
+            await self.dispatcher._release_provider('colab:' + worker['id'], owner)
 
     async def import_account(self, account_id, worker_id=None):
         async with self._lock:
@@ -207,21 +221,26 @@ class ColabRunner:
         if action not in {'start', 'stop', 'restart', 'reconnect'}:
             raise ValueError('Unknown runner action')
         async with self._lock:
-            async with self.dispatcher._dispatch_lock:
-                worker = self.registry.get_colab(worker_id)
-                if not worker or not worker.get('runner_account_id') or worker.get('remove_requested'):
+            owner = 'runner:control'
+            worker = await self.dispatcher.reserve_colab_worker_for_admin(worker_id, owner)
+            if not worker:
+                raise ValueError('Worker is not linked to a runner account')
+            try:
+                if not worker.get('runner_account_id'):
                     raise ValueError('Worker is not linked to a runner account')
-                provider = 'colab:' + worker_id
-                self.dispatcher._ensure_provider_state(provider)
-                if provider in self.dispatcher.dispatch_reservations or self.dispatcher._device_locks[provider].locked():
-                    raise RuntimeError('Wait for the current Docling request to finish before controlling the runtime')
-                # Pause before remote stop; no automatic restart of a stopped worker.
+                previous_pause = bool(worker.get('paused'))
                 self.registry.update_colab(worker_id, {'paused': True})
                 self.registry.runner_status[worker_id] = {'ready': False}
-                await self.request('POST', '/accounts/' + quote(worker['runner_account_id'], safe='') + '/' + action)
+                try:
+                    await self.request('POST', '/accounts/' + quote(worker['runner_account_id'], safe='') + '/' + action)
+                except BaseException:
+                    self.registry.update_colab(worker_id, {'paused': previous_pause})
+                    raise
                 if action != 'stop':
                     self.registry.update_colab(worker_id, {'paused': False})
                     self.recovery.pop(worker['runner_account_id'], None)
+            finally:
+                await self.dispatcher._release_provider('colab:' + worker_id, owner)
             await self._sync()
         return self.public()
 

@@ -645,6 +645,8 @@ def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    with tmp.open("r+b") as handle:
+        os.fsync(handle.fileno())
     tmp.replace(path)
 
 
@@ -1597,6 +1599,8 @@ def undo_human_visual_decision(result_dir: Path, entry_id: str) -> dict[str, Any
     entry = next((e for e in entries if str(e.get("entry_id") or "") == str(entry_id)), None)
     if not entry or entry.get("entry_type") != "vision_enrichment":
         raise ValueError("Vision audit entry was not found")
+    if entry.get("status") == "superseded":
+        raise ValueError("This visual was superseded; reload and review the current entry")
     if not entry.get("human_verified") or str(entry.get("human_visual_decision") or "") not in {"technical", "decorative", "useful", "not_useful"}:
         raise ValueError("This visual does not have a human decision to undo")
     entry["human_verified"] = False
@@ -1629,6 +1633,8 @@ def apply_human_visual_decision(result_dir: Path, entry_id: str, decision: str) 
     entry = next((e for e in entries if str(e.get("entry_id") or "") == str(entry_id)), None)
     if not entry or entry.get("entry_type") != "vision_enrichment":
         raise ValueError("Vision audit entry was not found")
+    if entry.get("status") == "superseded":
+        raise ValueError("This visual was superseded; reload and review the current entry")
     evidence_was_incomplete = bool(
         entry.get("verification_parse_failed")
         or int(entry.get("verification_incomplete_crop_count") or 0) > 0

@@ -96,6 +96,7 @@ async def test_two_physical_colab_loops_start_same_text_backlog_concurrently():
                 both_started.set()
             await release.wait()
 
+        worker._configured_colab_providers = lambda **kwargs: ["colab:colab-1", "colab:colab-2"]
         worker._run_job = fake_run_job
         task1 = asyncio.create_task(worker._colab_normal_worker_loop("colab:colab-1"))
         task2 = asyncio.create_task(worker._colab_normal_worker_loop("colab:colab-2"))

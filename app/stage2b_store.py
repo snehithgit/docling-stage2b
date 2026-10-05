@@ -956,6 +956,15 @@ class Stage2BStore:
                 (utcnow(), seconds, model, endpoint, verdict, request_json, result_json, provider, artifact_path, job_id),
             )
 
+    async def requeue_cancelled(self, job_id: int) -> None:
+        await self._run(self._requeue_cancelled_sync, job_id)
+
+    def _requeue_cancelled_sync(self, job_id: int) -> None:
+        with self._connection() as conn:
+            conn.execute("""UPDATE verification_jobs SET status='pending', started_at=NULL,
+                claimed_by=NULL, next_attempt_at=NULL, attempt_count=MAX(0,attempt_count-1)
+                WHERE id=? AND is_current=1 AND status='processing'""", (job_id,))
+
     async def mark_deferred(
         self,
         job_id: int,

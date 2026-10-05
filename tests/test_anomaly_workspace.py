@@ -37,7 +37,7 @@ def workspace(tmp_path, monkeypatch):
         }])),
         review_assistant_store=store,
         worker_registry=SimpleNamespace(snapshot=lambda config: registry),
-        postprocess_store=SimpleNamespace(get_job=AsyncMock(return_value={'result_dir': 'book'})),
+        postprocess_store=SimpleNamespace(get_job=AsyncMock(return_value={'status': 'completed', 'result_dir': 'book'})),
         events=SimpleNamespace(notify=lambda *a, **k: None),
         book_lifecycle_locks=SimpleNamespace(get=lambda jid: asyncio.Lock()),
         stage2b_worker=SimpleNamespace(_stage2c_ledger_lock=asyncio.Lock()),
@@ -246,7 +246,7 @@ def test_colab_rereview_stores_new_audit_and_history_without_changing_human(work
         worker_info = {**registry['colab_workers'][0], 'url': 'https://colab.example', 'model': 'test'}
         fake_registry = SimpleNamespace(get_colab=lambda wid: worker_info, read_api_key=lambda wid: 'test-key')
         postprocess = SimpleNamespace(
-            get_job=AsyncMock(return_value={'result_dir': 'book', 'conversion_job_id': 1, 'output_filename': 'book.zip'}),
+            get_job=AsyncMock(return_value={'status': 'completed', 'result_dir': 'book', 'conversion_job_id': 1, 'output_filename': 'book.zip'}),
             get_conversion_job=AsyncMock(return_value={'filename': 'book.pdf'}),
         )
         cfg = AppConfig(processed_dir=rt.config.processed_dir)
@@ -306,7 +306,7 @@ def test_normal_review_discards_changed_source_evidence(workspace, monkeypatch):
         path.write_text(json.dumps(ledger))
         worker_info = {**registry['colab_workers'][0], 'url': 'https://colab.example', 'model': 'test'}
         fake_registry = SimpleNamespace(get_colab=lambda wid: worker_info, read_api_key=lambda wid: 'test-key')
-        post = SimpleNamespace(get_job=AsyncMock(return_value={'result_dir': 'book', 'conversion_job_id': 1, 'output_filename': 'book.zip'}), get_conversion_job=AsyncMock(return_value={'filename': 'book.pdf'}))
+        post = SimpleNamespace(get_job=AsyncMock(return_value={'status': 'completed', 'result_dir': 'book', 'conversion_job_id': 1, 'output_filename': 'book.zip'}), get_conversion_job=AsyncMock(return_value={'filename': 'book.pdf'}))
         worker = stage2b.Stage2BWorker(lambda: AppConfig(processed_dir=rt.config.processed_dir), None, post, rt.events, worker_registry=fake_registry)
         worker._document_for = AsyncMock(return_value={})
         monkeypatch.setattr(stage2b, '_render_source_target', lambda *a: (b'crop', 'image/png', {}))

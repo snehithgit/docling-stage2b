@@ -23,6 +23,10 @@ class DoclingApiError(RuntimeError):
 
 
 
+class DoclingTaskNotFoundError(DoclingApiError):
+    """The remote service lost this task; retry must submit a fresh task."""
+
+
 class DoclingTransientSubmitError(DoclingApiError):
     """A submit failed before a response could establish a remote task.
 
@@ -216,6 +220,8 @@ class DoclingClient:
         try:
             async with httpx.AsyncClient(timeout=self._poll_timeout(config)) as client:
                 response = await client.get(f"{config.docling_url}/v1/status/poll/{task_id}")
+            if response.status_code == 404:
+                raise DoclingTaskNotFoundError("Docling task no longer exists; retry will resubmit the document")
             self._raise_for_response(response, "poll conversion")
             payload = response.json()
             if "task_status" not in payload:
