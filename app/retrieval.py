@@ -156,9 +156,15 @@ _REFERENCE_PATTERNS = [
 ]
 
 
-def _tokens(value: str) -> list[str]:
+@lru_cache(maxsize=8192)
+def _cached_tokens(value: str) -> tuple[str, ...]:
     values = [m.group(0).lower() for m in _TOKEN_RE.finditer(value or "")]
-    return [token for token in values if token not in _STOPWORDS and len(token) > 1]
+    return tuple(token for token in values if token not in _STOPWORDS and len(token) > 1)
+
+
+def _tokens(value: str) -> list[str]:
+    # Callers receive their own list; cached document tokens cannot be mutated.
+    return list(_cached_tokens(value or ""))
 
 
 def _normalized(value: str) -> str:
@@ -232,7 +238,7 @@ def _raw_has_unit(text: str, units: set[str]) -> bool:
 def _subject_overlap(row: dict[str, Any], subject_terms: list[str]) -> tuple[int, float, int]:
     if not subject_terms:
         return 0, 0.0, 0
-    tokens = set(row.get("_tokens") or _tokens(str(row.get("text") or "")))
+    tokens = row.get("_counter") or set(row.get("_tokens") or _tokens(str(row.get("text") or "")))
     headings = set(row.get("_heading_tokens") or _tokens(" ".join(row.get("headings") or [])))
     source_tokens = set(re.findall(r"[a-z0-9]+", str(row.get("source_filename") or "").lower()))
     matches = sum(term in tokens or term in headings or term in source_tokens for term in subject_terms)
@@ -244,6 +250,9 @@ def _subject_cohesion(row: dict[str, Any], subject_terms: list[str]) -> float:
     if len(subject_terms) < 2:
         return 0.0
     tokens = list(row.get("_tokens") or _tokens(str(row.get("text") or "")))
+    counter = row.get("_counter") or Counter(tokens)
+    if any(term not in counter for term in subject_terms):
+        return 0.0
     positions = {term: [i for i, token in enumerate(tokens) if token == term] for term in subject_terms}
     if any(not values for values in positions.values()):
         return 0.0
@@ -690,6 +699,8 @@ def _identifier_boundary_pattern(identifier: str) -> re.Pattern[str]:
 def _identifier_cell_definition(text: str, identifier: str) -> bool:
     """Detect generic table/key-value lines such as `Hydraulic motor | 2141`."""
     ident = identifier.lower()
+    if ident not in (text or "").lower():
+        return False
     for line in (text or "").splitlines():
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")] if "|" in line else []
         if len(cells) < 2:

@@ -502,3 +502,9 @@ def test_maintenance_task_distinguishes_changing_oil_from_checking_level():
     change={'headings':['Oil change'],'text':'Set down the opened grab.'}
     check={'headings':['Check oil level'],'text':'Close the grab to check oil level.'}
     assert procedure_task_evidence(change,question)>procedure_task_evidence(check,question)
+
+def test_cached_tokens_cannot_be_changed_by_a_caller():
+    from app.retrieval import _tokens
+    first=_tokens('Pump pressure 12 bar')
+    first.append('incorrect')
+    assert 'incorrect' not in _tokens('Pump pressure 12 bar')

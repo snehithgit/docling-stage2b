@@ -501,6 +501,15 @@ ${manuals} manual${manuals === 1 ? '' : 's'} will be unassigned from this machin
     finally { button.disabled = false; button.textContent = 'Follow reference'; }
   }
 
+  function answerCitationMarkup(answer, sources) {
+    return esc(answer).replace(/\[([SV]\d+)\]/gi, (label, id) => {
+      const index = sources.findIndex(source => String(source.label || '').toUpperCase() === id.toUpperCase());
+      const source = sources[index];
+      if (!source || !source.postprocess_job_id || !(source.page_numbers || []).some(page => Number.isInteger(Number(page)) && Number(page) > 0)) return label;
+      return `<button type="button" class="source-page-open answer-citation" data-page-result="${esc(rowKey('answer', index))}" aria-label="Open source ${esc(id.toUpperCase())}">${label}</button>`;
+    });
+  }
+
   function renderGeneratedAnswer(data) {
     const sources = data.sources || [];
     currentGeneratedAnswer = String(data.answer || '').trim();
@@ -509,7 +518,7 @@ ${manuals} manual${manuals === 1 ? '' : 's'} will be unassigned from this machin
     const tokenTotal = Number((data.usage || {}).total_tokens || 0);
     const timing = Number(data.latency_seconds || 0);
     $('answer-latency').textContent = `${timing ? `${timing.toFixed(1)} s` : ''}${tokenTotal ? `${timing ? ' · ' : ''}${tokenTotal.toLocaleString()} tokens` : ''}${data.truncated ? ' · output limit reached' : ''}`;
-    $('grounded-answer-text').textContent = currentGeneratedAnswer;
+    $('grounded-answer-text').innerHTML = answerCitationMarkup(currentGeneratedAnswer, sources);
     const scope = data.evidence_scope || {};
     const scopeText = scope.mode === 'equipment'
       ? `Evidence restricted to equipment: ${scope.equipment || 'selected equipment'}${scope.includes_adjacent_context ? ' · structural context included' : ''}`

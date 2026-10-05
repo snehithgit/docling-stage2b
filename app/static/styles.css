@@ -914,6 +914,7 @@ button.mini-action { cursor: pointer; }
 .grounded-answer-meta > div { display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
 .grounded-answer-meta strong { color:#50495f; font-weight:700; }
 .grounded-answer-text { padding:16px 0 13px; color:#342f3d; white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.7; font-size:13px; }
+.answer-citation { display:inline; padding:0 3px; margin:0; border:1px solid var(--line); border-radius:4px; background:#fff; color:var(--accent); font:inherit; cursor:pointer; }
 .grounded-answer-sources { display:grid; gap:8px; padding-top:12px; border-top:1px solid var(--line); }
 .grounded-answer-sources > strong { font-size:11px; }
 .grounded-answer-sources > div { display:grid; gap:6px; }
