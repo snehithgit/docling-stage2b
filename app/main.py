@@ -4789,7 +4789,7 @@ async def anomaly_review_queue() -> dict:
 
 @app.post("/api/anomaly-review/reverify-all")
 async def reverify_all_anomalies(confirm: bool = False) -> dict:
-    """Queue one fresh Colab audit for every current detected anomaly.
+    """Queue a fresh Colab audit only for human-reviewed detected anomalies.
 
     This is the only Yes/No decision on the dedicated Anomaly Review page.
     Active jobs are not duplicated. Existing human decisions remain
@@ -4798,7 +4798,7 @@ async def reverify_all_anomalies(confirm: bool = False) -> dict:
     if not confirm:
         raise HTTPException(
             status_code=422,
-            detail="Explicit confirmation is required before queueing all anomaly reviews.",
+            detail="Confirm before re-reviewing human-verified anomalies.",
         )
 
     registry = await asyncio.to_thread(runtime.worker_registry.snapshot, runtime.config)
@@ -4815,7 +4815,7 @@ async def reverify_all_anomalies(confirm: bool = False) -> dict:
     snapshot = await anomaly_review_queue()
     items = [
         item for item in (snapshot.get("items") or [])
-        if isinstance(item, dict) and (item.get("anomaly_types") or [])
+        if isinstance(item, dict) and item.get("human_reviewed") and (item.get("anomaly_types") or [])
     ]
     queued = 0
     already_running = 0
@@ -4869,7 +4869,7 @@ async def reverify_all_anomalies(confirm: bool = False) -> dict:
         "failed": len(errors),
         "errors": errors[:50],
         "human_authority_preserved": True,
-        "message": "All current anomalies were submitted for a fresh Colab audit where possible.",
+        "message": "Human-reviewed anomalies were submitted for a fresh Colab audit where possible.",
     }
 
 

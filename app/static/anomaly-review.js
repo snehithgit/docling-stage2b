@@ -154,7 +154,7 @@ function renderSummary(data) {
   const available = Boolean(workers.enabled && (workers.anomaly_workers || []).some(worker => worker.enabled && !worker.paused));
   anomalyWorkersAvailable = available;
   const yes = $("ar-batch-yes");
-  if (yes) yes.disabled = !available || detected === 0;
+  if (yes) yes.disabled = !available || !anomalyItems.some(item => item.human_reviewed && (item.anomaly_types || []).length);
   const note = $("ar-worker-note");
   if (!available) {
     note.hidden = false;
@@ -186,17 +186,17 @@ async function loadAnomalies() {
 async function reverifyAll() {
   const button = $("ar-batch-yes");
   if (!button || button.disabled) return;
-  const total = anomalyItems.filter(item => (item.anomaly_types || []).length).length;
+  const total = anomalyItems.filter(item => item.human_reviewed && (item.anomaly_types || []).length).length;
   if (!total) {
-    feedback("There are no current detected anomalies to re-verify.", "warning");
-    $("ar-batch-status").textContent = "No current anomalies were queued.";
+    feedback("There are no human-verified anomalies to re-review.", "warning");
+    $("ar-batch-status").textContent = "No human-verified anomalies were queued.";
     return;
   }
   const old = button.textContent;
   button.disabled = true;
   $("ar-batch-no").disabled = true;
-  button.textContent = "Queueing all anomalies…";
-  $("ar-batch-status").textContent = `Queueing ${total.toLocaleString()} current anomalies for Colab…`;
+  button.textContent = "Queueing human-verified re-reviews…";
+  $("ar-batch-status").textContent = `Queueing ${total.toLocaleString()} human-verified anomalies for Colab…`;
   try {
     const response = await fetch("/api/anomaly-review/reverify-all?confirm=true", {method:"POST", cache:"no-store"});
     let data = {};
@@ -208,7 +208,7 @@ async function reverifyAll() {
     $("ar-batch-status").textContent = message;
     await loadAnomalies();
   } catch (error) {
-    const message = error.message || "Could not queue all anomaly reviews.";
+    const message = error.message || "Could not queue human-verified anomaly re-reviews.";
     feedback(message, "warning");
     $("ar-batch-status").textContent = message;
   } finally {
@@ -251,7 +251,7 @@ $("ar-results").addEventListener("click", async event => {
 });
 
 function declineBulkRun() {
-  $("ar-batch-status").textContent = "No selected — no anomaly jobs were queued or changed.";
+  $("ar-batch-status").textContent = "No selected — human decisions remain unchanged. Automatic review of unreviewed anomalies continues.";
   feedback("No changes made. Anomaly re-verification was not started.", "info");
 }
 

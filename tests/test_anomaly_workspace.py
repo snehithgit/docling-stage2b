@@ -60,6 +60,41 @@ def test_anomaly_page_populates_human_reviewed_entry_without_normal_ai_result(wo
     asyncio.run(run())
 
 
+def test_bulk_re_review_excludes_unreviewed_detected_anomalies(workspace):
+    async def run():
+        rt, _, ledger, path = workspace
+        entry = dict(ledger["entries"][0], entry_id="generation:text:R2", human_verified=False, human_review={})
+        ledger["entries"].append(entry)
+        path.write_text(json.dumps(ledger), encoding="utf-8")
+        await rt.review_assistant_store.initialize()
+        result = await main.reverify_all_anomalies(confirm=True)
+        assert result["eligible"] == result["queued"] == 1
+        jobs = await rt.review_assistant_store.list_jobs()
+        assert [j["entry_id"] for j in jobs] == ["generation:text:R1"]
+    asyncio.run(run())
+
+
+def test_automatic_queue_covers_table_cells_and_vision_and_skips_humans(workspace):
+    async def run():
+        rt, registry, ledger, path = workspace
+        table = dict(ledger["entries"][0], entry_id="g:table:R2", entry_type="table_cell_correction", human_verified=False, human_review={})
+        vision = {"entry_id": "g:vision:R3", "entry_type": "vision_enrichment", "status": "proposed", "source_index": 1,
+                  "ai_review_assistant": {"recommendation": "NEEDS_HUMAN", "confidence": 0.5}}
+        declined = dict(table, entry_id="g:table:R4")
+        declined["anomaly_review_decision"] = {"decision": "declined", "evidence_signature": anomaly_evidence_signature(declined, "text")}
+        ledger["entries"].extend([table, vision, declined])
+        path.write_text(json.dumps(ledger), encoding="utf-8")
+        await rt.review_assistant_store.initialize()
+        service = ReviewAssistantService(lambda: rt.config, rt.worker_registry, rt.review_assistant_store,
+                                         rt.stage2b_store, rt.postprocess_store, rt.stage2b_worker, rt.events)
+        rt.stage2b_store.list_books.return_value[0]["artifact_pending"] = 1
+        assert await service._sync_candidates(registry["review"]) is False
+        assert service._machine_blockers == 1
+        assert {(j["entry_id"], j["review_type"]) for j in await rt.review_assistant_store.list_jobs() if j["review_type"].startswith("anomaly_")} == {
+            ("g:table:R2", "anomaly_text"), ("g:vision:R3", "anomaly_vision")}
+    asyncio.run(run())
+
+
 def test_bulk_http_confirmation_queues_human_reviewed_anomaly_and_skips_active(workspace):
     async def run():
         rt, _, ledger, path = workspace

@@ -57,12 +57,30 @@ def test_batch_queues_all_structural_types_and_deduplicates_individual(workspace
         await rt.review_assistant_store.initialize()
         first = await main.queue_structural_anomaly_review(21, "structural:R0")
         batch = await main.reverify_all_anomalies(confirm=True)
-        assert batch["queued"] == 5
+        assert batch["queued"] == 0
         assert batch["already_running"] == 1
         repeat = await main.queue_structural_anomaly_review(21, "structural:R0")
         assert repeat["job"]["id"] == first["job"]["id"]
+        assert (await rt.review_assistant_store.counts())["anomaly_structural_pending"] == 1
+        assert sum(i["state"] == "queued" for i in (await main.anomaly_review_queue())["items"]) == 1
+    asyncio.run(run())
+
+
+def test_structural_findings_auto_queue_but_human_decision_needs_yes(workspace):
+    async def run():
+        _, _, rt, registry, _ = workspace
+        await rt.review_assistant_store.initialize()
+        service = ReviewAssistantService(lambda: rt.config, rt.worker_registry, rt.review_assistant_store,
+                                         rt.stage2b_store, rt.postprocess_store, rt.stage2b_worker, rt.events)
+        assert await service._sync_candidates(registry["review"]) is True
+        jobs = await rt.review_assistant_store.list_jobs()
+        assert {j["entry_id"] for j in jobs} == {f"structural:R{i}" for i in range(1, 6)}
+        assert all(j["review_type"] == "anomaly_structural" for j in jobs)
+        await service._sync_candidates(registry["review"])
+        assert len(await rt.review_assistant_store.list_jobs()) == 5
+        batch = await main.reverify_all_anomalies(confirm=True)
+        assert batch["eligible"] == batch["queued"] == 1
         assert (await rt.review_assistant_store.counts())["anomaly_structural_pending"] == 6
-        assert all(i["state"] == "queued" for i in (await main.anomaly_review_queue())["items"])
     asyncio.run(run())
 
 
