@@ -152,6 +152,7 @@ class ReviewAssistantStore:
                         # A user-requested batch/single re-review is the newest
                         # authority for this same evidence version. Do not let
                         # background candidate sync retire it before Colab runs.
+                        self._recover_stale_anomaly_completion(conn, postprocess_job_id, entry, review_type, manual_sig)
                         return
             conn.execute("""UPDATE review_assistant_jobs SET is_current=0
                          WHERE postprocess_job_id=? AND entry_id=? AND review_type=? AND entry_signature<>? AND is_current=1""",
@@ -163,6 +164,29 @@ class ReviewAssistantStore:
             conn.execute("""UPDATE review_assistant_jobs SET is_current=1, result_dir=?
                          WHERE postprocess_job_id=? AND entry_id=? AND review_type=? AND entry_signature=?""",
                          (result_dir, postprocess_job_id, entry_id, review_type, sig))
+            if str(review_type).startswith("anomaly_"):
+                self._recover_stale_anomaly_completion(conn, postprocess_job_id, entry, review_type, sig)
+
+    @staticmethod
+    def _recover_stale_anomaly_completion(conn, job_id, entry, review_type, signature):
+        if entry.get("human_verified") or entry.get("human_visual_decision"):
+            return
+        kind = review_type.removeprefix("anomaly_")
+        audit = entry.get("anomaly_review")
+        if (isinstance(audit, dict) and audit and not audit.get("discarded") and audit.get("stored") is not False
+                and audit.get("evidence_signature") == anomaly_evidence_signature(entry, kind)
+                and (kind != "text" or isinstance(audit.get("source_validation"), dict))):
+            return
+        # Legacy completed jobs can have no usable ledger result. Re-arm them
+        # without resetting attempts, so unusable completions cannot loop forever.
+        conn.execute("""UPDATE review_assistant_jobs
+                        SET status=CASE WHEN attempt_count>=3 THEN 'failed' ELSE 'pending' END,
+                            claimed_by=NULL, started_at=NULL, completed_at=NULL, next_attempt_at=NULL,
+                            error_type='StaleAnomalyAudit',
+                            error_message='Completed audit has no current validated ledger result; source re-review required'
+                        WHERE postprocess_job_id=? AND entry_id=? AND review_type=?
+                          AND entry_signature=? AND status='completed'""",
+                     (job_id, entry["entry_id"], review_type, signature))
 
     async def queue_manual_anomaly(
         self, postprocess_job_id: int, result_dir: str, entry: dict[str, Any], review_type: str
