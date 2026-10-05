@@ -643,11 +643,14 @@ def source_sha256(value: str | bytes) -> str:
 
 def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    with tmp.open("r+b") as handle:
-        os.fsync(handle.fileno())
-    tmp.replace(path)
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        with tmp.open("r+b") as handle:
+            os.fsync(handle.fileno())
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 
@@ -1228,7 +1231,9 @@ def upsert_ledger_entry(result_dir: Path, source_zip_sha256: str, entry: dict[st
     try:
         current = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
     except (OSError, json.JSONDecodeError):
-        current = {}
+        raise ValueError("Existing correction ledger cannot be read; refusing to overwrite it")
+    if not isinstance(current, dict) or not isinstance(current.get("entries", []), list):
+        raise ValueError("Existing correction ledger has invalid structure; refusing to overwrite it")
     entries = list(current.get("entries") or [])
     entry_id = str(entry["entry_id"])
     existing_entry = next(

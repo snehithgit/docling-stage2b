@@ -5808,6 +5808,9 @@ class Stage2BWorker:
                 recommendation = "NEEDS_HUMAN"
             suggestion = {
                 "schema": "marine-ai-review-assistant/v1",
+                "postprocess_job_id": postprocess_job_id,
+                "entry_id": entry_id,
+                "evidence_signature": expected_signature,
                 "review_type": review_type,
                 "worker_id": worker_id,
                 "worker_name": worker.get("name") or worker_id,
@@ -5850,6 +5853,10 @@ class Stage2BWorker:
                 await asyncio.to_thread(
                     upsert_ledger_entry, result_dir, str(current.get("source_zip_sha256") or ""), current_entry
                 )
+                saved = json.loads(ledger_path.read_text(encoding="utf-8"))
+                saved_entry = next((e for e in saved.get("entries", []) if e.get("entry_id") == entry_id), {})
+                if saved_entry.get("ai_review_assistant") != suggestion:
+                    raise ValueError("AI review ledger save could not be verified for the target entry")
             self._events.notify("review_assistant_completed")
             return suggestion
         finally:
@@ -6041,6 +6048,8 @@ class Stage2BWorker:
 
             result = {
                 "schema": "marine-anomaly-review/v1",
+                "postprocess_job_id": postprocess_job_id,
+                "entry_id": entry_id,
                 "review_type": review_type,
                 "worker_id": worker_id,
                 "worker_name": worker.get("name") or worker_id,
@@ -6107,6 +6116,10 @@ class Stage2BWorker:
                     upsert_ledger_entry, result_dir,
                     str(current.get("source_zip_sha256") or ""), current_entry,
                 )
+                saved = json.loads(ledger_path.read_text(encoding="utf-8"))
+                saved_entry = next((e for e in saved.get("entries", []) if e.get("entry_id") == entry_id), {})
+                if saved_entry.get("anomaly_review") != result:
+                    raise ValueError("Anomaly review ledger save could not be verified for the target entry")
             self._events.notify("anomaly_review_completed")
             return result
         finally:

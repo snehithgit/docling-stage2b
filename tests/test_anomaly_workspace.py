@@ -88,7 +88,9 @@ def test_stale_completed_audits_recover_with_bounded_attempts(workspace, manual)
         for attempt in range(1, 4):
             job = await store.claim_next("colab-1", {"anomaly_text"})
             assert job["attempt_count"] == attempt
-            await store.mark_completed(job["id"], {"stored": False}, 1)
+            # Seed a pre-fix completion to exercise legacy recovery.
+            with store._conn() as conn:
+                conn.execute("UPDATE review_assistant_jobs SET status='completed', result_json=? WHERE id=?", ('{"stored":false}',job['id']))
             await store.sync_candidate(21, "book", entry, "anomaly_text")
             current, = await store.list_jobs()
             assert current["status"] == ("pending" if attempt < 3 else "failed")

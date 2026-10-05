@@ -33,11 +33,10 @@ def _utc_after(seconds: int) -> str:
 
 
 def _load_ledger_sync(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+    data = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    if not isinstance(data, dict) or not isinstance(data.get("entries", []), list):
+        raise ValueError(f"Invalid correction ledger: {path.name}")
+    return data
 
 
 def _signature(entry: dict[str, Any], review_type: str) -> str:
@@ -290,14 +289,21 @@ class ReviewAssistantStore:
             out = dict(row); out.update({"status":"processing","claimed_by":worker_id,"attempt_count":int(out.get("attempt_count") or 0)+1})
             return out
 
-    async def mark_completed(self, job_id: int, result: dict[str, Any], seconds: float) -> None:
-        await self._run(self._complete_sync, job_id, result, seconds)
+    async def mark_completed(self, job_id: int, result: dict[str, Any], seconds: float, claim=None) -> bool:
+        return await self._run(self._complete_sync, job_id, result, seconds, claim)
 
-    def _complete_sync(self, job_id: int, result: dict[str, Any], seconds: float) -> None:
+    def _complete_sync(self, job_id: int, result: dict[str, Any], seconds: float, claim=None) -> bool:
         with self._conn() as conn:
-            conn.execute("""UPDATE review_assistant_jobs SET status='completed', completed_at=?, processing_seconds=?,
-                         result_json=?, error_type=NULL, error_message=NULL WHERE id=?""",
-                         (_utcnow(), float(seconds), json.dumps(result, ensure_ascii=False), job_id))
+            discarded = bool(result.get("discarded"))
+            if result.get("stored") is False and not discarded:
+                raise ValueError("Review result was not saved to the ledger")
+            guard = " AND status='processing' AND is_current=1"
+            args = ["discarded" if discarded else "completed", _utcnow(), float(seconds), json.dumps(result, ensure_ascii=False), job_id]
+            if claim is not None:
+                guard += " AND claimed_by=? AND attempt_count=? AND entry_signature=?"
+                args.extend([claim["claimed_by"], claim["attempt_count"], claim["entry_signature"]])
+            return bool(conn.execute("""UPDATE review_assistant_jobs SET status=?, completed_at=?, processing_seconds=?,
+                         result_json=?, error_type=NULL, error_message=NULL WHERE id=?""" + guard, args).rowcount)
 
     async def mark_retryable(self, job_id: int, exc: Exception, delay: int = 30) -> None:
         await self._run(self._retry_sync, job_id, type(exc).__name__, str(exc), delay)
@@ -373,12 +379,14 @@ class ReviewAssistantStore:
                 "anomaly_vision_pending":0,"anomaly_vision_processing":0,"anomaly_vision_completed":0,
                 "anomaly_structural_pending":0,"anomaly_structural_processing":0,"anomaly_structural_completed":0,
                 "failed":0,
+                "discarded":0,
             }
             for r in rows:
                 t=str(r["review_type"]); st=str(r["status"]); n=int(r["n"])
                 key=f"{t}_{st}"
                 if key in out: out[key]=n
                 if st=="failed": out["failed"]+=n
+                if st=="discarded": out["discarded"]+=n
             return out
 
 
@@ -476,7 +484,7 @@ class ReviewAssistantService:
             return structural_entries(path)
         except Exception:
             logger.exception("Structural anomaly discovery failed for %s", path)
-            return []
+            raise
 
     @staticmethod
     def _endpoint_outage(exc):
@@ -505,9 +513,18 @@ class ReviewAssistantService:
                     worker_id=worker_id, postprocess_job_id=int(job["postprocess_job_id"]),
                     entry_id=str(job["entry_id"]), review_type=review_type,
                 )
+            if not isinstance(result, dict) or (result.get("stored") is not True and not result.get("discarded")):
+                raise ValueError("Worker returned without confirming a saved ledger result")
+            for key, expected in (("entry_id", job["entry_id"]), ("postprocess_job_id", job["postprocess_job_id"]), ("worker_id", worker_id)):
+                if key in result and result[key] != expected:
+                    raise ValueError(f"Saved review result has a mismatched {key}")
             cooldowns.pop(worker_id, None)
-            await self._store.mark_completed(int(job["id"]),result,time.monotonic()-started)
-            self._events.notify("review_assistant_job_completed")
+            acknowledged = await self._store.mark_completed(int(job["id"]),result,time.monotonic()-started, claim=job)
+            if not acknowledged:
+                logger.warning("Review completion claim was superseded: job=%s worker=%s", job["id"], worker_id)
+                self._events.notify("review_assistant_completion_superseded")
+                return True
+            self._events.notify("review_assistant_job_discarded" if result.get("discarded") else "review_assistant_job_completed")
         except asyncio.CancelledError:
             await asyncio.shield(self._store.defer_busy(int(job["id"]), delay=0))
             raise
@@ -589,6 +606,8 @@ class ReviewAssistantService:
                 await asyncio.sleep(max(2,int(getattr(config,"stage2b_poll_interval_seconds",3))))
             except asyncio.CancelledError: raise
             except Exception:
+                logger.exception("Review supervisor failed; queue remains available for retry")
+                self._events.notify("review_assistant_supervisor_error")
                 await asyncio.sleep(3)
 
     async def status(self) -> dict[str, Any]:

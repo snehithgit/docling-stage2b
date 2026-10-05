@@ -480,7 +480,8 @@ def test_detected_anomaly_is_automatically_queued_after_normal_review(tmp_path: 
         assert {j["review_type"] for j in jobs} == {"text", "anomaly_text"}
         await service._sync_candidates()
         assert len(await store.list_jobs()) == 2
-        await store.mark_completed(next(j["id"] for j in jobs if j["review_type"] == "anomaly_text"), {}, 1)
+        claimed = await store.claim_next(w['id'], {'anomaly_text'})
+        await store.mark_completed(claimed['id'], {'stored': True}, 1, claim=claimed)
         from app.anomaly_review import anomaly_evidence_signature
         entry["anomaly_review"] = {"stored": True, "evidence_signature": anomaly_evidence_signature(entry, "text"), "source_validation": {"verified": True}}
         (result_dir / "correction_ledger.json").write_text(json.dumps({"entries": [entry]}), encoding="utf-8")
