@@ -3,6 +3,9 @@ from contextlib import nullcontext
 
 import asyncio
 import hashlib
+import logging
+
+import httpx
 import json
 import sqlite3
 import time
@@ -16,6 +19,9 @@ from .anomaly_review import anomaly_evidence_signature, detect_anomaly_types
 from .verifier_clients import ReviewWorkerBusyError
 from .stage2c import _authoritative_visual_subjects, _vision_requires_human
 from .structural_anomaly import structural_entries
+
+
+logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> str:
@@ -317,6 +323,17 @@ class ReviewAssistantStore:
                 attempt_count=MAX(0,attempt_count-1), claimed_by=NULL, started_at=NULL,
                 next_attempt_at=? WHERE id=? AND status='processing'""", (_utc_after(delay), job_id))
 
+    async def defer_endpoint(self, job_id: int, delay: int) -> None:
+        await self._run(self._defer_endpoint_sync, job_id, delay)
+
+    def _defer_endpoint_sync(self, job_id: int, delay: int) -> None:
+        with self._conn() as conn:
+            conn.execute("""UPDATE review_assistant_jobs SET status='pending',
+                attempt_count=MAX(0,attempt_count-1), claimed_by=NULL, started_at=NULL,
+                next_attempt_at=?, error_type='EndpointUnavailable',
+                error_message='Colab endpoint unavailable; worker is cooling down before retry'
+                WHERE id=? AND is_current=1 AND status='processing'""", (_utc_after(delay), job_id))
+
     async def retry_failed(self, job_id: int) -> bool:
         return await self._run(self._retry_failed_sync, job_id)
 
@@ -396,11 +413,12 @@ class ReviewAssistantService:
             self._machine_blockers = 0
             return False
         books=await self._stage2b_store.list_books(); valid:set[tuple[int,str,str]]=set()
-        blocker_keys=("text_pending","text_processing","text_failed","vision_pending","vision_processing","vision_failed","artifact_pending","artifact_processing","artifact_failed")
+        blocker_keys=("text_pending","text_processing","vision_pending","vision_processing","artifact_pending","artifact_processing")
         self._machine_blockers = sum(sum(int(book.get(k) or 0) for k in blocker_keys) for book in books)
         # This is deliberately a global phase barrier. AI second-opinion work is
-        # lower priority than every normal Text/Vision/Artifact route across the
-        # library, not merely lower priority than routes from the same book.
+        # lower priority than runnable Text/Vision/Artifact work across the
+        # library. Terminal failures stay visible and still block that book from
+        # Stage 2C/3 publication, but must not waste every review GPU indefinitely.
         # Detected anomaly jobs can be visible in the queue immediately. The
         # return value below still prevents dispatch during primary work.
         config = self._config_getter()
@@ -410,48 +428,67 @@ class ReviewAssistantService:
             if not jid or not result_dir_name: continue
             path=Path(config.processed_dir)/Path(result_dir_name).name/"correction_ledger.json"
             candidates.append((jid, result_dir_name, path))
-        ledgers = await asyncio.gather(*(asyncio.to_thread(_load_ledger_sync, path) for _, _, path in candidates))
-        structural = await asyncio.gather(*(asyncio.to_thread(structural_entries, path.parent) for _, _, path in candidates)) if settings.get("anomaly_worker_ids") else [[] for _ in candidates]
-        pending_candidates = []
-        for (jid, result_dir_name, _path), ledger, structural_findings in zip(candidates, ledgers, structural):
-            for entry in ledger.get("entries") or []:
-                if not isinstance(entry, dict): continue
-                if entry.get("status")=="superseded": continue
-                if entry.get("entry_type")=="text_correction" and not entry.get("human_verified") and str(entry.get("verification_verdict") or "").upper() in {"LIKELY_CORRUPT","UNCERTAIN"}:
-                    key=(jid,str(entry.get("entry_id")),"text"); valid.add(key)
-                    if not self._machine_blockers: pending_candidates.append((jid,result_dir_name,entry,"text"))
-            vision=[e for e in (ledger.get("entries") or []) if isinstance(e,dict) and e.get("entry_type")=="vision_enrichment" and e.get("status")!="superseded"]
-            for entry in _authoritative_visual_subjects(vision):
-                if _vision_requires_human(entry):
-                    key=(jid,str(entry.get("entry_id")),"vision"); valid.add(key)
-                    if not self._machine_blockers: pending_candidates.append((jid,result_dir_name,entry,"vision"))
+        # Keep discovery and queue sync in the same publication critical section.
+        # A ledger snapshot from before a completed audit must not re-arm it.
+        async with getattr(self._worker, "_stage2c_ledger_lock", nullcontext()):
+            ledgers = await asyncio.gather(*(asyncio.to_thread(_load_ledger_sync, path) for _, _, path in candidates))
+            structural = await asyncio.gather(*(asyncio.to_thread(self._structural_candidates, path.parent) for _, _, path in candidates)) if settings.get("anomaly_worker_ids") else [[] for _ in candidates]
+            pending_candidates = []
+            for (jid, result_dir_name, _path), ledger, structural_findings in zip(candidates, ledgers, structural):
+                for entry in ledger.get("entries") or []:
+                    if not isinstance(entry, dict): continue
+                    if entry.get("status")=="superseded": continue
+                    if entry.get("entry_type")=="text_correction" and not entry.get("human_verified") and str(entry.get("verification_verdict") or "").upper() in {"LIKELY_CORRUPT","UNCERTAIN"}:
+                        key=(jid,str(entry.get("entry_id")),"text"); valid.add(key)
+                        if not self._machine_blockers: pending_candidates.append((jid,result_dir_name,entry,"text"))
+                vision=[e for e in (ledger.get("entries") or []) if isinstance(e,dict) and e.get("entry_type")=="vision_enrichment" and e.get("status")!="superseded"]
+                for entry in _authoritative_visual_subjects(vision):
+                    if _vision_requires_human(entry):
+                        key=(jid,str(entry.get("entry_id")),"vision"); valid.add(key)
+                        if not self._machine_blockers: pending_candidates.append((jid,result_dir_name,entry,"vision"))
 
-            if settings.get("anomaly_worker_ids"):
-                subjects = [(e, "text") for e in ledger.get("entries") or []
-                            if isinstance(e, dict) and e.get("entry_type") in {"text_correction", "table_cell_correction"}]
-                subjects.extend((e, "vision") for e in _authoritative_visual_subjects(vision))
-                subjects.extend((e, "structural") for e in structural_findings)
-                for entry, kind in subjects:
-                    if (entry.get("status") == "superseded" or entry.get("human_verified")
-                            or entry.get("human_visual_decision") or not entry.get("entry_id")
-                            or not detect_anomaly_types(entry, kind)):
-                        continue
-                    decision = entry.get("anomaly_review_decision") or {}
-                    if (decision.get("decision") == "declined"
-                            and decision.get("evidence_signature") == anomaly_evidence_signature(entry, kind)):
-                        continue
-                    review_type = "anomaly_" + kind
-                    valid.add((jid, str(entry["entry_id"]), review_type))
-                    pending_candidates.append((jid, result_dir_name, entry, review_type))
-            # Human-reviewed findings require an explicit re-review request.
-            # Existing manual requests survive automatic candidate retirement.
-        await self._store.sync_candidates(pending_candidates)
-        await self._store.retire_missing(valid)
+                if settings.get("anomaly_worker_ids"):
+                    subjects = [(e, "text") for e in ledger.get("entries") or []
+                                if isinstance(e, dict) and e.get("entry_type") in {"text_correction", "table_cell_correction"}]
+                    subjects.extend((e, "vision") for e in _authoritative_visual_subjects(vision))
+                    subjects.extend((e, "structural") for e in structural_findings)
+                    for entry, kind in subjects:
+                        if (entry.get("status") == "superseded" or entry.get("human_verified")
+                                or entry.get("human_visual_decision") or not entry.get("entry_id")
+                                or not detect_anomaly_types(entry, kind)):
+                            continue
+                        decision = entry.get("anomaly_review_decision") or {}
+                        if (decision.get("decision") == "declined"
+                                and decision.get("evidence_signature") == anomaly_evidence_signature(entry, kind)):
+                            continue
+                        review_type = "anomaly_" + kind
+                        valid.add((jid, str(entry["entry_id"]), review_type))
+                        pending_candidates.append((jid, result_dir_name, entry, review_type))
+                # Human-reviewed findings require an explicit re-review request.
+                # Existing manual requests survive automatic candidate retirement.
+            await self._store.sync_candidates(pending_candidates)
+            await self._store.retire_missing(valid)
         return self._machine_blockers == 0
+
+    @staticmethod
+    def _structural_candidates(path):
+        try:
+            return structural_entries(path)
+        except Exception:
+            logger.exception("Structural anomaly discovery failed for %s", path)
+            return []
+
+    @staticmethod
+    def _endpoint_outage(exc):
+        if isinstance(exc, (httpx.TransportError, ConnectionError, TimeoutError)):
+            return True
+        return isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in {
+            401, 403, 404, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 527, 530}
 
     async def _run_one(self, worker_id: str, allowed: set[str]) -> bool:
         job=await self._store.claim_next(worker_id,allowed)
         if not job: return False
+        cooldowns = self.__dict__.setdefault("_endpoint_cooldowns", {})
         started=time.monotonic()
         try:
             review_type=str(job["review_type"])
@@ -468,15 +505,24 @@ class ReviewAssistantService:
                     worker_id=worker_id, postprocess_job_id=int(job["postprocess_job_id"]),
                     entry_id=str(job["entry_id"]), review_type=review_type,
                 )
+            cooldowns.pop(worker_id, None)
             await self._store.mark_completed(int(job["id"]),result,time.monotonic()-started)
             self._events.notify("review_assistant_job_completed")
         except asyncio.CancelledError:
+            await asyncio.shield(self._store.defer_busy(int(job["id"]), delay=0))
             raise
         except ReviewWorkerBusyError:
             await self._store.defer_busy(int(job["id"]))
             self._events.notify("review_assistant_provider_busy")
             return False
         except Exception as exc:
+            if self._endpoint_outage(exc):
+                previous = cooldowns.get(worker_id, {})
+                delay = min(300, max(30, int(previous.get("delay", 15)) * 2))
+                cooldowns[worker_id] = {"delay": delay, "until": time.monotonic() + delay}
+                await self._store.defer_endpoint(int(job["id"]), delay=delay)
+                self._events.notify("review_assistant_endpoint_deferred")
+                return False
             await self._store.mark_retryable(int(job["id"]),exc,30)
             self._events.notify("review_assistant_job_retry")
         return True
@@ -484,13 +530,15 @@ class ReviewAssistantService:
     async def _drain_worker(self, worker_id: str) -> None:
         try:
             while not self._stop.is_set():
+                if time.monotonic() < self.__dict__.get("_endpoint_cooldowns", {}).get(worker_id, {}).get("until", 0):
+                    return
                 snapshot = await asyncio.to_thread(self._registry.snapshot, self._config_getter())
                 settings = snapshot.get("review") or {}
                 worker = next((w for w in snapshot.get("colab_workers", []) if w["id"] == worker_id), None)
                 if not settings.get("enabled") or not worker or not worker.get("enabled") or worker.get("paused") or worker.get("remove_requested") or (worker.get("runner_account_id") and not worker.get("runner_ready")):
                     return
                 books = await self._stage2b_store.list_books()
-                keys = ("text_pending", "text_processing", "text_failed", "vision_pending", "vision_processing", "vision_failed", "artifact_pending", "artifact_processing", "artifact_failed")
+                keys = ("text_pending", "text_processing", "vision_pending", "vision_processing", "artifact_pending", "artifact_processing")
                 if any(int(book.get(k) or 0) for book in books for k in keys):
                     return
                 if f"colab:{worker_id}" in self._worker.dispatch_reservations:

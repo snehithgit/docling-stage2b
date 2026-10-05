@@ -19,6 +19,24 @@ class Dispatcher:
     def _ensure_provider_state(self, provider):
         self._device_locks.setdefault(provider, asyncio.Lock())
 
+    async def reserve_colab_worker_for_admin(self, worker_id, owner):
+        async with self._dispatch_lock:
+            provider = 'colab:' + worker_id
+            self._ensure_provider_state(provider)
+            if provider in self.dispatch_reservations or self._device_locks[provider].locked():
+                raise RuntimeError('Busy')
+            worker = self.registry.get_colab(worker_id)
+            if worker and worker.get('remove_requested'):
+                raise ValueError('Removing')
+            if worker:
+                self.dispatch_reservations[provider] = owner
+            return worker
+
+    async def _release_provider(self, provider, owner):
+        async with self._dispatch_lock:
+            if self.dispatch_reservations.get(provider) == owner:
+                self.dispatch_reservations.pop(provider)
+
     def reset_provider_connection(self, provider):
         pass
 
@@ -334,3 +352,46 @@ async def test_pool_health_tries_second_worker_after_first_probe_failure(setup, 
     for status in monitor.verifier_status.values():
         assert status['reachable']
         assert 'Colab pool · health checked on colab-2' in status['detail']
+
+
+@pytest.mark.asyncio
+async def test_failed_runtime_control_restores_pause_and_releases_global_lock(setup):
+    runner, registry, dispatcher, _, _, _ = setup
+    worker = await runner.import_account('account/one')
+
+    async def failed(method, path):
+        assert not dispatcher._dispatch_lock.locked()
+        assert dispatcher.dispatch_reservations['colab:' + worker['id']] == 'runner:control'
+        raise ValueError('Runner unavailable')
+
+    runner.request = failed
+    with pytest.raises(ValueError):
+        await runner.control(worker['id'], 'restart')
+    assert not registry.get_colab(worker['id'])['paused']
+    assert not dispatcher.dispatch_reservations
+
+
+@pytest.mark.asyncio
+async def test_failed_recovery_does_not_clear_other_worker_readiness(setup):
+    runner, registry, dispatcher, account, endpoint, _ = setup
+    first = await runner.import_account('account/one')
+    other = registry.add_colab(name='Other')
+    registry.update_colab(other['id'], {'runner_account_id': 'two', 'url': 'https://tunnel.example', 'enabled': True})
+    registry.write_api_key(other['id'], endpoint['api_key'])
+    account.update(state='error', healthy=False, routable=False)
+    runner.recovery['account/one'] = {'attempts': 0, 'next_retry_at_epoch': 0}
+
+    async def request(method, path):
+        assert not dispatcher._dispatch_lock.locked()
+        if path == '/accounts':
+            return [account, {**account, 'id': 'two', 'state': 'running', 'healthy': True, 'routable': True}]
+        if method == 'POST':
+            raise ValueError('restart failed')
+        return endpoint
+
+    runner.request = request
+    await runner.sync()
+    assert registry.get_colab(other['id'])['runner_ready']
+    assert not registry.get_colab(first['id'])['runner_ready']
+    assert runner.recovery['account/one']['last_error']
+    assert not dispatcher.dispatch_reservations

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import uuid
 import logging
 import math
 import re
@@ -16,7 +17,7 @@ from .config import AppConfig
 from .docling_client import DoclingApiError, DoclingClient
 from .events import EventBroker
 from .postprocess_store import PostprocessStore
-from .pipeline_state import stage2a_human_review_summary, stage2c_freshness, stage2c_output_signature, verification_rows_for_stage2c, verification_signature
+from .pipeline_state import stage2c_semantic_signature, stage2a_human_review_summary, stage2c_freshness, stage2c_output_signature, verification_rows_for_stage2c, verification_signature
 from .retrieval import RETRIEVAL_RULE_VERSION, annotate_retrieval_rows, _write_jsonl_atomic as _write_retrieval_jsonl
 from .stage2c import STAGE2C_RULE_VERSION, human_review_summary, rebuild_chunk_overlays, verifier_audit_summary
 from .book_lifecycle_lock import LifecycleLockGetter
@@ -103,7 +104,7 @@ class Stage3ChunkBuilder:
         stage2c_info: dict[str, Any] | None = None
         if self._verification_store is not None:
             verification_rows = await self._verification_store.list_book_jobs_raw(postprocess_job_id)
-            stage2c_info = stage2c_freshness(
+            stage2c_info = await asyncio.to_thread(stage2c_freshness,
                 result_dir,
                 verification_rows,
                 rule_version=STAGE2C_RULE_VERSION,
@@ -166,6 +167,7 @@ class Stage3ChunkBuilder:
             "started_at_epoch": None,
             "completed_at_epoch": None,
             "stage2c_signature": (stage2c_info or {}).get("output_signature") or stage2c_output_signature(result_dir),
+            "stage2c_semantic_signature": (stage2c_info or {}).get("semantic_output_signature") or stage2c_semantic_signature(result_dir),
             "stage2a_human_review_pending": int(structural_review.get("blocking_review_required") or 0),
         }
         self._state[postprocess_job_id] = state
@@ -173,6 +175,12 @@ class Stage3ChunkBuilder:
         self._tasks[postprocess_job_id] = task
         self._events.notify("stage3_chunking_started")
         return {"accepted": True, **state}
+
+    @staticmethod
+    def _load_working_document(path):
+        with zipfile.ZipFile(path) as archive:
+            document, member = select_docling_document(archive)
+        return document, member, copy.deepcopy(document)
 
     async def _run(self, postprocess_job_id: int, job: dict[str, Any]) -> None:
         config = self._config_getter()
@@ -202,9 +210,7 @@ class Stage3ChunkBuilder:
             if not zipfile.is_zipfile(converted_zip):
                 raise ValueError("Converted Docling output is not a ZIP archive")
 
-            with zipfile.ZipFile(converted_zip) as archive:
-                document, json_member = select_docling_document(archive)
-            working_document = copy.deepcopy(document)
+            document, json_member, working_document = await asyncio.to_thread(self._load_working_document, converted_zip)
 
             # Rebuild derived overlays from the authoritative ledger on every
             # Stage 3 run. This applies current safety rules to older ledgers
@@ -325,7 +331,7 @@ class Stage3ChunkBuilder:
             applied_page_repairs = apply_repairs_to_document(result_dir, document, working_document)
             state["docling_page_repairs_applied"] = len(applied_page_repairs)
 
-            working_bytes = json.dumps(working_document, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            working_bytes = await asyncio.to_thread(lambda: json.dumps(working_document, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
             task_id = await self._docling_client.submit_hybrid_chunks_json(
                 filename=f"{Path(json_member).stem}.stage2c.json",
                 content=working_bytes,
@@ -375,7 +381,7 @@ class Stage3ChunkBuilder:
             if missing_region_chunks:
                 chunks.extend(missing_region_chunks)
             state["docling_missing_region_chunks"] = len(missing_region_chunks)
-            chunks, post_stats = self._post_validate_chunks(
+            chunks, post_stats = await asyncio.to_thread(self._post_validate_chunks,
                 chunks,
                 max_tokens=config.stage3_chunk_max_tokens,
                 enforce=config.stage3_enforce_max_tokens,
@@ -485,16 +491,16 @@ class Stage3ChunkBuilder:
                 }
                 output_rows.append(row)
 
-            output_rows, retrieval_rows, retrieval_quality = annotate_retrieval_rows(
+            output_rows, retrieval_rows, retrieval_quality = await asyncio.to_thread(annotate_retrieval_rows,
                 output_rows,
                 postprocess_job_id=postprocess_job_id,
                 source_filename=str(manifest.get("source_filename") or Path(converted_name).stem),
                 result_dir_name=result_dir.name,
                 max_tokens=config.stage3_chunk_max_tokens,
             )
-            self._write_jsonl_atomic(result_dir / "chunks.jsonl", output_rows)
-            _write_retrieval_jsonl(result_dir / "retrieval_index.jsonl", retrieval_rows)
-            _write_retrieval_jsonl(result_dir / "table_evidence.jsonl", [row for row in retrieval_rows if row.get("stitched_table")])
+            await asyncio.to_thread(self._write_jsonl_atomic, result_dir / "chunks.jsonl", output_rows)
+            await asyncio.to_thread(_write_retrieval_jsonl, result_dir / "retrieval_index.jsonl", retrieval_rows)
+            await asyncio.to_thread(_write_retrieval_jsonl, result_dir / "table_evidence.jsonl", [row for row in retrieval_rows if row.get("stitched_table")])
             quality_tmp = result_dir / "retrieval_quality.json.tmp"
             quality_tmp.write_text(json.dumps(retrieval_quality, indent=2, ensure_ascii=False), encoding="utf-8")
             quality_tmp.replace(result_dir / "retrieval_quality.json")
@@ -1327,7 +1333,7 @@ class Stage3ChunkBuilder:
 
     @staticmethod
     def _write_jsonl_atomic(path: Path, rows: list[dict[str, Any]]) -> None:
-        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp = path.with_suffix("." + uuid.uuid4().hex + ".tmp")
         with tmp.open("w", encoding="utf-8") as handle:
             for row in rows:
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")

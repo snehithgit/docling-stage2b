@@ -1423,7 +1423,7 @@ def annotate_retrieval_rows(
 
 
 def _write_jsonl_atomic(path: Path, rows: Iterable[dict[str, Any]]) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_suffix("." + uuid.uuid4().hex + ".tmp")
     with tmp.open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -1849,7 +1849,7 @@ def save_benchmark(processed_dir: Path, payload: dict[str, Any]) -> None:
     path = benchmark_path(processed_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {**payload, "schema": _SCHEMA_BENCHMARK, "updated_at_epoch": time.time()}
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_suffix("." + uuid.uuid4().hex + ".tmp")
     tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     tmp.replace(path)
 
@@ -2055,7 +2055,7 @@ def run_benchmark(
         "generated_at_epoch": time.time(),
     }
     path = benchmark_result_path(processed_dir)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_suffix("." + uuid.uuid4().hex + ".tmp")
     tmp.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
     tmp.replace(path)
     return result

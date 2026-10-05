@@ -29,7 +29,7 @@ def workspace(tmp_path, monkeypatch):
     rt = SimpleNamespace(config=AppConfig(processed_dir=str(tmp_path)),
                          stage2b_store=SimpleNamespace(list_books=AsyncMock(return_value=[{"postprocess_job_id": 21, "result_dir": "book", "output_filename": "book.zip"}])),
                          review_assistant_store=store, worker_registry=SimpleNamespace(snapshot=lambda config: registry),
-                         postprocess_store=SimpleNamespace(get_job=AsyncMock(return_value={"result_dir": "book", "conversion_job_id": 1, "output_filename": "book.zip"})),
+                         postprocess_store=SimpleNamespace(get_job=AsyncMock(return_value={"status": "completed", "result_dir": "book", "conversion_job_id": 1, "output_filename": "book.zip"})),
                          events=SimpleNamespace(notify=lambda *a, **k: None), book_lifecycle_locks=SimpleNamespace(get=lambda jid: asyncio.Lock()),
                          stage2b_worker=SimpleNamespace(_stage2c_ledger_lock=asyncio.Lock()))
     monkeypatch.setattr(main, "runtime", rt)

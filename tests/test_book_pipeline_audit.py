@@ -21,7 +21,7 @@ async def test_sequence_uses_postprocess_store_id_not_conversion_id(tmp_path, mo
     await main.Runtime._advance_pipeline_sequence_once(runtime)
     if blocked_status:
         worker.start_stage2c_backfill.assert_not_awaited()
-        runtime.stage2b_store.list_book_jobs_raw.assert_not_awaited()
+        runtime.stage2b_store.list_book_jobs_raw.assert_awaited_once_with(32)
     else:
         worker.start_stage2c_backfill.assert_awaited_once_with(32)
         runtime.stage2b_store.list_book_jobs_raw.assert_awaited_once_with(32)

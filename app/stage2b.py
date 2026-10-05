@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 import difflib
 import hashlib
 import io
@@ -3657,7 +3658,7 @@ class Stage2BWorker:
         if not post_job or post_job.get("status") != "completed" or not post_job.get("result_dir"):
             raise ValueError("Stage 2A must be completed before Stage 2C can be built")
         verification_rows = await self._store.list_book_jobs_raw(postprocess_job_id)
-        allow_empty = not bool(getattr(config, "stage2b_artifact_sweep_enabled", True))
+        allow_empty = not bool(getattr(config, "stage2b_artifact_sweep_enabled", True)) or (not verification_rows and self.book_discovery_current(postprocess_job_id))
         if not verification_rows and not allow_empty:
             raise ValueError("No Stage 2B verification routes exist for this book")
         effective_rows = verification_rows_for_stage2c(
@@ -3767,6 +3768,8 @@ class Stage2BWorker:
                 generation = str(row.get("generation") or "")
                 entry_id = f"{generation}:{'text' if target == 'pi5' else 'vision'}:{row.get('route_id')}"
                 if entry_id in existing_ids:
+                    if row.get("stage2c_entry_state") in {"publishing", "error"}:
+                        await self.ensure_stage2c_entry(int(row["id"]))
                     state["skipped_existing"] += 1
                     state["processed"] += 1
                     state["remaining"] = max(0, len(rows) - int(state["processed"]))
@@ -4092,6 +4095,21 @@ class Stage2BWorker:
             for cached_id in set(self._route_sync_signatures) - live_job_ids:
                 self._route_sync_signatures.pop(cached_id, None)
             return created_total
+
+    def book_discovery_current(self, postprocess_job_id: int) -> bool:
+        """An empty queue is complete only after route and sweep discovery succeeds."""
+        signature = self._route_sync_signatures.get(int(postprocess_job_id))
+        if not signature:
+            return False
+        directory = Path(signature[0])
+        try:
+            route = (directory / "routes.json").stat()
+            manifest_path = directory / "source_manifest.json"
+            manifest = manifest_path.stat() if manifest_path.is_file() else None
+            return signature == (str(directory), route.st_mtime_ns, route.st_size,
+                                 manifest.st_mtime_ns if manifest else 0, manifest.st_size if manifest else 0)
+        except OSError:
+            return False
 
     @staticmethod
     def _is_artifact_sweep_job(job: dict[str, Any]) -> bool:
@@ -4538,9 +4556,7 @@ class Stage2BWorker:
                 wanted = set() if globally_stopped else set(self._configured_colab_providers())
                 for provider in list(self._colab_normal_tasks):
                     task = self._colab_normal_tasks[provider]
-                    if task.done() or provider not in wanted:
-                        if not task.done():
-                            task.cancel()
+                    if task.done():
                         self._colab_normal_tasks.pop(provider, None)
                 for provider in sorted(wanted):
                     task = self._colab_normal_tasks.get(provider)
@@ -4563,6 +4579,8 @@ class Stage2BWorker:
         while not self._stopping.is_set():
             try:
                 config = self._config_getter()
+                if (self._paused("pi5") and self._paused("oneplus")) or provider not in self._configured_colab_providers():
+                    return
                 if self._physical_worker_paused(provider):
                     await asyncio.sleep(config.stage2b_poll_interval_seconds)
                     continue
@@ -4627,9 +4645,7 @@ class Stage2BWorker:
                 wanted = set() if globally_stopped else set(self._configured_colab_providers(artifact_only=True))
                 for provider in list(self._colab_artifact_tasks):
                     task = self._colab_artifact_tasks[provider]
-                    if task.done() or provider not in wanted:
-                        if not task.done():
-                            task.cancel()
+                    if task.done():
                         self._colab_artifact_tasks.pop(provider, None)
                 for provider in sorted(wanted):
                     task = self._colab_artifact_tasks.get(provider)
@@ -4651,6 +4667,8 @@ class Stage2BWorker:
         while not self._stopping.is_set():
             try:
                 config = self._config_getter()
+                if (self._paused("pi5") and self._paused("oneplus")) or provider not in self._configured_colab_providers(artifact_only=True):
+                    return
                 globally_stopped = self._paused("pi5") and self._paused("oneplus")
                 if globally_stopped or self._physical_worker_paused(provider) or not self._artifact_participates(provider):
                     await asyncio.sleep(config.stage2b_poll_interval_seconds)
@@ -4844,7 +4862,7 @@ class Stage2BWorker:
             rows,
             artifact_sweep_required=bool(getattr(config, "stage2b_artifact_sweep_required_for_finalize", True)),
         )
-        allow_empty = not bool(getattr(config, "stage2b_artifact_sweep_enabled", True))
+        allow_empty = not bool(getattr(config, "stage2b_artifact_sweep_enabled", True)) or self.book_discovery_current(postprocess_job_id)
         if (not rows and not allow_empty) or any(row.get("status") in {"pending", "processing", "failed"} for row in signature_rows):
             return
         running = self._stage2c_backfill_tasks.get(int(postprocess_job_id))
@@ -5047,12 +5065,16 @@ class Stage2BWorker:
                 "stage2b_cloud_quota_paused",
                 **(await self._notification_job_context(job, error=exc)),
             )
+        except asyncio.CancelledError:
+            if claimed_here:
+                await asyncio.shield(self._store.requeue_cancelled(int(job["id"])))
+            raise
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code if exc.response is not None else 0
             provider = str(dispatch_provider or target).lower()
             retryable = status >= 500 or status in {408, 429}
             seconds = time.monotonic() - started
-            if (provider == "colab" or provider.startswith("colab:")) and status in {401, 403, 404}:
+            if (provider == "colab" or provider.startswith("colab:")) and status in {401, 403, 404, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 527, 530}:
                 # Match the provider-branching pattern used everywhere else in this
                 # file (see _endpoint_provider_ready, _client_for,
                 # _vision_client_for_role, and the job-timeout check below): a
@@ -5092,7 +5114,7 @@ class Stage2BWorker:
         except (httpx.TransportError, TimeoutError, ConnectionError) as exc:
             seconds = time.monotonic() - started
             provider = str(
-                (job.get("_artifact_worker") if is_artifact_sweep else self._selected_provider(target))
+                dispatch_provider
                 or target
             ).lower()
             # A built-in TimeoutError here is the outer absolute OnePlus job
@@ -5620,6 +5642,21 @@ class Stage2BWorker:
             "created_at_epoch": time.time(),
         }
 
+    @asynccontextmanager
+    async def _review_inference_window(self, postprocess_job_id):
+        """Let humans edit during inference; recheck lifecycle before publishing."""
+        lock = self._lifecycle_lock_getter(postprocess_job_id) if self._lifecycle_lock_getter else None
+        if lock is not None:
+            lock.release()  # The public review entry point acquired this lock.
+        try:
+            yield
+        finally:
+            if lock is not None:
+                await lock.acquire()
+        current = await self._postprocess_store.get_job(postprocess_job_id)
+        if not current or current.get("status") != "completed" or not current.get("result_dir"):
+            raise ValueError("Book was removed or changed during AI review; result discarded")
+
     async def run_review_assistant_job(
         self, *, worker_id: str, postprocess_job_id: int, entry_id: str, review_type: str
     ) -> dict[str, Any]:
@@ -5627,9 +5664,8 @@ class Stage2BWorker:
 
         This NEVER writes human_verified or human_visual_decision. It only stores
         an auditable AI suggestion next to the authoritative human-review entry.
-        The book lifecycle lock spans source reads, inference, and the ledger write
-        so a concurrent delete cannot quarantine the book and then have this
-        background worker silently recreate its result directory.
+        Source preparation and publication hold the book lifecycle lock. Inference
+        releases it; publication rechecks book existence and evidence signatures.
         """
         postprocess_job_id = int(postprocess_job_id)
         if self._lifecycle_lock_getter is not None:
@@ -5755,7 +5791,7 @@ class Stage2BWorker:
                 target_length = max(len(str(entry.get("original_text") or "")),
                                     len(str(entry.get("proposed_text") or "")))
                 review_max_tokens = max(1024, min(4096, target_length + 512))
-            async with self._device_locks[provider]:
+            async with self._review_inference_window(postprocess_job_id), self._device_locks[provider]:
                 response = await client.inspect_image(
                     image_bytes, prompt, mime_type=mime, model=str(worker.get("model") or "koboldcpp"),
                     max_tokens=review_max_tokens,
@@ -5980,7 +6016,7 @@ class Stage2BWorker:
             )
             self._ensure_provider_state(provider)
             started = time.monotonic()
-            async with self._device_locks[provider]:
+            async with self._review_inference_window(postprocess_job_id), self._device_locks[provider]:
                 response = await client.inspect_image(
                     image_bytes, prompt, mime_type=mime,
                     model=str(worker.get("model") or "koboldcpp"), max_tokens=(4096 if review_type == "text" else 1024),

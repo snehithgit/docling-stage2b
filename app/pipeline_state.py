@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+import os
+import uuid
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -97,6 +99,41 @@ def stage2c_output_signature(result_dir: Path) -> str:
     return _sha256_parts(
         [f"{path.name}:{_ledger_content_signature(path) if path.name == 'correction_ledger.json' else file_signature(path)}".encode("utf-8") for path in paths]
     )
+
+
+def stage2c_semantic_signature(result_dir: Path) -> str:
+    """Hash accepted content and upstream authority, excluding backfill counters."""
+    directory = Path(result_dir)
+    state = load_json(directory / "stage2c_backfill.json")
+    authority = {key: state.get(key) for key in ("status", "verification_signature", "rule_version")}
+    parts = [json.dumps(authority, sort_keys=True).encode("utf-8")]
+    for name in ("correction_ledger.json", "chunk_overlays.jsonl", "table_structure_repairs.json", "docling_page_repairs.json"):
+        path = directory / name
+        signature = _ledger_content_signature(path) if name == "correction_ledger.json" else file_signature(path)
+        parts.append(f"{name}:{signature}".encode("utf-8"))
+    return _sha256_parts(parts)
+
+
+def migrate_stage3_semantic_signature(result_dir: Path, stage2c_info: dict) -> bool:
+    """Migrate a proven-current legacy index without rechunking or GET writes."""
+    path = Path(result_dir) / "stage3_chunking.json"
+    state = load_json(path)
+    if (state.get("status") != "completed" or state.get("stage2c_semantic_signature")
+            or state.get("stage2c_signature") != stage2c_info.get("output_signature")
+            or not stage2c_info.get("ready")
+            or stage2c_output_signature(result_dir) != stage2c_info.get("output_signature")):
+        return False
+    state["stage2c_semantic_signature"] = stage2c_info.get("semantic_output_signature") or stage2c_semantic_signature(result_dir)
+    temporary = path.with_suffix("." + uuid.uuid4().hex + ".tmp")
+    try:
+        with temporary.open("w", encoding="utf-8") as handle:
+            json.dump(state, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return True
 
 
 def _ledger_content_signature(path: Path) -> str:
@@ -222,7 +259,7 @@ def stage2a_human_review_summary(result_dir: Path) -> dict[str, Any]:
     }
 
 
-def stage2a_structural_review_context(result_dir: Path, route_id: str) -> dict[str, Any]:
+def stage2a_structural_review_context(result_dir: Path, route_id: str, *, route: dict | None = None, diagnostics: dict | None = None) -> dict[str, Any]:
     """Return one structural route with its persisted diagnostic evidence.
 
     Older 40.11R ``routes.json`` files intentionally grouped diagnostics and
@@ -232,16 +269,18 @@ def stage2a_structural_review_context(result_dir: Path, route_id: str) -> dict[s
     the UI.
     """
     result_dir = Path(result_dir)
-    summary = stage2a_human_review_summary(result_dir)
-    route = next(
-        (item for item in summary.get("routes", []) if str(item.get("route_id") or "") == str(route_id)),
-        None,
-    )
+    if route is None:
+        summary = stage2a_human_review_summary(result_dir)
+        route = next(
+            (item for item in summary.get("routes", []) if str(item.get("route_id") or "") == str(route_id)),
+            None,
+        )
     if route is None:
         raise KeyError(route_id)
 
     code = str(route.get("code") or "")
-    diagnostics = load_json(result_dir / "diagnostics.json")
+    if diagnostics is None:
+        diagnostics = load_json(result_dir / "diagnostics.json")
     signal = next(
         (item for item in (diagnostics.get("signals") or [])
          if isinstance(item, dict) and str(item.get("code") or "") == code),
@@ -430,6 +469,7 @@ def stage2c_freshness(result_dir: Path, verification_rows: list[dict[str, Any]],
         "rule_version": rule_version,
         "recorded_rule_version": state.get("rule_version"),
         "output_signature": stage2c_output_signature(result_dir) if outputs else None,
+        "semantic_output_signature": stage2c_semantic_signature(result_dir) if outputs else None,
         "state": state,
     }
 
@@ -449,6 +489,8 @@ def stage3_freshness(
     outputs = chunks_output and retrieval_output
     ready_status = str(state.get("status") or "") == "completed"
     signature_match = bool(expected) and bool(state.get("stage2c_signature")) and str(state.get("stage2c_signature")) == expected
+    if state.get("stage2c_semantic_signature") and stage2c_info.get("semantic_output_signature"):
+        signature_match = state["stage2c_semantic_signature"] == stage2c_info["semantic_output_signature"]
     stage3_rule_match = (not stage3_rule_version) or str(state.get("rule_version") or "") == str(stage3_rule_version)
     quality = load_json(result_dir / "retrieval_quality.json")
     retrieval_rule_match = (not retrieval_rule_version) or str(quality.get("retrieval_rule_version") or "") == str(retrieval_rule_version)

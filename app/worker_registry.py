@@ -108,6 +108,8 @@ class WorkerRegistry:
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         os.chmod(tmp, 0o600)
+        with tmp.open("r+b") as handle:
+            os.fsync(handle.fileno())
         tmp.replace(self.path)
         os.chmod(self.path, 0o600)
 
@@ -407,6 +409,8 @@ class WorkerRegistry:
         tmp = path.with_suffix(".key.tmp")
         tmp.write_text(key + "\n", encoding="utf-8")
         os.chmod(tmp, 0o600)
+        with tmp.open("r+b") as handle:
+            os.fsync(handle.fileno())
         tmp.replace(path)
         os.chmod(path, 0o600)
 

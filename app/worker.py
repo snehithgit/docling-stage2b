@@ -12,7 +12,7 @@ from typing import Any
 
 from .config import AppConfig
 from .database import JobStore
-from .docling_client import DoclingApiError, DoclingTransientSubmitError, DoclingClient, ResultPayload
+from .docling_client import DoclingTaskNotFoundError, DoclingApiError, DoclingTransientSubmitError, DoclingClient, ResultPayload
 from .events import EventBroker
 
 
@@ -526,6 +526,8 @@ class ConversionWorker:
                 error=f"TimeoutError: {exc}",
             )
         except Exception as exc:
+            if isinstance(exc, DoclingTaskNotFoundError):
+                await self._store.clear_task_id(job["id"])
             # Once a Stage 1 row has entered processing, no unexpected local
             # exception (including SQLite OperationalError) may strand it there
             # until restart. CancelledError is not swallowed by this handler.

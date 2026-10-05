@@ -3,10 +3,11 @@ from __future__ import annotations
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor
 
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 import asyncio
 import hashlib
 import json
+import logging
 import re
 import sqlite3
 import time
@@ -15,6 +16,8 @@ import zipfile
 from urllib.parse import quote, unquote, urlparse
 from datetime import UTC, datetime
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
@@ -52,6 +55,7 @@ from .pipeline_state import (
     set_stage2a_human_review_decision,
     stage2c_freshness,
     stage3_freshness,
+    migrate_stage3_semantic_signature,
     verification_rows_for_stage2c,
 )
 from .retrieval import (
@@ -119,12 +123,15 @@ def _converted_zip_for_postprocess_job(job: dict, result_dir: Path) -> Path | No
     return path if path.is_file() else None
 
 
-async def _ensure_table_collapse_compatibility(job: dict, result_dir: Path) -> dict:
+async def _ensure_table_collapse_compatibility(job: dict, result_dir: Path, *, skip_if_busy: bool = False) -> dict:
     converted_zip = _converted_zip_for_postprocess_job(job, result_dir)
     if converted_zip is None:
         return {"status": "unavailable", "added": 0}
     job_id = int(job.get("id") or 0)
-    async with runtime.book_lifecycle_locks.get(job_id):
+    lock = runtime.book_lifecycle_locks.get(job_id)
+    if skip_if_busy and lock.locked():
+        return {"status": "busy", "added": 0}
+    async with lock:
         return await asyncio.to_thread(ensure_collapse_scan, result_dir, converted_zip)
 
 
@@ -1166,7 +1173,7 @@ class Runtime:
                 return state
             if status == "partial":
                 raise RuntimeError(str(state.get("error_message") or "Stage 2C rebuild completed only partially; Stage 3 is blocked until Stage 2C completes successfully"))
-            if status == "failed":
+            if status in {"failed", "cancelled", "waiting_for_pi5"}:
                 raise RuntimeError(str(state.get("error") or state.get("error_message") or "Stage 2C rebuild failed"))
             await asyncio.sleep(0.5)
         raise TimeoutError("Stage 2C rebuild timed out")
@@ -1178,7 +1185,7 @@ class Runtime:
             status = str(state.get("status") or "")
             if status == "completed":
                 return state
-            if status == "failed":
+            if status in {"failed", "cancelled", "waiting_for_pi5"}:
                 raise RuntimeError(str(state.get("error") or "Stage 3 rebuild failed"))
             await asyncio.sleep(1.0)
         raise TimeoutError("Stage 3 rebuild timed out")
@@ -1262,6 +1269,25 @@ class Runtime:
             self.pipeline_sequence_state["last_run_at_epoch"] = time.time()
             await asyncio.sleep(max(3, int(self.config.postprocess_poll_interval_seconds)))
 
+    def _pipeline_retry_ready(self, job_id, stage, state):
+        locks = getattr(self, "book_lifecycle_locks", None)
+        if locks is not None and locks.get(job_id).locked():
+            return False
+        retries = self.__dict__.setdefault("_pipeline_stage_retry", {})
+        entry = retries.get((job_id, stage), {})
+        if state.get("status") == "waiting_for_pi5":
+            observed = (state.get("started_at_epoch"), state.get("last_error_message"), state.get("retry_after_seconds"))
+            if entry.get("waiting_state") != observed:
+                entry = {**entry, "waiting_state": observed, "until": max(float(entry.get("until", 0)), time.time() + max(0, float(state.get("retry_after_seconds") or 0)))}
+                retries[(job_id, stage)] = entry
+        return time.time() >= float(entry.get("until", 0))
+
+    def _pipeline_retry_started(self, job_id, stage):
+        retries = self.__dict__.setdefault("_pipeline_stage_retry", {})
+        previous = retries.get((job_id, stage), {})
+        delay = min(1800, max(60, int(previous.get("delay", 30)) * 2))
+        retries[(job_id, stage)] = {"delay": delay, "until": time.time() + delay}
+
     async def _advance_pipeline_sequence_once(self) -> None:
         """Advance downstream stages only when the immediately prior stage is current.
 
@@ -1274,83 +1300,99 @@ class Runtime:
         verification_summary = {int(row.get("postprocess_job_id") or 0): row for row in await self.stage2b_store.list_books()}
         book_catalog: list[dict] = []
         advanced = 0
+        self.pipeline_sequence_state["book_errors"] = {}
         for job in jobs:
-            job_id = int(job.get("id") or 0)
-            result_dir = Path(self.config.processed_dir) / Path(str(job.get("result_dir") or "")).name
-            await asyncio.to_thread(repair_identity_metadata, result_dir, job_id, conversion_job_id=job.get("conversion_job_id"))
-            summary = verification_summary.get(job_id) or {}
-            total = int(summary.get("total") or 0)
-            current_stage3 = False
-            if total:
-                blockers = sum(verification_counts(summary)[status] for status in ("pending", "processing", "failed"))
-                if not blockers:
-                    rows = await self.stage2b_store.list_book_jobs_raw(job_id)
-                    stage2c = stage2c_freshness(result_dir, rows, rule_version=STAGE2C_RULE_VERSION, artifact_sweep_required=bool(getattr(runtime.config, "stage2b_artifact_sweep_required_for_finalize", True)))
-                    if not stage2c.get("ready"):
-                        running = self.stage2b_worker.stage2c_state_for(job_id) or {}
-                        if str(running.get("status") or "") not in {"queued", "running"} and bool(self.config.stage2c_auto_finalize_after_stage2b):
-                            self.pipeline_sequence_state.update({"current_book": job_id, "current_stage": "stage2c"})
-                            try:
-                                started = await self.stage2b_worker.start_stage2c_backfill(job_id)
-                                if started.get("accepted"):
-                                    advanced += 1
-                            except ValueError:
-                                pass
-                    else:
-                        await _ensure_table_collapse_compatibility(job, result_dir)
-                        structural_gate = await asyncio.to_thread(stage2a_human_review_summary, result_dir)
-                        if structural_gate.get("blocking_review_required", 0):
-                            book_catalog.append({
-                                "postprocess_job_id": job_id,
-                                "result_dir": result_dir,
-                                "stage3_current": False,
-                                "structural_review_waiting": structural_gate.get("blocking_review_required", 0),
-                            })
-                            self.pipeline_sequence_state.update({"current_book": job_id, "current_stage": "stage2a_human_review"})
-                            continue
-                        audit_gate = await asyncio.to_thread(
-                            verifier_audit_summary, result_dir,
-                            text_require_human=bool(self.config.stage2c_require_human_review),
-                        )
-                        if audit_gate.get("blocking_review_required", 0):
-                            book_catalog.append({"postprocess_job_id": job_id, "result_dir": result_dir, "stage3_current": False, "audit_waiting": audit_gate.get("review_required", 0)})
-                            self.pipeline_sequence_state.update({"current_book": job_id, "current_stage": "verifier_audit"})
-                            continue
-                        stage3 = stage3_freshness(result_dir, stage2c, stage3_rule_version=STAGE3_RULE_VERSION, retrieval_rule_version=RETRIEVAL_RULE_VERSION)
-                        current_stage3 = bool(stage3.get("ready"))
-                        if not current_stage3:
-                            # Retrieval-rule upgrades do not require Docling or Stage 3
-                            # chunk regeneration. Rebuild only derived retrieval artifacts
-                            # from the existing canonical chunks, then machine embeddings
-                            # become stale naturally because the retrieval-index signature changed.
-                            if stage3.get("reason") == "retrieval_rules_stale" and stage3.get("canonical_ready"):
-                                self.pipeline_sequence_state.update({"current_book": job_id, "current_stage": "retrieval_refresh"})
+            try:
+                job_id = int(job.get("id") or 0)
+                result_dir = Path(self.config.processed_dir) / Path(str(job.get("result_dir") or "")).name
+                locks = getattr(self, "book_lifecycle_locks", None)
+                if locks is not None and locks.get(job_id).locked():
+                    book_catalog.append({"postprocess_job_id": job_id, "result_dir": result_dir.name, "index_ready": False})
+                    continue
+                await asyncio.to_thread(repair_identity_metadata, result_dir, job_id, conversion_job_id=job.get("conversion_job_id"))
+                summary = verification_summary.get(job_id) or {}
+                total = int(summary.get("total") or 0)
+                current_stage3 = False
+                discovery_current = getattr(self.stage2b_worker, "book_discovery_current", lambda _: False)(job_id)
+                if total or discovery_current:
+                    blockers = sum(verification_counts(summary)[status] for status in ("pending", "processing", "failed"))
+                    rows = None
+                    if blockers:
+                        rows = await self.stage2b_store.list_book_jobs_raw(job_id)
+                        # An empty response cannot disprove the summary (a concurrent rebuild).
+                        if rows:
+                            effective = verification_rows_for_stage2c(rows, artifact_sweep_required=bool(getattr(self.config, "stage2b_artifact_sweep_required_for_finalize", True)))
+                            blockers = sum(row.get("status") in {"pending", "processing", "failed"} for row in effective)
+                    if not blockers:
+                        if rows is None:
+                            rows = await self.stage2b_store.list_book_jobs_raw(job_id)
+                        stage2c = await asyncio.to_thread(stage2c_freshness, result_dir, rows, rule_version=STAGE2C_RULE_VERSION, artifact_sweep_required=bool(getattr(self.config, "stage2b_artifact_sweep_required_for_finalize", True)))
+                        if not stage2c.get("ready"):
+                            running = self.stage2b_worker.stage2c_state_for(job_id) or {}
+                            if str(running.get("status") or "") not in {"queued", "running"} and bool(self.config.stage2c_auto_finalize_after_stage2b) and Runtime._pipeline_retry_ready(self, job_id, "stage2c", running):
+                                self.pipeline_sequence_state.update({"current_book": job_id, "current_stage": "stage2c"})
                                 try:
-                                    await asyncio.to_thread(
-                                        refresh_retrieval_artifacts, result_dir,
-                                        max_tokens=self.config.stage3_chunk_max_tokens,
-                                    )
-                                    advanced += 1
-                                    current_stage3 = True
-                                    self.events.notify("pipeline_retrieval_refresh_completed")
-                                except (OSError, ValueError, json.JSONDecodeError):
-                                    current_stage3 = False
-                            else:
+                                    started = await self.stage2b_worker.start_stage2c_backfill(job_id)
+                                    if started.get("accepted"):
+                                        advanced += 1
+                                    Runtime._pipeline_retry_started(self, job_id, "stage2c")
+                                except ValueError:
+                                    Runtime._pipeline_retry_started(self, job_id, "stage2c")
+                        else:
+                            self.__dict__.setdefault("_pipeline_stage_retry", {}).pop((job_id, "stage2c"), None)
+                            compatibility = await _ensure_table_collapse_compatibility(job, result_dir, skip_if_busy=True)
+                            if compatibility.get("status") == "busy":
+                                book_catalog.append({"postprocess_job_id": job_id, "result_dir": result_dir.name, "index_ready": False})
+                                continue
+                            structural_gate = await asyncio.to_thread(stage2a_human_review_summary, result_dir)
+                            if structural_gate.get("blocking_review_required", 0):
+                                book_catalog.append({
+                                    "postprocess_job_id": job_id,
+                                    "result_dir": result_dir,
+                                    "stage3_current": False,
+                                    "structural_review_waiting": structural_gate.get("blocking_review_required", 0),
+                                })
+                                self.pipeline_sequence_state.update({"current_book": job_id, "current_stage": "stage2a_human_review"})
+                                continue
+                            audit_gate = await asyncio.to_thread(
+                                verifier_audit_summary, result_dir,
+                                text_require_human=bool(self.config.stage2c_require_human_review),
+                            )
+                            if audit_gate.get("blocking_review_required", 0):
+                                book_catalog.append({"postprocess_job_id": job_id, "result_dir": result_dir, "stage3_current": False, "audit_waiting": audit_gate.get("review_required", 0)})
+                                self.pipeline_sequence_state.update({"current_book": job_id, "current_stage": "verifier_audit"})
+                                continue
+                            stage3 = await asyncio.to_thread(stage3_freshness, result_dir, stage2c, stage3_rule_version=STAGE3_RULE_VERSION, retrieval_rule_version=RETRIEVAL_RULE_VERSION)
+                            current_stage3 = bool(stage3.get("ready"))
+                            if current_stage3:
+                                if locks is not None and not locks.get(job_id).locked():
+                                    async with locks.get(job_id), getattr(self.stage2b_worker, "_stage2c_ledger_lock", nullcontext()):
+                                        await asyncio.to_thread(migrate_stage3_semantic_signature, result_dir, stage2c)
+                                self.__dict__.setdefault("_pipeline_stage_retry", {}).pop((job_id, "stage3"), None)
+                            if not current_stage3:
                                 running = self.stage3_builder.state_for(job_id) or {}
-                                if str(running.get("status") or "") not in {"queued", "running"}:
+                                if str(running.get("status") or "") not in {"queued", "running"} and Runtime._pipeline_retry_ready(self, job_id, "stage3", running):
                                     self.pipeline_sequence_state.update({"current_book": job_id, "current_stage": "stage3"})
                                     try:
                                         started = await self.stage3_builder.start(job_id)
                                         if started.get("accepted"):
                                             advanced += 1
+                                        Runtime._pipeline_retry_started(self, job_id, "stage3")
                                     except ValueError:
-                                        pass
-            book_catalog.append({
-                "postprocess_job_id": job_id,
-                "source_filename": str(job.get("source_filename") or job.get("output_filename") or result_dir.name),
-                "result_dir": result_dir.name,
-                "index_ready": bool(current_stage3 and (result_dir / "retrieval_index.jsonl").is_file()),
-            })
+                                        Runtime._pipeline_retry_started(self, job_id, "stage3")
+                book_catalog.append({
+                    "postprocess_job_id": job_id,
+                    "source_filename": str(job.get("source_filename") or job.get("output_filename") or result_dir.name),
+                    "result_dir": result_dir.name,
+                    "index_ready": bool(current_stage3 and (result_dir / "retrieval_index.jsonl").is_file()),
+                })
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                job_id = int(job.get("id") or 0)
+                self.pipeline_sequence_state["book_errors"][str(job_id)] = f"{type(exc).__name__}: {exc}"
+                logger.exception("Pipeline advancement failed for book %s", job_id)
+                book_catalog.append({"postprocess_job_id": job_id, "result_dir": Path(str(job.get("result_dir") or "")).name, "index_ready": False})
 
         # Embeddings are one persisted index per physical machine. Build/rebuild only
         # after every assigned manual has a current Stage 3 retrieval index.
@@ -3128,7 +3170,11 @@ async def _delete_book_locked(job_id: int, request: DeleteBookRequest) -> dict:
     async def cancel_reservation() -> None:
         await runtime.postprocess_store.cancel_book_deletion(job_id, original_status)
 
-    conversion = await runtime.postprocess_store.get_conversion_job(int(job.get("conversion_job_id") or 0))
+    try:
+        conversion = await runtime.postprocess_store.get_conversion_job(int(job.get("conversion_job_id") or 0))
+    except BaseException:
+        await asyncio.shield(cancel_reservation())
+        raise
     stage2c_state = runtime.stage2b_worker.stage2c_state_for(job_id) or {}
     if str(stage2c_state.get("status") or "") in {"queued", "running"}:
         await cancel_reservation()
@@ -5463,13 +5509,21 @@ async def retrieval_reindex_all() -> dict:
     for book in books:
         result_dir = Path(runtime.config.processed_dir) / str(book["result_dir"])
         try:
-            quality = await asyncio.to_thread(
-                refresh_retrieval_artifacts,
-                result_dir,
-                max_tokens=runtime.config.stage3_chunk_max_tokens,
-                postprocess_job_id=int(book.get("postprocess_job_id") or 0),
-                source_filename=str(book.get("source_filename") or ""),
-            )
+            job_id = int(book.get("postprocess_job_id") or 0)
+            async with runtime.book_lifecycle_locks.get(job_id):
+                current = await runtime.postprocess_store.get_job(job_id)
+                if not current or current.get("status") != "completed":
+                    raise ValueError("Book is no longer available for reindexing")
+                state = runtime.stage3_builder.state_for(job_id) or {}
+                if state.get("status") in {"queued", "running"}:
+                    raise ValueError("Stage 3 is building this book; retry reindex after it finishes")
+                quality = await asyncio.to_thread(
+                    refresh_retrieval_artifacts,
+                    result_dir,
+                    max_tokens=runtime.config.stage3_chunk_max_tokens,
+                    postprocess_job_id=int(book.get("postprocess_job_id") or 0),
+                    source_filename=str(book.get("source_filename") or ""),
+                )
             results.append({
                 "postprocess_job_id": book["postprocess_job_id"],
                 "source_filename": book["source_filename"],

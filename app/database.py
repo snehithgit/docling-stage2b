@@ -109,6 +109,9 @@ class JobStore:
 
     def _recover_interrupted_sync(self) -> int:
         with self._connection() as connection:
+            connection.execute("""UPDATE jobs SET status='failed',
+                error_type='DeletionInterrupted', error_message='Deletion interrupted by restart; inspect quarantined files before retrying'
+                WHERE status='deleting'""")
             total = connection.execute(
                 "SELECT COUNT(*) FROM jobs WHERE status = 'processing'"
             ).fetchone()[0]
