@@ -397,3 +397,24 @@ def test_table_row_collapse_cannot_be_dismissed_without_source_review_marker(tmp
     )
     assert decided["status"] == "dismissed"
     assert decided["human_reviewed_evidence_ids"] == ["table-source"]
+
+
+def test_identity_accepts_distinct_conversion_and_postprocess_ids(tmp_path):
+    from app.pipeline_state import identity_metadata_status, repair_identity_metadata
+    directory = tmp_path / "Manual__job15__run0"
+    directory.mkdir()
+    metadata = directory / "stage3_chunking.json"
+    metadata.write_text(json.dumps({"postprocess_job_id":32}), encoding="utf-8")
+    assert identity_metadata_status(directory, 32, conversion_job_id=15)["ok"]
+    assert repair_identity_metadata(directory, 32, conversion_job_id=15)["repaired"] == []
+    assert json.loads(metadata.read_text())["postprocess_job_id"] == 32
+
+
+def test_identity_rejects_wrong_conversion_mapping_without_writing(tmp_path):
+    from app.pipeline_state import repair_identity_metadata
+    directory = tmp_path / "Manual__job15__run0"
+    directory.mkdir()
+    metadata = directory / "stage3_chunking.json"
+    metadata.write_text(json.dumps({"postprocess_job_id":32}), encoding="utf-8")
+    assert not repair_identity_metadata(directory, 32, conversion_job_id=16)["repairable"]
+    assert json.loads(metadata.read_text())["postprocess_job_id"] == 32

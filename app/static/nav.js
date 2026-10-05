@@ -72,7 +72,7 @@
 })();
 
 (() => {
-  const version = "2026.10.04.40.11AH13";
+  const version = "2026.10.05.40.11AH14";
   const sidebar = document.querySelector('.sidebar');
   if (!sidebar) return;
   const badge = document.createElement('div');
@@ -114,14 +114,14 @@
   const items = [
     ['/', 'Books', icons.books],
     ['/add-book', 'Add book', icons.add],
-    ['/queue', 'Convert', icons.add],
+    ['/queue', 'Conversion queue', icons.add],
     ['/verification', 'Verification', icons.verify],
-    ['/workers', 'Workers', icons.workers],
-    ['/review-workers', 'Review workers', icons.reviewWorkers],
     ['/anomaly-review', 'Anomaly review', icons.anomaly],
     ['/artifact-audit', 'Artifact audit', icons.artifact],
-    ['/text-audit', 'Verifier audit', icons.audit],
-    ['/retrieval', 'RAG', icons.rag],
+    ['/text-audit', 'Text review', icons.audit],
+    ['/retrieval', 'Ask your books', icons.rag],
+    ['/workers', 'Workers', icons.workers],
+    ['/review-workers', 'Review workers', icons.reviewWorkers],
     ['/chunks', 'Chunk Viewer', icons.chunks],
     ['/oneplus', 'OnePlus', icons.phone],
   ];
@@ -129,7 +129,14 @@
   if (nav) {
     const existing = new Map([...nav.querySelectorAll('a[href]')].map(link => [link.getAttribute('href'), link]));
     const fragment = document.createDocumentFragment();
+    const sections = {'/': 'Library', '/verification': 'Correct books', '/retrieval': 'Questions and evidence', '/workers': 'Devices and advanced tools'};
     items.forEach(([href, label, icon]) => {
+      if (sections[href]) {
+        const heading = document.createElement('div');
+        heading.className = 'sidebar-label';
+        heading.textContent = sections[href];
+        fragment.appendChild(heading);
+      }
       const link = existing.get(href) || document.createElement('a');
       link.href = href;
       link.innerHTML = `<span class="nav-item-label">${icon}${label}</span>`;

@@ -30,6 +30,7 @@
       if (pending || total === 0) return {code:'Verify', label:total ? `${pending} checks waiting` : 'Verification not prepared', tone:'active', next:'Open'};
       return {code:'Verify', label:'Verification required', tone:'active', next:'Open'};
     }
+    if (Number(pipeline.stage2a_human_review_pending || 0)) return {code:'Review', label:'Source review needs your decision', tone:'attention', next:'Review'};
     if (pipeline.next_stage === 'stage2c') return {code:'Finalize', label:'Corrections/enrichment rebuilding', tone:'active', next:'Open'};
     if (pipeline.next_stage === 'stage3') return {code:'Chunk', label:'Stage 3 chunks rebuilding', tone:'active', next:'Open'};
     if (pipeline.next_stage === 'assign_machine') return {code:'Machine', label:'Assign manual to its machine', tone:'attention', next:'Open'};
