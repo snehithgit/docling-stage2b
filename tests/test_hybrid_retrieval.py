@@ -184,3 +184,22 @@ def test_semantic_intent_tiebreak_only_reorders_near_equal_candidates():
     out = _apply_semantic_intent_tiebreak(rows, {"available":True,"label":"troubleshooting","score":0.8})
     assert out[0]["text"].startswith("fault cause")
     assert out[2]["hybrid_score"] == 0.020000
+
+
+def test_equipment_hybrid_precomputed_vector_skips_query_embedding(monkeypatch, tmp_path):
+    from app import hybrid_retrieval as module
+    row = {"chunk_id": "A1", "postprocess_job_id": 1, "text": "pump", "score": 1, "rank": 1}
+    monkeypatch.setattr(module, "search_indices", lambda *a, **k: [dict(row)])
+    seen = []
+    def vector(*a, **k):
+        seen.append(k["query_vector"])
+        return [dict(row)], 0.0
+    monkeypatch.setattr(module, "vector_search_equipment", vector)
+    monkeypatch.setattr(module, "semantic_intent_from_vector", lambda *a, **k: {"available": False})
+    def unexpected(*a, **k):
+        raise AssertionError("A supplied query vector must not be embedded again")
+    monkeypatch.setattr(module, "embed_texts", unexpected)
+    rows, metadata = module.hybrid_search_equipment(tmp_path, "eq-a", [], "pump", base_url="unused", model="test", query_prefix="", document_prefix="", timeout_seconds=1, query_vector=[1.0, 0.0])
+    assert seen == [[1.0, 0.0]]
+    assert rows[0]["chunk_id"] == "A1"
+    assert metadata["query_embedding_ms"] == 0.0

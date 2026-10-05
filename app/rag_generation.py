@@ -396,7 +396,7 @@ def build_grounded_user_prompt(question: str, sources: list[dict[str, Any]]) -> 
         f"{blocks}\n\n"
         "ANSWER REQUIREMENTS:\n"
         "- Use only the source excerpts above.\n"
-        "- Cite technical claims inline with the supplied [S#] and/or [V#] labels.\n"
+        "- End EVERY factual sentence and numbered step with its own supporting [S#] or [V#] citation. A citation only after the whole procedure is invalid.\n"
         "- Prefer the source that directly answers the question over merely related background.\n"
         "- Do not transfer instructions or values between different equipment/systems.\n"
         "- Do not invent missing steps, values, causes, or safety limits.\n"
@@ -630,8 +630,8 @@ _CITATION_RE = re.compile(r"\[([SV]\d+)\]", re.IGNORECASE)
 _GROUNDING_WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9_/-]{2,}")
 _CRITICAL_TOKEN_RE = re.compile(
     r"(?<![\w.,])(?:[<>≤≥]=?\s*)?[-+]?\d+(?:[.,]\d+)?\s*(?:%|°\s*[CF]|V|mV|A|mA|bar|psi|Hz|rpm|kW|W|N\s*[·.-]?\s*m|Nm|mm|cm|kg|tonnes?|tons?|t|s|sec(?:onds?)?|min(?:utes?)?|h|hours?|Ω|ohms?)(?:\b|(?<=%)(?!\w))"
-    r"|(?<![\w.,])[-+]?\d+(?:[.,]\d+)?(?![\w.,])"
-    r"|\b(?=[A-Za-z0-9_./-]*[A-Za-z])(?=[A-Za-z0-9_./-]*\d)[A-Za-z0-9][A-Za-z0-9_./-]{2,}\b",
+    r"|(?<![\w.,])[-+]?\d+(?:[.,]\d+)?(?!\w|[.,]\d)"
+    r"|\b(?=[A-Za-z0-9_./-]*[A-Za-z])(?=[A-Za-z0-9_./-]*\d)[A-Za-z0-9][A-Za-z0-9_./-]{1,}\b",
     re.IGNORECASE,
 )
 _GROUNDING_STOPWORDS = {
@@ -649,9 +649,30 @@ def _grounding_words(text: str) -> set[str]:
 
 def _critical_tokens(text: str) -> list[str]:
     values: list[str] = []
-    for match in _CRITICAL_TOKEN_RE.finditer(str(text or "")):
+    token_text = str(text or "")
+    # Multi-item lists must tokenize identically with or without spaces after
+    # commas. Preserve genuine thousands grouping and decimal comma values.
+    def numeric_list(match):
+        value = match.group(0)
+        if re.fullmatch(r"\d{1,3}(?:,\d{3})+", value):
+            return value
+        return re.sub(r",\s*", " ", value)
+    token_text = re.sub(r"\b\d+(?:,\s*\d+){2,}\b", numeric_list, token_text)
+    for match in _CRITICAL_TOKEN_RE.finditer(token_text):
         token = re.sub(r"\s+", "", match.group(0)).casefold()
         if token and token not in values:
+            values.append(token)
+    for match in re.finditer(r"\b(counter[- ]?clockwise|anti[- ]?clockwise|clockwise|CCW|CW)\b", str(text or ""), re.I):
+        word = re.sub(r"[- ]", "", match.group(0)).casefold()
+        token = "rotation:ccw" if word in {"counterclockwise", "anticlockwise", "ccw"} else "rotation:cw"
+        if token not in values:
+            values.append(token)
+    for match in re.finditer(r"\bN\.?([OC])\.?(?!\w)|\bnormally\s+(open|closed)\b", str(text or ""), re.I):
+        # Bare English "no" is not a normally-open electrical contact label.
+        if match.group(1) and match.group(0) == "no":
+            continue
+        token = "contact:no" if (match.group(1) or "").upper() == "O" or (match.group(2) or "").casefold() == "open" else "contact:nc"
+        if token not in values:
             values.append(token)
     return values
 
@@ -746,8 +767,23 @@ def claim_support_audit(answer: str, sources: list[dict[str, Any]]) -> dict[str,
             lexical_ok = len(overlap) >= 1
         else:
             lexical_ok = len(overlap) >= 2 and coverage >= 0.25
-        supported = not missing_critical and lexical_ok
-        reason = "supported" if supported else ("critical_token_not_in_cited_source" if missing_critical else "weak_claim_source_overlap")
+        prohibition_conflict = False
+        if not re.search(r"\b(?:not|never|avoid|prevent)\b", clean, re.I):
+            for sentence in re.split(r"\n+|(?<=[.!?])\s+", exact_evidence):
+                if not re.search(r"\b(?:do not|must not|never)\b", sentence, re.I):
+                    continue
+                # Conditional warnings need a semantic reader; this guard only
+                # catches direct reversals of an unconditional source prohibition.
+                if re.search(r"\b(?:unless|until|before|after|when|while|if)\b", sentence, re.I):
+                    continue
+                instruction = re.sub(r"\b(?:do not|must not|never)\b", "", sentence, flags=re.I)
+                words = _grounding_words(instruction)
+                if len(words) >= 2 and words.issubset(claim_words):
+                    prohibition_conflict = True
+                    break
+        supported = not missing_critical and lexical_ok and not prohibition_conflict
+        reason = ("supported" if supported else "critical_token_not_in_cited_source" if missing_critical
+                  else "source_prohibition_reversed" if prohibition_conflict else "weak_claim_source_overlap")
         claims.append({
             "claim": clean,
             "citations": labels,

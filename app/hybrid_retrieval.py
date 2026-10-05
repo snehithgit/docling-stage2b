@@ -1161,12 +1161,14 @@ def hybrid_search_equipment(
     candidate_depth: int = 60,
     rrf_k: int = 60,
     top_k: int = 5,
+    query_vector: list[float] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     candidate_depth = max(int(top_k), max(10, int(candidate_depth)))
     lexical = search_indices(index_paths, query, top_k=candidate_depth)
     q_started = time.perf_counter()
-    qvec = embed_texts(base_url, [str(query_prefix or "") + str(query or "")], timeout_seconds=timeout_seconds)[0]
-    query_embed_ms = round((time.perf_counter() - q_started) * 1000, 3)
+    qvec = (embed_texts(base_url, [str(query_prefix or "") + str(query or "")], timeout_seconds=timeout_seconds)[0]
+            if query_vector is None else list(query_vector))
+    query_embed_ms = round((time.perf_counter() - q_started) * 1000, 3) if query_vector is None else 0.0
     vector, _ = vector_search_equipment(
         processed_dir, equipment_id, index_paths, query,
         base_url=base_url, model=model, query_prefix=query_prefix,

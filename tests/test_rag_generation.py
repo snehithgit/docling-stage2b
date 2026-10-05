@@ -429,3 +429,43 @@ async def test_unknown_question_model_refuses_without_a_generation_call(monkeypa
     assert result['insufficient_evidence'] is True
     assert result['model_called'] is False
     assert result['missing_question_identifiers']==['HC9999']
+
+def test_citation_does_not_validate_reversed_source_prohibition():
+    result=citation_audit('Run the pump dry [S1].',[{'label':'S1','text':'Do not run the pump dry.'}])
+    assert result['answer_usable'] is False
+    assert result['unsupported_claims'][0]['reason']=='source_prohibition_reversed'
+
+def test_source_prohibition_can_be_quoted_faithfully():
+    result=citation_audit('Do not run the pump dry [S1].',[{'label':'S1','text':'Do not run the pump dry.'}])
+    assert result['answer_usable'] is True
+
+def test_two_character_terminal_id_must_exist_in_its_citation():
+    result=citation_audit('Terminal A2 supplies 24 V [S1].',[{'label':'S1','text':'Terminal A1 supplies 24 V.'}])
+    assert result['answer_usable'] is False
+
+@pytest.mark.parametrize('source,answer',[
+ ('Turn the handle counterclockwise.','Turn the handle clockwise [S1].'),
+ ('Use the N.C. contact.','Use the N.O. contact [S1].'),
+ ('Use the normally closed contact.','Use the normally open contact [S1].'),
+])
+def test_rotation_and_contact_state_cannot_be_reversed(source,answer):
+    assert citation_audit(answer,[{'label':'S1','text':source}])['answer_usable'] is False
+
+
+def test_comma_separated_item_list_keeps_identical_source_tokens():
+    answer = "Repair set for items 10, 17, 23, 71 is 0000020824 [S1]."
+    source = "Repair set for items 10,17,23,71 is 0000020824."
+    assert citation_audit(answer, [{"label": "S1", "text": source}])["answer_usable"] is True
+
+
+def test_large_number_cannot_be_split_as_item_list():
+    result = citation_audit("The capacity is 200 [S1].", [{"label": "S1", "text": "The capacity is 1,200,000."}])
+    assert result["answer_usable"] is False
+
+
+def test_uppercase_normally_open_contact_is_preserved():
+    assert citation_audit("Use the normally open contact [S1].", [{"label": "S1", "text": "Use the NORMALLY OPEN contact."}])["answer_usable"] is True
+
+
+def test_number_before_sentence_period_matches_source_value():
+    assert citation_audit("The part number is 38000 [S1].", [{"label": "S1", "text": "The part number is 38000."}])["answer_usable"] is True
