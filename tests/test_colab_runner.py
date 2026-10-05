@@ -395,3 +395,41 @@ async def test_failed_recovery_does_not_clear_other_worker_readiness(setup):
     assert not registry.get_colab(first['id'])['runner_ready']
     assert runner.recovery['account/one']['last_error']
     assert not dispatcher.dispatch_reservations
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('reason,ready', [('stats stale',True),('unhealthy',False),('unknown',False)])
+async def test_direct_endpoint_accepts_only_explicit_telemetry_blocker(setup,reason,ready):
+    runner,registry,_,account,endpoint,_=setup
+    worker=await runner.import_account('account/one')
+    original=runner.request
+    account['routable']=False
+    async def request(method,path):
+        if path=='/pool':return {'unavailable':[{'account':account['id'],'reason':reason}]}
+        return await original(method,path)
+    runner.request=request
+    await runner.sync()
+    current=registry.get_colab(worker['id'])
+    assert current['runner_ready'] is ready
+    if ready:
+        assert current['runner_status']['waiting_reason']==''
+        assert 'statistics delayed' in current['runner_status']['warning']
+        assert registry.configured_colabs()
+    endpoint['healthy']=False
+    await runner.sync()
+    assert not registry.get_colab(worker['id'])['runner_ready']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('change',[{'login_required':True},{'remaining_s':0},{'state':'draining'}])
+async def test_telemetry_fallback_preserves_runtime_guards(setup,change):
+    runner,registry,_,account,_,_=setup
+    worker=await runner.import_account('account/one')
+    original=runner.request
+    account.update(routable=False,**change)
+    async def request(method,path):
+        if path=='/pool':return {'unavailable':[{'account':account['id'],'reason':'stats stale'}]}
+        return await original(method,path)
+    runner.request=request
+    await runner.sync()
+    assert not registry.get_colab(worker['id'])['runner_ready']

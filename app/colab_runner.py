@@ -100,6 +100,18 @@ class ColabRunner:
                 account['runtime_estimate_s'] = estimate.get('estimate_s')
                 account['runtime_estimate_observed_at'] = estimate.get('observed_at')
                 account['stats_age_s'] = resources.get('stats_age_s')
+            # Direct endpoints remain usable when only notebook telemetry is stale.
+            # Ask the runner for its explicit blocker; unknown blockers fail closed.
+            if any(a.get('state') == 'running' and a.get('healthy') is True and a.get('routable') is not True for a in self.accounts):
+                try:
+                    pool = await self.request('GET', '/pool')
+                    unavailable = pool.get('unavailable') if isinstance(pool, dict) else []
+                    reasons = {r.get('account'): r.get('reason') for r in (unavailable or []) if isinstance(r, dict)}
+                    for a in self.accounts:
+                        if reasons.get(a['id']) == 'stats stale':
+                            a['telemetry_delayed'] = True
+                except ValueError:
+                    pass
             self.observed_at, self.error = time.time(), None
             accounts = {a['id']: a for a in self.accounts}
             for worker in self.registry.snapshot()['colab_workers']:
@@ -109,7 +121,7 @@ class ColabRunner:
                 account = accounts.get(account_id, {})
                 status = {**account, 'observed_at_epoch': self.observed_at, 'ready': False}
                 status['waiting_reason'] = self.waiting_reason(account)
-                ready = account.get('state') == 'running' and account.get('healthy') is True and account.get('routable') is True and not account.get('login_required')
+                ready = account.get('state') == 'running' and account.get('healthy') is True and (account.get('routable') is True or account.get('telemetry_delayed') is True) and not account.get('login_required')
                 remaining = account.get('remaining_s')
                 ready = ready and (remaining is None or isinstance(remaining, (int, float)) and remaining > 0)
                 # Keep the previous verified snapshot (with its original TTL)
@@ -136,6 +148,8 @@ class ColabRunner:
                             self.dispatcher.reset_provider_connection(provider)
                         status['ready'] = bool(ready and endpoint.get('healthy') is True and self.config().get('enabled'))
                         if status['ready']:
+                            status['waiting_reason'] = ''
+                            status['warning'] = 'Endpoint ready; notebook statistics delayed' if account.get('telemetry_delayed') else ''
                             self.recovery.pop(account_id, None)
                     except (ValueError, RuntimeError) as exc:
                         status['ready'] = False
@@ -161,7 +175,7 @@ class ColabRunner:
             return 'Runner state: ' + str(account.get('state') or 'unknown')
         if account.get('healthy') is not True:
             return 'Runner endpoint unhealthy'
-        if account.get('routable') is not True:
+        if account.get('routable') is not True and not account.get('telemetry_delayed'):
             return 'Runner not routable; check notebook statistics freshness in runner'
         remaining = account.get('remaining_s')
         if remaining is not None and (not isinstance(remaining, (int, float)) or remaining <= 0):
