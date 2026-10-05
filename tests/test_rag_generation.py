@@ -469,3 +469,17 @@ def test_uppercase_normally_open_contact_is_preserved():
 
 def test_number_before_sentence_period_matches_source_value():
     assert citation_audit("The part number is 38000 [S1].", [{"label": "S1", "text": "The part number is 38000."}])["answer_usable"] is True
+
+
+def test_unicode_nonbreaking_hyphen_preserves_technical_identifier():
+    assert citation_audit("HE.CT1\u2011U1 is a power supply [S1].", [{"label": "S1", "text": "HE.CT1-U1 is a power supply."}])["answer_usable"] is True
+
+
+def test_procedure_markdown_title_is_not_an_uncited_factual_claim():
+    answer = "**Procedure for checking the pump**\nCheck the pump [S1]."
+    assert citation_audit(answer, [{"label": "S1", "text": "Check the pump."}])["answer_usable"] is True
+
+
+def test_bold_procedure_assertion_still_requires_a_citation():
+    answer = "**Procedure requires disconnecting the pump**"
+    assert citation_audit(answer, [{"label": "S1", "text": "Disconnect the pump."}])["answer_usable"] is False

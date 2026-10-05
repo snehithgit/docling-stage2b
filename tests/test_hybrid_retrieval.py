@@ -203,3 +203,27 @@ def test_equipment_hybrid_precomputed_vector_skips_query_embedding(monkeypatch, 
     assert seen == [[1.0, 0.0]]
     assert rows[0]["chunk_id"] == "A1"
     assert metadata["query_embedding_ms"] == 0.0
+
+
+def test_dominant_exact_phrase_survives_missing_vector_candidate():
+    from app.hybrid_retrieval import _apply_exact_phrase_guard
+    target = {"rank": 1, "score": 47, "chunk_id": "A", "postprocess_job_id": 1, "text": "Inspection once or more a year keeps precision."}
+    background = {"rank": 2, "score": 18, "chunk_id": "B", "postprocess_job_id": 1, "text": "List of maintenance inspections."}
+    result = _apply_exact_phrase_guard([background], [target, background], "Find the description of Inspection once or more a year.")
+    assert result[0]["chunk_id"] == "A"
+    assert result[0]["exact_phrase_guard"] is True
+
+
+def test_ambiguous_similar_lexical_scores_do_not_force_phrase_promotion():
+    from app.hybrid_retrieval import _apply_exact_phrase_guard
+    a = {"rank": 1, "score": 68, "chunk_id": "A", "text": "Continue with one turn of each screw: 200 Nm."}
+    b = {"rank": 2, "score": 66, "chunk_id": "B", "text": "Continue with one turn of each screw: 114 Nm."}
+    result = _apply_exact_phrase_guard([b, a], [a, b], "Continue with one turn of each screw torque?")
+    assert result[0]["chunk_id"] == "B"
+
+
+def test_high_lexical_score_without_exact_phrase_does_not_force_promotion():
+    from app.hybrid_retrieval import _apply_exact_phrase_guard
+    a = {"rank": 1, "score": 50, "chunk_id": "A", "text": "Inspection and precision maintenance details."}
+    b = {"rank": 2, "score": 10, "chunk_id": "B", "text": "Maintenance."}
+    assert _apply_exact_phrase_guard([b], [a,b], "Inspection once or more a year")[0]["chunk_id"] == "B"
