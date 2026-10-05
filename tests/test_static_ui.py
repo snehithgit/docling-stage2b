@@ -320,7 +320,8 @@ def test_review_worker_page_is_deferred_until_primary_machine_work_is_complete_a
     js = read("review-workers.js")
     text_review = read("review.html")
     vision_review = read("vision-audit.js")
-    assert "All Text + Vision + Artifact machine jobs across the library must finish first" in html
+    assert "Pending and processing Text, Vision and Artifact jobs have priority" in html
+    assert "Failed jobs remain visible and block publication of their book" in html
     assert "They never set" in html and "human_verified" in html
     assert "Text review" in js and "Vision review" in js
     assert "/api/review-workers/settings" in js

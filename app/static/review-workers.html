@@ -4,8 +4,8 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Review workers · Docling Auto-Convert</title>
-  <link rel="stylesheet" href="/assets/styles.css?v=2026.10.05.40.11AH19"/>
-  <link rel="stylesheet" href="/assets/workflow.css?v=2026.10.05.40.11AH19"/>
+  <link rel="stylesheet" href="/assets/styles.css?v=2026.10.05.40.11AH20"/>
+  <link rel="stylesheet" href="/assets/workflow.css?v=2026.10.05.40.11AH20"/>
 </head>
 <body class="ui29 review-workers-page">
 <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -38,7 +38,7 @@
     <section class="review-overview-grid" aria-label="Review phase status">
       <article class="review-overview-card review-gate-card">
         <div class="review-overview-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5z"/><path d="M8 9h8M8 13h5"/></svg></div>
-        <div><span class="review-card-kicker">Primary workload gate</span><strong id="review-machine-gate">Checking Text, Vision and Artifact workload…</strong><small><strong>All Text + Vision + Artifact machine jobs across the library must finish first.</strong> Review workers start only after that gate is clear.</small></div>
+        <div><span class="review-card-kicker">Primary workload gate</span><strong id="review-machine-gate">Checking Text, Vision and Artifact workload…</strong><small><strong>Pending and processing Text, Vision and Artifact jobs have priority.</strong> Failed jobs remain visible and block publication of their book; eligible AI reviews can continue.</small></div>
       </article>
       <article class="review-overview-card review-toggle-card">
         <div><span class="review-card-kicker">Review assistant phase</span><strong>Enable assigned review workers</strong><small>This phase creates suggestions only. They never set <code>human_verified</code> or a human visual decision.</small></div>
@@ -72,7 +72,7 @@
     </section>
   </main>
 </div>
-<script src="/assets/nav.js?v=2026.10.05.40.11AH19"></script>
-<script src="/assets/review-workers.js?v=2026.10.05.40.11AH19"></script>
+<script src="/assets/nav.js?v=2026.10.05.40.11AH20"></script>
+<script src="/assets/review-workers.js?v=2026.10.05.40.11AH20"></script>
 </body>
 </html>

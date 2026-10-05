@@ -51,7 +51,7 @@ async function loadStatus(){
     refreshWorkerReadiness(pool.colab_workers||[]);
     const c=st.counts||{};
     const blockers=Number(st.machine_blockers||0);
-    $('review-machine-gate').textContent=st.machine_work_complete?'Primary machine workload complete · review workers may run.':`${blockers.toLocaleString()} primary job${blockers===1?'':'s'} still block this phase.`;
+    $('review-machine-gate').textContent=st.machine_work_complete?'No pending or processing primary work · review workers may run.':`${blockers.toLocaleString()} primary job${blockers===1?'':'s'} still block this phase.`;
     const textRemaining=(c.text_pending||0)+(c.text_processing||0);
     const visionRemaining=(c.vision_pending||0)+(c.vision_processing||0);
     const anomalyPending=(c.anomaly_text_pending||0)+(c.anomaly_vision_pending||0)+(c.anomaly_structural_pending||0);
