@@ -42,3 +42,21 @@ test('proposal rendering escapes table text and includes copy action',()=>{
  assert.ok(!output.includes('<script>'));
  assert.ok(output.includes('data-copy-table="0:0"'));
 });
+
+test('batch Yes is unavailable when findings have no human decisions',async()=>{
+ const h=harness([table]);
+ h.ctx.renderSummary({counts:{detected:1},workers:{enabled:true,anomaly_workers:[{enabled:true,paused:false}]}});
+ assert.equal(h.get('ar-batch-yes').disabled,true);
+ await h.ctx.reverifyAll();
+ assert.equal(h.requests.length,0);
+});
+test('batch Yes requests human re-review and No makes no request',async()=>{
+ const h=harness([table,{...table,entry_id:'human',human_reviewed:true}]);
+ h.ctx.renderSummary({counts:{detected:2},workers:{enabled:true,anomaly_workers:[{enabled:true,paused:false}]}});
+ assert.equal(h.get('ar-batch-yes').disabled,false);
+ h.ctx.declineBulkRun();
+ assert.equal(h.requests.length,0);
+ assert.match(h.get('ar-batch-status').textContent,/Automatic review.*continues/);
+ await h.ctx.reverifyAll();
+ assert.equal(h.requests[0],'/api/anomaly-review/reverify-all?confirm=true');
+});

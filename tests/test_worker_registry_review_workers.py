@@ -435,7 +435,7 @@ def test_manual_anomaly_job_survives_automatic_candidate_retirement(tmp_path: Pa
     asyncio.run(run())
 
 
-def test_anomaly_job_requires_explicit_bulk_operator_queue_after_normal_review(tmp_path: Path):
+def test_detected_anomaly_is_automatically_queued_after_normal_review(tmp_path: Path):
     async def run():
         cfg = _config(tmp_path)
         Path(cfg.processed_dir).mkdir(parents=True)
@@ -477,10 +477,12 @@ def test_anomaly_job_requires_explicit_bulk_operator_queue_after_normal_review(t
         )
         assert await service._sync_candidates() is True
         jobs = await store.list_jobs()
-        # Normal Review Assistant candidates may be prepared automatically.
-        # Anomaly candidates must not exist until the operator presses the
-        # single global Yes action on Anomaly Review.
-        assert {j["review_type"] for j in jobs} == {"text"}
+        assert {j["review_type"] for j in jobs} == {"text", "anomaly_text"}
+        await service._sync_candidates()
+        assert len(await store.list_jobs()) == 2
+        await store.mark_completed(next(j["id"] for j in jobs if j["review_type"] == "anomaly_text"), {}, 1)
+        await service._sync_candidates()
+        assert next(j for j in await store.list_jobs() if j["review_type"] == "anomaly_text")["status"] == "completed"
 
         manual = await store.queue_manual_anomaly(
             11, "book__job11", entry, "anomaly_text"

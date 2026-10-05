@@ -15,6 +15,7 @@ from typing import Any
 from .anomaly_review import anomaly_evidence_signature, detect_anomaly_types
 from .verifier_clients import ReviewWorkerBusyError
 from .stage2c import _authoritative_visual_subjects, _vision_requires_human
+from .structural_anomaly import structural_entries
 
 
 def _utcnow() -> str:
@@ -376,8 +377,8 @@ class ReviewAssistantService:
         # This is deliberately a global phase barrier. AI second-opinion work is
         # lower priority than every normal Text/Vision/Artifact route across the
         # library, not merely lower priority than routes from the same book.
-        if self._machine_blockers:
-            return False
+        # Detected anomaly jobs can be visible in the queue immediately. The
+        # return value below still prevents dispatch during primary work.
         config = self._config_getter()
         candidates: list[tuple[int, str, Path]] = []
         for book in books:
@@ -386,25 +387,43 @@ class ReviewAssistantService:
             path=Path(config.processed_dir)/Path(result_dir_name).name/"correction_ledger.json"
             candidates.append((jid, result_dir_name, path))
         ledgers = await asyncio.gather(*(asyncio.to_thread(_load_ledger_sync, path) for _, _, path in candidates))
+        structural = await asyncio.gather(*(asyncio.to_thread(structural_entries, path.parent) for _, _, path in candidates)) if settings.get("anomaly_worker_ids") else [[] for _ in candidates]
         pending_candidates = []
-        for (jid, result_dir_name, _path), ledger in zip(candidates, ledgers):
+        for (jid, result_dir_name, _path), ledger, structural_findings in zip(candidates, ledgers, structural):
             for entry in ledger.get("entries") or []:
                 if not isinstance(entry, dict): continue
                 if entry.get("status")=="superseded": continue
                 if entry.get("entry_type")=="text_correction" and not entry.get("human_verified") and str(entry.get("verification_verdict") or "").upper() in {"LIKELY_CORRUPT","UNCERTAIN"}:
-                    key=(jid,str(entry.get("entry_id")),"text"); valid.add(key); pending_candidates.append((jid,result_dir_name,entry,"text"))
+                    key=(jid,str(entry.get("entry_id")),"text"); valid.add(key)
+                    if not self._machine_blockers: pending_candidates.append((jid,result_dir_name,entry,"text"))
             vision=[e for e in (ledger.get("entries") or []) if isinstance(e,dict) and e.get("entry_type")=="vision_enrichment" and e.get("status")!="superseded"]
             for entry in _authoritative_visual_subjects(vision):
                 if _vision_requires_human(entry):
-                    key=(jid,str(entry.get("entry_id")),"vision"); valid.add(key); pending_candidates.append((jid,result_dir_name,entry,"vision"))
+                    key=(jid,str(entry.get("entry_id")),"vision"); valid.add(key)
+                    if not self._machine_blockers: pending_candidates.append((jid,result_dir_name,entry,"vision"))
 
-            # Anomaly work is operator-triggered from the dedicated Anomaly
-            # Review page. Do not auto-create anomaly jobs here. Manual anomaly
-            # jobs use a "manual:" signature and retire_missing() intentionally
-            # preserves them until the assigned Colab worker completes them.
+            if settings.get("anomaly_worker_ids"):
+                subjects = [(e, "text") for e in ledger.get("entries") or []
+                            if isinstance(e, dict) and e.get("entry_type") in {"text_correction", "table_cell_correction"}]
+                subjects.extend((e, "vision") for e in _authoritative_visual_subjects(vision))
+                subjects.extend((e, "structural") for e in structural_findings)
+                for entry, kind in subjects:
+                    if (entry.get("status") == "superseded" or entry.get("human_verified")
+                            or entry.get("human_visual_decision") or not entry.get("entry_id")
+                            or not detect_anomaly_types(entry, kind)):
+                        continue
+                    decision = entry.get("anomaly_review_decision") or {}
+                    if (decision.get("decision") == "declined"
+                            and decision.get("evidence_signature") == anomaly_evidence_signature(entry, kind)):
+                        continue
+                    review_type = "anomaly_" + kind
+                    valid.add((jid, str(entry["entry_id"]), review_type))
+                    pending_candidates.append((jid, result_dir_name, entry, review_type))
+            # Human-reviewed findings require an explicit re-review request.
+            # Existing manual requests survive automatic candidate retirement.
         await self._store.sync_candidates(pending_candidates)
         await self._store.retire_missing(valid)
-        return True
+        return self._machine_blockers == 0
 
     async def _run_one(self, worker_id: str, allowed: set[str]) -> bool:
         job=await self._store.claim_next(worker_id,allowed)
