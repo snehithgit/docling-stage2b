@@ -25,3 +25,7 @@ A current canonical index is required before a machine embedding can be consider
 751 backend tests passed locally; one skipped; two existing POSIX permission checks fail on Windows and are delegated to Linux CI. All 14 frontend behavioral tests passed. New regression tests cover distinct conversion/processing IDs, rejection of wrong mappings and sequencing with real database field names.
 
 No blanket re-OCR, human decision reset or deletion was performed. Live answer quality has not yet been benchmarked after indexes become current. Review jobs that failed and unresolved source findings still require inspection. A complete redesign and exhaustive quality guarantee are not claimed by this repair.
+
+## Colab artifact readiness follow-up
+
+Book readiness and automatic finalization previously summed only Pi5 and OnePlus physical counters. Completed, processing, and failed artifact jobs claimed by Colab disappeared from those totals. Provider-independent current-job counts now drive book readiness, finalization blockers, and the library/book progress displays. Physical counters remain available for device-specific consumers. A SQLite regression test covers all four statuses for Colab artifact jobs.

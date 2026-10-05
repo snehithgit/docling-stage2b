@@ -32,10 +32,10 @@
   function counts() {
     const v = book?.verification || {};
     return {
-      pending:Number(v.pi5_pending||0)+Number(v.oneplus_pending||0),
-      processing:Number(v.pi5_processing||0)+Number(v.oneplus_processing||0),
-      failed:Number(v.pi5_failed||0)+Number(v.oneplus_failed||0),
-      completed:Number(v.pi5_completed||0)+Number(v.oneplus_completed||0),
+      pending:Number(v.pending ?? (Number(v.pi5_pending||0)+Number(v.oneplus_pending||0))),
+      processing:Number(v.processing ?? (Number(v.pi5_processing||0)+Number(v.oneplus_processing||0))),
+      failed:Number(v.failed ?? (Number(v.pi5_failed||0)+Number(v.oneplus_failed||0))),
+      completed:Number(v.completed ?? (Number(v.pi5_completed||0)+Number(v.oneplus_completed||0))),
       total:Number(v.total||0),
       piDone:Number(v.pi5_completed||0), oneDone:Number(v.oneplus_completed||0),
       piPending:Number(v.pi5_pending||0)+Number(v.pi5_processing||0),

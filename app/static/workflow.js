@@ -16,11 +16,11 @@
 
   function stage(book) {
     const v = book.verification || {};
-    const pending = Number(v.pi5_pending || 0) + Number(v.oneplus_pending || 0);
-    const processing = Number(v.pi5_processing || 0) + Number(v.oneplus_processing || 0);
-    const failed = Number(v.pi5_failed || 0) + Number(v.oneplus_failed || 0);
+    const pending = Number(v.pending ?? (Number(v.pi5_pending || 0) + Number(v.oneplus_pending || 0)));
+    const processing = Number(v.processing ?? (Number(v.pi5_processing || 0) + Number(v.oneplus_processing || 0)));
+    const failed = Number(v.failed ?? (Number(v.pi5_failed || 0) + Number(v.oneplus_failed || 0)));
     const total = Number(v.total || 0);
-    const done = Number(v.pi5_completed || 0) + Number(v.oneplus_completed || 0);
+    const done = Number(v.completed ?? (Number(v.pi5_completed || 0) + Number(v.oneplus_completed || 0)));
     const pipeline = book.pipeline || {};
     if (book.status === 'failed') return {code:'Analyze', label:'Extraction needs attention', tone:'attention', next:'Open'};
     if (book.status !== 'completed') return {code:'Analyze', label:'Analyzing extraction', tone:'active', next:'Open'};

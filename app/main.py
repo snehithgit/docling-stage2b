@@ -77,7 +77,7 @@ from .verifier_clients import OpenAICompatibleVerifier
 from .stage3 import STAGE3_RULE_VERSION, Stage3ChunkBuilder
 from .book_lifecycle_lock import BookLifecycleLocks
 from .telegram_bot import TelegramBotService
-from .stage2b_store import HUMAN_VISUAL_RECOVERY_CODE, Stage2BStore
+from .stage2b_store import HUMAN_VISUAL_RECOVERY_CODE, Stage2BStore, verification_counts
 from .worker import ConversionWorker
 from .worker_registry import WorkerRegistry
 from .colab_runner import ColabRunner
@@ -1193,10 +1193,7 @@ class Runtime:
                 item = {"postprocess_job_id": job_id, "book": name, "status": "running"}
                 state["results"].append(item)
                 state["current_book"] = name
-                terminal_blockers = sum(int(book.get(k) or 0) for k in (
-                    "pi5_pending", "pi5_processing", "pi5_failed",
-                    "oneplus_pending", "oneplus_processing", "oneplus_failed",
-                ))
+                terminal_blockers = sum(verification_counts(book)[status] for status in ("pending", "processing", "failed"))
                 if terminal_blockers:
                     item.update({"status": "skipped", "reason": "Stage 2B still has pending, processing, or failed routes"})
                     state["processed_books"] += 1
@@ -1285,10 +1282,7 @@ class Runtime:
             total = int(summary.get("total") or 0)
             current_stage3 = False
             if total:
-                blockers = sum(int(summary.get(key) or 0) for key in (
-                    "pi5_pending", "pi5_processing", "pi5_failed",
-                    "oneplus_pending", "oneplus_processing", "oneplus_failed",
-                ))
+                blockers = sum(verification_counts(summary)[status] for status in ("pending", "processing", "failed"))
                 if not blockers:
                     rows = await self.stage2b_store.list_book_jobs_raw(job_id)
                     stage2c = stage2c_freshness(result_dir, rows, rule_version=STAGE2C_RULE_VERSION, artifact_sweep_required=bool(getattr(runtime.config, "stage2b_artifact_sweep_required_for_finalize", True)))
@@ -2832,6 +2826,7 @@ async def documents() -> dict:
             "oneplus_pending": int(book.get("oneplus_pending") or 0),
             "oneplus_processing": int(book.get("oneplus_processing") or 0),
             "oneplus_failed": int(book.get("oneplus_failed") or 0),
+            **verification_counts(book),
             "total": int(book.get("total") or 0),
         }
         row["verification"] = verification
@@ -2848,11 +2843,8 @@ async def documents() -> dict:
         }
         if row.get("status") == "completed" and row.get("result_dir"):
             total = verification["total"]
-            blockers = sum(verification[key] for key in (
-                "pi5_pending", "pi5_processing", "pi5_failed",
-                "oneplus_pending", "oneplus_processing", "oneplus_failed",
-            ))
-            pipeline["stage2b_ready"] = bool(total and blockers == 0 and (verification["pi5_completed"] + verification["oneplus_completed"] == total))
+            blockers = sum(verification[key] for key in ("pending", "processing", "failed"))
+            pipeline["stage2b_ready"] = bool(total and blockers == 0 and (verification["completed"] == total))
             result_dir = Path(runtime.config.processed_dir) / Path(str(row.get("result_dir"))).name
             await _ensure_table_collapse_compatibility(row, result_dir)
             structural_review = await asyncio.to_thread(stage2a_human_review_summary, result_dir)
