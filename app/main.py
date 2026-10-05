@@ -1278,9 +1278,9 @@ class Runtime:
         book_catalog: list[dict] = []
         advanced = 0
         for job in jobs:
-            job_id = int(job.get("postprocess_job_id") or 0)
+            job_id = int(job.get("id") or 0)
             result_dir = Path(self.config.processed_dir) / Path(str(job.get("result_dir") or "")).name
-            await asyncio.to_thread(repair_identity_metadata, result_dir, job_id)
+            await asyncio.to_thread(repair_identity_metadata, result_dir, job_id, conversion_job_id=job.get("conversion_job_id"))
             summary = verification_summary.get(job_id) or {}
             total = int(summary.get("total") or 0)
             current_stage3 = False
@@ -5156,7 +5156,7 @@ async def _retrieval_books() -> list[dict]:
         if job.get("status") != "completed" or not job.get("result_dir"):
             continue
         result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
-        identity = await asyncio.to_thread(repair_identity_metadata, result_dir, int(job.get("id") or 0))
+        identity = await asyncio.to_thread(identity_metadata_status, result_dir, int(job.get("id") or 0), conversion_job_id=job.get("conversion_job_id"))
         chunks_path = result_dir / "chunks.jsonl"
         quality_path = result_dir / "retrieval_quality.json"
         quality = None

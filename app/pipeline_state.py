@@ -129,15 +129,23 @@ def result_dir_job_id(result_dir: Path) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def identity_metadata_status(result_dir: Path, expected_job_id: int | None = None) -> dict[str, Any]:
+def identity_metadata_status(result_dir: Path, expected_job_id: int | None = None, *, conversion_job_id: int | None = None) -> dict[str, Any]:
     """Audit persisted derived-state job IDs against the authoritative result directory.
 
-    The directory name is created by the post-process store and is the stable
-    identity for persisted book artifacts.  This function never guesses when
+    The directory names the conversion job. When its mapping is supplied,
+    derived metadata is checked against the associated postprocess job.  This function never guesses when
     the directory lacks a job id.
     """
     result_dir = Path(result_dir)
-    authoritative = result_dir_job_id(result_dir)
+    directory_id = result_dir_job_id(result_dir)
+    authoritative = directory_id
+    if conversion_job_id is not None:
+        # Folder names contain the conversion ID, not the postprocess ID.
+        if directory_id != int(conversion_job_id) or not expected_job_id or int(expected_job_id) <= 0:
+            return {"ok": False, "authoritative_job_id": None, "expected_job_id": expected_job_id,
+                    "conversion_job_id": int(conversion_job_id), "directory_job_id": directory_id,
+                    "mismatches": {"conversion_directory": directory_id}}
+        authoritative = int(expected_job_id)
     if expected_job_id is not None and authoritative is not None and int(expected_job_id) != authoritative:
         return {"ok": False, "authoritative_job_id": authoritative, "expected_job_id": int(expected_job_id), "mismatches": {"runtime": int(expected_job_id)}}
     mismatches: dict[str, int] = {}
@@ -159,14 +167,14 @@ def identity_metadata_status(result_dir: Path, expected_job_id: int | None = Non
     }
 
 
-def repair_identity_metadata(result_dir: Path, expected_job_id: int | None = None) -> dict[str, Any]:
+def repair_identity_metadata(result_dir: Path, expected_job_id: int | None = None, *, conversion_job_id: int | None = None) -> dict[str, Any]:
     """Repair only unambiguous derived JSON metadata job IDs; never move data.
 
     Text/chunks/ledger content is untouched.  If the runtime job id disagrees
     with the directory identity the function refuses to repair.
     """
     result_dir = Path(result_dir)
-    status = identity_metadata_status(result_dir, expected_job_id)
+    status = identity_metadata_status(result_dir, expected_job_id, conversion_job_id=conversion_job_id)
     authoritative = status.get("authoritative_job_id")
     if authoritative is None or (expected_job_id is not None and int(expected_job_id) != int(authoritative)):
         return {**status, "repaired": [], "repairable": False}
@@ -191,7 +199,7 @@ def repair_identity_metadata(result_dir: Path, expected_job_id: int | None = Non
         tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         tmp.replace(path)
         repaired.append(name)
-    final = identity_metadata_status(result_dir, expected_job_id)
+    final = identity_metadata_status(result_dir, expected_job_id, conversion_job_id=conversion_job_id)
     return {**final, "repaired": repaired, "repairable": True}
 
 
