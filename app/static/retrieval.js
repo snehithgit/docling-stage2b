@@ -526,7 +526,8 @@ ${manuals} manual${manuals === 1 ? '' : 's'} will be unassigned from this machin
     }).join('');
     $('grounded-answer-card').hidden = false;
     bindResultActions($('grounded-answer-card'));
-    if (data.truncated) answerMessage('The selected model reached its output limit. Verify the visible citations before relying on an incomplete ending.', 'warning');
+    if (data.answer_usable === false) answerMessage(data.grounding_warning || 'Answer failed source validation. Inspect the cited passages before relying on it.', 'error');
+    else if (data.truncated) answerMessage('The selected model reached its output limit. Verify the visible citations before relying on an incomplete ending.', 'warning');
     else if (data.grounding_warning) answerMessage(data.grounding_warning, 'warning');
     else if (data.insufficient_evidence) answerMessage('The generator correctly stopped because the selected manual evidence does not contain enough information. Open + Page to inspect the original source; do not borrow steps from another manual.', 'warning');
     else answerMessage(`Answer generated from ${sources.length} grounded evidence record${sources.length === 1 ? '' : 's'} using [S#]/[V#] citation labels.`, 'success');

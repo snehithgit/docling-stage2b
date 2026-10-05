@@ -5792,8 +5792,8 @@ async def _execute_retrieval_generation(update: RetrievalGenerateRequest) -> dic
         "sources": sources,
         "evidence_scope": evidence_scope,
         **generated,
-        "generator_used": True,
-        "llm_calls": 1,
+        "generator_used": generated.get("model_called", True),
+        "llm_calls": int(generated.get("model_called", True)),
     }
 
 

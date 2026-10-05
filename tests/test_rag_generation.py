@@ -390,3 +390,42 @@ def test_equipment_scope_fails_closed_instead_of_silently_sending_visual_only():
     assert sources == []
     assert scope["scope_error"] == "text_provenance_mismatch"
 
+
+def test_refusal_phrase_cannot_hide_an_unsupported_claim():
+    sources=[{'label':'S1','text':'Pump pressure is 12 bar.'}]
+    result=citation_audit('Not enough information in the retrieved sources. Pump pressure is 999 bar [S1].',sources)
+    assert result['answer_usable'] is False
+    assert result['grounding_warning']
+
+import pytest
+@pytest.mark.parametrize('source,answer', [
+    ('Pump pressure is 16 bar.', 'Pump pressure is 6 bar [S1].'),
+    ('Neutral output is -6 V.', 'Neutral output is +6 V [S1].'),
+    ('The valve opens at 25%.', 'The valve opens at 75% [S1].'),
+    ('Detector HC1000 uses a thermistor.', 'Detector HC100 uses a thermistor [S1].'),
+])
+def test_critical_values_require_whole_tokens_and_preserve_sign(source,answer):
+    result=citation_audit(answer,[{'label':'S1','text':source}])
+    assert result['answer_usable'] is False
+    assert result['unsupported_claim_count']==1
+
+def test_citation_only_line_belongs_to_preceding_claim():
+    result=citation_audit('The HC100 uses a thermistor.\n[S1]',[{'label':'S1','text':'The HC100 uses a thermistor.'}])
+    assert result['answer_usable'] is True
+
+def test_part_number_cannot_be_substring_of_another_number():
+    result=citation_audit('The part number is 3800 [S1].',[{'label':'S1','text':'The part number is 38000.'}])
+    assert result['answer_usable'] is False
+
+def test_number_after_comma_is_not_a_complete_source_value():
+    result=citation_audit('Change coolant every 200 hours [S1].',[{'label':'S1','text':'Change coolant every 1,200 hours.'}])
+    assert result['answer_usable'] is False
+
+@pytest.mark.asyncio
+async def test_unknown_question_model_refuses_without_a_generation_call(monkeypatch):
+    async def forbidden(*args,**kwargs):raise AssertionError('Must not call a generator')
+    monkeypatch.setattr('app.rag_generation._generate_local',forbidden)
+    result=await generate_grounded_answer('pi5',AppConfig(),'What sensor does HC9999 use?',[{'label':'S1','text':'The HC100 uses a thermistor.'}])
+    assert result['insufficient_evidence'] is True
+    assert result['model_called'] is False
+    assert result['missing_question_identifiers']==['HC9999']
