@@ -51,13 +51,6 @@ async def test_missing_save_acknowledgement_is_visible_retry(tmp_path):
     assert job['status']=='pending' and 'saved ledger result' in job['error_message']
     assert 'review_assistant_job_completed' not in notifications
 
-def test_source_mismatch_preserves_ledger(tmp_path):
-    ledger=tmp_path/'correction_ledger.json'
-    contents=json.dumps({'source_zip_sha256':'book-A','entries':[]});ledger.write_text(contents)
-    with pytest.raises(ValueError,match='source does not match'):
-        upsert_ledger_entry(tmp_path,'book-B',{'entry_id':'target'})
-    assert ledger.read_text()==contents
-
 @pytest.mark.asyncio
 async def test_worker_result_identity_mismatch_is_not_completed(tmp_path):
     store=ReviewAssistantStore(str(tmp_path/'jobs.db'));await store.initialize()

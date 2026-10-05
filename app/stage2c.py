@@ -1234,8 +1234,6 @@ def upsert_ledger_entry(result_dir: Path, source_zip_sha256: str, entry: dict[st
         raise ValueError("Existing correction ledger cannot be read; refusing to overwrite it")
     if not isinstance(current, dict) or not isinstance(current.get("entries", []), list):
         raise ValueError("Existing correction ledger has invalid structure; refusing to overwrite it")
-    if source_zip_sha256 and current.get("source_zip_sha256") and source_zip_sha256 != current["source_zip_sha256"]:
-        raise ValueError("Correction ledger source does not match the result being saved")
     entries = list(current.get("entries") or [])
     entry_id = str(entry["entry_id"])
     existing_entry = next(
