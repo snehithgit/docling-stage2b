@@ -74,6 +74,45 @@ def test_bulk_re_review_excludes_unreviewed_detected_anomalies(workspace):
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("manual", [False, True])
+def test_stale_completed_audits_recover_with_bounded_attempts(workspace, manual):
+    async def run():
+        rt, _, ledger, _ = workspace
+        entry = dict(ledger["entries"][0], human_verified=False, human_review={})
+        store = rt.review_assistant_store
+        await store.initialize()
+        if manual:
+            await store.queue_manual_anomaly(21, "book", entry, "anomaly_text")
+        else:
+            await store.sync_candidate(21, "book", entry, "anomaly_text")
+        for attempt in range(1, 4):
+            job = await store.claim_next("colab-1", {"anomaly_text"})
+            assert job["attempt_count"] == attempt
+            await store.mark_completed(job["id"], {"stored": False}, 1)
+            await store.sync_candidate(21, "book", entry, "anomaly_text")
+            current, = await store.list_jobs()
+            assert current["status"] == ("pending" if attempt < 3 else "failed")
+            assert current["attempt_count"] == attempt
+        assert await store.claim_next("colab-1", {"anomaly_text"}) is None
+    asyncio.run(run())
+
+
+def test_current_completed_audit_is_not_requeued(workspace):
+    async def run():
+        rt, _, ledger, _ = workspace
+        entry = dict(ledger["entries"][0], human_verified=False, human_review={})
+        store = rt.review_assistant_store
+        await store.initialize()
+        await store.queue_manual_anomaly(21, "book", entry, "anomaly_text")
+        job = await store.claim_next("colab-1", {"anomaly_text"})
+        entry["anomaly_review"] = {"stored": True, "evidence_signature": anomaly_evidence_signature(entry, "text"), "source_validation": {"verified": True}}
+        await store.mark_completed(job["id"], entry["anomaly_review"], 1)
+        await store.sync_candidate(21, "book", entry, "anomaly_text")
+        current, = await store.list_jobs()
+        assert current["status"] == "completed"
+    asyncio.run(run())
+
+
 def test_automatic_queue_covers_table_cells_and_vision_and_skips_humans(workspace):
     async def run():
         rt, registry, ledger, path = workspace
