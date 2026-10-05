@@ -207,7 +207,7 @@ def main():
     initialize(str(args.root), str(cache))
     for eid, equipment in EQUIPMENT.items():
         paths = [args.root / "retrieval-audit-corpus" / m["result_dir"] / "retrieval_index.jsonl" for m in equipment["manuals"] if m.get("active_for_rag")]
-        hybrid.equipment_hybrid_index_status(args.root / "retrieval-audit-corpus", eid, paths, model="BAAI/bge-small-en-v1.5", document_prefix="")
+        hybrid.equipment_hybrid_index_status(args.root / "retrieval-audit-corpus", eid, paths, model="BAAI/bge-small-en-v1.5", document_prefix="", manual_types={m["postprocess_job_id"]: m.get("manual_type", "other") for m in equipment["manuals"]})
     started = time.monotonic()
     with output.open("a", encoding="utf-8") as handle, concurrent.futures.ProcessPoolExecutor(max_workers=args.workers, initializer=initialize, initargs=(str(args.root), str(cache))) as pool:
         for i, result in enumerate(pool.map(evaluate, selected, chunksize=8), 1):
