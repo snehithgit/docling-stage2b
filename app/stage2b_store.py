@@ -20,6 +20,15 @@ def utc_after(seconds: int | float) -> str:
     return (datetime.now(UTC) + timedelta(seconds=max(0, float(seconds)))).isoformat()
 
 
+def verification_counts(book: dict[str, Any]) -> dict[str, int]:
+    """Count current jobs across providers, with legacy payload compatibility."""
+    return {
+        status: int(book.get(status, int(book.get("pi5_" + status) or 0)
+                             + int(book.get("oneplus_" + status) or 0)) or 0)
+        for status in ("pending", "processing", "completed", "failed")
+    }
+
+
 class Stage2BStore:
     """Persistent verification queues for Pi5 and OnePlus.
 
@@ -1427,6 +1436,10 @@ class Stage2BStore:
                           SUM(CASE WHEN code='FULL_TECHNICAL_VISUAL' AND status='completed' THEN 1 ELSE 0 END) AS artifact_completed,
                           SUM(CASE WHEN code='FULL_TECHNICAL_VISUAL' AND status='failed' THEN 1 ELSE 0 END) AS artifact_failed,
                           SUM(CASE WHEN code='FULL_TECHNICAL_VISUAL' THEN 1 ELSE 0 END) AS artifact_total,
+                          SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending,
+                          SUM(CASE WHEN status='processing' THEN 1 ELSE 0 END) AS processing,
+                          SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS completed,
+                          SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed,
                           COUNT(*) AS total
                    FROM verification_jobs
                    WHERE is_current=1
