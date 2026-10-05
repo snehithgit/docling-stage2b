@@ -20,6 +20,23 @@ def _config(tmp_path: Path) -> AppConfig:
     )
 
 
+def test_status_snapshot_matches_scheduler_for_runner_and_pause(tmp_path: Path):
+    import time
+
+    registry = WorkerRegistry(_config(tmp_path).database_path)
+    item = registry.add_colab(name="Managed GPU")
+    wid = item["id"]
+    registry.update_colab(wid, {"enabled": True, "url": "https://example.trycloudflare.com", "runner_account_id": "acc1"})
+    registry.write_api_key(wid, "r" * 32)
+    for ready, paused, age in ((False, False, 0), (True, False, 0), (True, True, 0), (True, False, 60)):
+        registry.runner_status[wid] = {"ready": ready, "observed_at_epoch": time.time() - age}
+        registry.update_colab(wid, {"paused": paused})
+        status = registry.snapshot_with_key_status()
+        assert status["configured_colabs"] == registry.configured_colabs()
+        assert bool(status["configured_colabs"]) == (ready and not paused and age < 45)
+        assert status["key_status"][wid]["api_key_configured"] is True
+
+
 def test_worker_registry_supports_independent_local_and_multiple_colab_controls(tmp_path: Path):
     cfg = _config(tmp_path)
     registry = WorkerRegistry(cfg.database_path)

@@ -201,6 +201,8 @@ class WorkerRegistry:
             }
             if (
                 not item.get("remove_requested")
+                and not item.get("paused")
+                and (not item.get("runner_account_id") or item.get("runner_ready"))
                 and item.get("enabled")
                 and item.get("url")
                 and ready
