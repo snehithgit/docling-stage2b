@@ -29,3 +29,7 @@ No blanket re-OCR, human decision reset or deletion was performed. Live answer q
 ## Colab artifact readiness follow-up
 
 Book readiness and automatic finalization previously summed only Pi5 and OnePlus physical counters. Completed, processing, and failed artifact jobs claimed by Colab disappeared from those totals. Provider-independent current-job counts now drive book readiness, finalization blockers, and the library/book progress displays. Physical counters remain available for device-specific consumers. A SQLite regression test covers all four statuses for Colab artifact jobs.
+
+## Worker status consistency
+
+The optimized status snapshot counted stored endpoint credentials as eligible even when the runner was idle, its status was stale, or a worker was paused. It now applies the same runner freshness and pause rules as scheduler selection. Credentials remaining on disk no longer imply runtime availability. A regression compares both selection paths across these conditions.
