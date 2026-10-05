@@ -1,4 +1,5 @@
 from __future__ import annotations
+from contextlib import nullcontext
 
 import asyncio
 import hashlib
@@ -120,12 +121,20 @@ class ReviewAssistantStore:
     async def sync_candidate(self, postprocess_job_id: int, result_dir: str, entry: dict[str, Any], review_type: str) -> None:
         await self._run(self._sync_candidate_sync, postprocess_job_id, result_dir, entry, review_type)
 
-    def _sync_candidate_sync(self, postprocess_job_id: int, result_dir: str, entry: dict[str, Any], review_type: str) -> None:
+    async def sync_candidates(self, candidates) -> None:
+        await self._run(self._sync_candidates_batch_sync, candidates)
+
+    def _sync_candidates_batch_sync(self, candidates) -> None:
+        with self._conn() as conn:
+            for jid, result_dir, entry, review_type in candidates:
+                self._sync_candidate_sync(jid, result_dir, entry, review_type, conn)
+
+    def _sync_candidate_sync(self, postprocess_job_id: int, result_dir: str, entry: dict[str, Any], review_type: str, connection=None) -> None:
         sig = _signature(entry, review_type)
         entry_id = str(entry.get("entry_id") or "")
         if not entry_id:
             return
-        with self._conn() as conn:
+        with (nullcontext(connection) if connection is not None else self._conn()) as conn:
             if str(review_type).startswith("anomaly_"):
                 base_type = str(review_type).removeprefix("anomaly_")
                 evidence_sig = anomaly_evidence_signature(entry, base_type)
@@ -377,56 +386,80 @@ class ReviewAssistantService:
             path=Path(config.processed_dir)/Path(result_dir_name).name/"correction_ledger.json"
             candidates.append((jid, result_dir_name, path))
         ledgers = await asyncio.gather(*(asyncio.to_thread(_load_ledger_sync, path) for _, _, path in candidates))
+        pending_candidates = []
         for (jid, result_dir_name, _path), ledger in zip(candidates, ledgers):
             for entry in ledger.get("entries") or []:
                 if not isinstance(entry, dict): continue
                 if entry.get("status")=="superseded": continue
                 if entry.get("entry_type")=="text_correction" and not entry.get("human_verified") and str(entry.get("verification_verdict") or "").upper() in {"LIKELY_CORRUPT","UNCERTAIN"}:
-                    key=(jid,str(entry.get("entry_id")),"text"); valid.add(key); await self._store.sync_candidate(jid,result_dir_name,entry,"text")
+                    key=(jid,str(entry.get("entry_id")),"text"); valid.add(key); pending_candidates.append((jid,result_dir_name,entry,"text"))
             vision=[e for e in (ledger.get("entries") or []) if isinstance(e,dict) and e.get("entry_type")=="vision_enrichment" and e.get("status")!="superseded"]
             for entry in _authoritative_visual_subjects(vision):
                 if _vision_requires_human(entry):
-                    key=(jid,str(entry.get("entry_id")),"vision"); valid.add(key); await self._store.sync_candidate(jid,result_dir_name,entry,"vision")
+                    key=(jid,str(entry.get("entry_id")),"vision"); valid.add(key); pending_candidates.append((jid,result_dir_name,entry,"vision"))
 
             # Anomaly work is operator-triggered from the dedicated Anomaly
             # Review page. Do not auto-create anomaly jobs here. Manual anomaly
             # jobs use a "manual:" signature and retire_missing() intentionally
             # preserves them until the assigned Colab worker completes them.
+        await self._store.sync_candidates(pending_candidates)
         await self._store.retire_missing(valid)
         return True
 
-    async def _run_one(self, worker_id: str, allowed: set[str]) -> None:
+    async def _run_one(self, worker_id: str, allowed: set[str]) -> bool:
+        job=await self._store.claim_next(worker_id,allowed)
+        if not job: return False
+        started=time.monotonic()
         try:
-            job=await self._store.claim_next(worker_id,allowed)
-            if not job: return
-            started=time.monotonic()
-            try:
-                review_type=str(job["review_type"])
-                if review_type.startswith("anomaly_"):
-                    result=await self._worker.run_anomaly_review_job(
-                        worker_id=worker_id,
-                        postprocess_job_id=int(job["postprocess_job_id"]),
-                        entry_id=str(job["entry_id"]),
-                        review_type=review_type.removeprefix("anomaly_"),
-                        manual_requested=str(job.get("entry_signature") or "").startswith("manual:"),
-                    )
-                else:
-                    result=await self._worker.run_review_assistant_job(
-                        worker_id=worker_id, postprocess_job_id=int(job["postprocess_job_id"]),
-                        entry_id=str(job["entry_id"]), review_type=review_type,
-                    )
-                await self._store.mark_completed(int(job["id"]),result,time.monotonic()-started)
-                self._events.notify("review_assistant_job_completed")
-            except asyncio.CancelledError:
-                raise
-            except ReviewWorkerBusyError:
-                await self._store.defer_busy(int(job["id"]))
-                self._events.notify("review_assistant_provider_busy")
-            except Exception as exc:
-                await self._store.mark_retryable(int(job["id"]),exc,30)
-                self._events.notify("review_assistant_job_retry")
+            review_type=str(job["review_type"])
+            if review_type.startswith("anomaly_"):
+                result=await self._worker.run_anomaly_review_job(
+                    worker_id=worker_id,
+                    postprocess_job_id=int(job["postprocess_job_id"]),
+                    entry_id=str(job["entry_id"]),
+                    review_type=review_type.removeprefix("anomaly_"),
+                    manual_requested=str(job.get("entry_signature") or "").startswith("manual:"),
+                )
+            else:
+                result=await self._worker.run_review_assistant_job(
+                    worker_id=worker_id, postprocess_job_id=int(job["postprocess_job_id"]),
+                    entry_id=str(job["entry_id"]), review_type=review_type,
+                )
+            await self._store.mark_completed(int(job["id"]),result,time.monotonic()-started)
+            self._events.notify("review_assistant_job_completed")
+        except asyncio.CancelledError:
+            raise
+        except ReviewWorkerBusyError:
+            await self._store.defer_busy(int(job["id"]))
+            self._events.notify("review_assistant_provider_busy")
+            return False
+        except Exception as exc:
+            await self._store.mark_retryable(int(job["id"]),exc,30)
+            self._events.notify("review_assistant_job_retry")
+        return True
+
+    async def _drain_worker(self, worker_id: str) -> None:
+        try:
+            while not self._stop.is_set():
+                snapshot = await asyncio.to_thread(self._registry.snapshot, self._config_getter())
+                settings = snapshot.get("review") or {}
+                worker = next((w for w in snapshot.get("colab_workers", []) if w["id"] == worker_id), None)
+                if not settings.get("enabled") or not worker or not worker.get("enabled") or worker.get("paused") or worker.get("remove_requested") or (worker.get("runner_account_id") and not worker.get("runner_ready")):
+                    return
+                books = await self._stage2b_store.list_books()
+                keys = ("text_pending", "text_processing", "text_failed", "vision_pending", "vision_processing", "vision_failed", "artifact_pending", "artifact_processing", "artifact_failed")
+                if any(int(book.get(k) or 0) for book in books for k in keys):
+                    return
+                if f"colab:{worker_id}" in self._worker.dispatch_reservations:
+                    return
+                allowed = set()
+                if worker_id in settings.get("text_worker_ids", []): allowed.add("text")
+                if worker_id in settings.get("vision_worker_ids", []): allowed.add("vision")
+                if worker_id in settings.get("anomaly_worker_ids", []): allowed.update({"anomaly_text", "anomaly_vision", "anomaly_structural"})
+                if not allowed or not await self._run_one(worker_id, allowed):
+                    return
         finally:
-            self._active.pop(worker_id,None)
+            self._active.pop(worker_id, None)
 
     async def _loop(self) -> None:
         while not self._stop.is_set():
@@ -461,7 +494,7 @@ class ReviewAssistantService:
                             allowed.update({"anomaly_text","anomaly_vision","anomaly_structural"})
                         if not allowed:
                             continue
-                        self._active[wid]=asyncio.create_task(self._run_one(wid,allowed), name=f"review-assistant-{wid}")
+                        self._active[wid]=asyncio.create_task(self._drain_worker(wid), name=f"review-assistant-{wid}")
                 await asyncio.sleep(max(2,int(getattr(config,"stage2b_poll_interval_seconds",3))))
             except asyncio.CancelledError: raise
             except Exception:
