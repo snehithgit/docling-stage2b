@@ -485,3 +485,20 @@ def test_table_reference_with_no_raw_table_payload_is_ineligible():
     assert meta["content_type"] == "table_empty"
     assert meta["eligible"] is False
     assert "TABLE_EMPTY" in meta["warnings"]
+
+def test_preparation_query_ranks_isolation_instruction_above_connection_diagram(tmp_path):
+    from app.retrieval import search_indices
+    import json
+    path=tmp_path/'retrieval_index.jsonl'
+    common={'source_filename':'Board manual.pdf','postprocess_job_id':1,'headings':['Procedure for exchanging input board type 98.6.034.703'],'quality_score':100,'content_type':'prose'}
+    rows=[{**common,'chunk_id':'diagram','text':'Procedure for exchanging input board type 98.6.034.703. Connect adapters and configure voltage channels.'},{**common,'chunk_id':'safe','text':'Procedure for exchanging input board type 98.6.034.703. Switch off the power to the processor before disconnecting the board connectors.'}]
+    path.write_text('\n'.join(json.dumps(r) for r in rows))
+    result=search_indices([path],'Before replacing input board type 98.6.034.703, what must be isolated?',top_k=2)
+    assert result[0]['chunk_id']=='safe'
+
+def test_maintenance_task_distinguishes_changing_oil_from_checking_level():
+    from app.retrieval import procedure_task_evidence
+    question='How should the grab be positioned before changing its oil?'
+    change={'headings':['Oil change'],'text':'Set down the opened grab.'}
+    check={'headings':['Check oil level'],'text':'Close the grab to check oil level.'}
+    assert procedure_task_evidence(change,question)>procedure_task_evidence(check,question)

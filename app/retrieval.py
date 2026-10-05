@@ -29,7 +29,7 @@ _DEFINITION_INTENT_RE = re.compile(
     re.IGNORECASE,
 )
 _PROCEDURE_INTENT_RE = re.compile(
-    r"\b(?:how\s+(?:do|to)|procedure|check|adjust|test|measure|inspect|replace|remove|install|change|calibrat(?:e|ion)|zero\s+set(?:ting)?)\b",
+    r"\b(?:how\s+(?:do|to)|procedure|check(?:ing)?|adjust(?:ing)?|test(?:ing)?|measure|inspect(?:ing)?|replac(?:e|ing)|remov(?:e|ing)|install(?:ing)?|chang(?:e|ing)|exchang(?:e|ing)|calibrat(?:e|ion)|zero\s+set(?:ting)?)\b",
     re.IGNORECASE,
 )
 _TROUBLESHOOT_INTENT_RE = re.compile(
@@ -305,6 +305,26 @@ def _query_profile(query: str) -> dict[str, Any]:
     }
 
 
+def procedure_task_evidence(row: dict[str, Any], query: str) -> float:
+    """Match an explicit maintenance task rather than generic equipment context."""
+    text = str(row.get("text") or "")
+    if re.search(r"\bisolat(?:e|ed|ion)\b", query, re.I) and re.search(
+        r"\b(?:switch(?:ed)?\s+off|power\s+off|disconnect\s+(?:the\s+)?(?:power|battery)|shut\s+down)\b", text, re.I
+    ):
+        return 18.0
+    task = re.search(r"\b(chang(?:e|ing)|replac(?:e|ing)|clean(?:ing)?|inspect(?:ing)?|adjust(?:ing)?)\s+([^?.!]+)", query, re.I)
+    if not task:
+        return 0.0
+    action = task.group(1).lower()
+    roots = ("chang", "replac", "exchang") if action.startswith(("chang", "replac")) else (re.sub(r"ing$", "", action),)
+    subjects = [t for t in _tokens(task.group(2))[:6] if t not in _STOPWORDS | {"its", "my", "our", "type", "before", "after"}]
+    headings = " ".join(str(h) for h in row.get("headings", []))
+    heading_terms = set(_tokens(headings))
+    if subjects and any(re.search(r"\b" + root, headings, re.I) for root in roots) and any(t in heading_terms for t in subjects):
+        return 14.0
+    return 0.0
+
+
 def _query_feature_score(row: dict[str, Any], query: str) -> float:
     """Generic reranking features independent of any manufacturer or book."""
     if not query:
@@ -320,7 +340,7 @@ def _query_feature_score(row: dict[str, Any], query: str) -> float:
     definition = bool(profile["definition"])
     function_intent = bool(profile["function_intent"])
     action_request = bool(profile["action_request"])
-    score = 0.0
+    score = procedure_task_evidence(row, query)
 
     # Subject first: a perfect procedure for the wrong equipment should not win.
     if subject_terms:
