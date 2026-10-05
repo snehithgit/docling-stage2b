@@ -649,7 +649,7 @@ def _grounding_words(text: str) -> set[str]:
 
 def _critical_tokens(text: str) -> list[str]:
     values: list[str] = []
-    token_text = str(text or "")
+    token_text = str(text or "").translate({ord(char): "-" for char in "‐‑‒–—−"})
     # Multi-item lists must tokenize identically with or without spaces after
     # commas. Preserve genuine thousands grouping and decimal comma values.
     def numeric_list(match):
@@ -662,7 +662,7 @@ def _critical_tokens(text: str) -> list[str]:
         token = re.sub(r"\s+", "", match.group(0)).casefold()
         if token and token not in values:
             values.append(token)
-    for match in re.finditer(r"\b(counter[- ]?clockwise|anti[- ]?clockwise|clockwise|CCW|CW)\b", str(text or ""), re.I):
+    for match in re.finditer(r"\b(counter[- ]?clockwise|anti[- ]?clockwise|clockwise|CCW|CW)\b", token_text, re.I):
         word = re.sub(r"[- ]", "", match.group(0)).casefold()
         token = "rotation:ccw" if word in {"counterclockwise", "anticlockwise", "ccw"} else "rotation:cw"
         if token not in values:
@@ -715,6 +715,10 @@ def claim_support_audit(answer: str, sources: list[dict[str, Any]]) -> dict[str,
     insufficient = _NOT_ENOUGH.casefold() in str(answer or "").casefold()
     claims: list[dict[str, Any]] = []
     for segment in _claim_segments(answer):
+        # A standalone markdown procedure title makes no factual assertion.
+        # Bold factual statements remain audited, including embedded numbers.
+        if re.fullmatch(r"\*\*(?:procedure|steps)\s+(?:for|to)\s+[^.!?]+\*\*:?", segment, re.IGNORECASE) and not re.search(r"\b(?:is|are|must|should|uses?|requires?)\b", segment, re.IGNORECASE):
+            continue
         labels = [label.upper() for label in _CITATION_RE.findall(segment)]
         clean = _CITATION_RE.sub("", segment)
         clean = re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", clean).strip()

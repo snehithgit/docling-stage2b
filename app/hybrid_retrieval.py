@@ -328,6 +328,36 @@ def rrf_fuse(lexical: list[dict[str, Any]], vector: list[dict[str, Any]], *, rrf
     return output
 
 
+def _apply_exact_phrase_guard(fused: list[dict[str, Any]], lexical: list[dict[str, Any]], query: str, *, rrf_k: int = 60) -> list[dict[str, Any]]:
+    """Preserve a dominant exact phrase that vector candidate truncation misses."""
+    if not fused or len(lexical) < 2:
+        return fused
+    first, second = lexical[:2]
+    if _row_key(first) == _row_key(fused[0]):
+        return fused
+    if float(first.get("score") or 0) < max(20.0, 2.0 * float(second.get("score") or 0)):
+        return fused
+    words = re.findall(r"[a-z0-9]+", str(query or "").casefold())
+    body = " ".join(re.findall(r"[a-z0-9]+", str(first.get("text") or "").casefold()))
+    other = " ".join(re.findall(r"[a-z0-9]+", str(fused[0].get("text") or "").casefold()))
+    phrases = [" ".join(words[i:i+4]) for i in range(max(0, len(words)-3))]
+    unique = [phrase for phrase in phrases if len(set(_tokens(phrase))) >= 2 and phrase in body and phrase not in other]
+    if not unique:
+        return fused
+    key = _row_key(first)
+    promoted = next((dict(row) for row in fused if _row_key(row) == key), dict(first))
+    if "hybrid_score" not in promoted:
+        lexical_rank = int(first.get("rank") or 1)
+        promoted.update(score=round(1.0 / (max(1, int(rrf_k)) + lexical_rank), 9), lexical_score=first.get("score"), lexical_rank=lexical_rank, vector_rank=None)
+        promoted["hybrid_score"] = promoted["score"]
+    promoted["retrieval_method"] = "hybrid_rrf"
+    promoted["exact_phrase_guard"] = True
+    output = [promoted] + [dict(row) for row in fused if _row_key(row) != key]
+    for rank, row in enumerate(output, 1):
+        row["rank"] = rank
+    return output
+
+
 def _apply_structured_identifier_guard(fused: list[dict[str, Any]], lexical: list[dict[str, Any]], query: str) -> list[dict[str, Any]]:
     if not fused or not lexical:
         return fused
@@ -1182,6 +1212,7 @@ def hybrid_search_equipment(
         lexical[:candidate_depth], vector[:candidate_depth],
         rrf_k=max(1, int(rrf_k)), top_k=candidate_depth,
     )
+    fused_candidates = _apply_exact_phrase_guard(fused_candidates, lexical[:candidate_depth], query, rrf_k=rrf_k)
     fused_candidates = _apply_structured_identifier_guard(fused_candidates, lexical[:candidate_depth], query)
     fused_candidates = _apply_semantic_intent_tiebreak(fused_candidates, semantic_intent)
     fused_candidates = diversify_results(fused_candidates, top_k=max(1, int(top_k)))
