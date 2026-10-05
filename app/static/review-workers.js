@@ -62,6 +62,7 @@ async function loadStatus(){
     $('review-processing').textContent=(c.text_processing||0)+(c.vision_processing||0)+anomalyProcessing;
     $('review-failed').textContent=Number(c.failed||0).toLocaleString();
     $('review-completed').textContent=(c.text_completed||0)+(c.vision_completed||0)+(c.anomaly_text_completed||0)+(c.anomaly_vision_completed||0)+(c.anomaly_structural_completed||0);
+    $('review-discarded').textContent=Number(c.discarded||0).toLocaleString();
     const rows=(st.jobs||[]).map(j=>`<tr><td data-label="Type">${esc(j.review_type)}</td><td data-label="Book"><a href="/book?job=${Number(j.postprocess_job_id)}">#${Number(j.postprocess_job_id)}</a></td><td data-label="Entry"><code>${esc(j.entry_id)}</code></td><td data-label="Status"><span class="status ${esc(j.status)}">${esc(j.status)}</span></td><td data-label="Worker">${esc(j.claimed_by||'—')}</td><td data-label="Attempt">${Number(j.attempt_count||0)}</td><td data-label="Last retry">${esc(j.error_message||j.error_type||'—')}</td><td data-label="Time">${fmt(j.processing_seconds)}</td><td data-label="Action">${j.status==='failed'?`<button class="mini-action" type="button" data-review-retry="${Number(j.id)}">Retry review</button>`:'—'}</td></tr>`).join('')||'<tr><td colspan="9" class="empty-state">No review-assistant jobs yet.</td></tr>';
     const body=$('review-jobs');
     if(body.dataset.signature!==rows){body.innerHTML=rows;body.dataset.signature=rows;}

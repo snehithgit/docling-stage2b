@@ -79,7 +79,9 @@ def structural_signature(entry: dict[str, Any]) -> str:
 
 def save_structural_audit(result_dir: Path, entry: dict[str, Any], result: dict[str, Any]) -> None:
     path = Path(result_dir) / AUDIT_FILE
-    payload = load_json(path)
+    payload = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    if not isinstance(payload, dict) or not isinstance(payload.get("reviews", {}), dict):
+        raise ValueError("Structural audit ledger is invalid; refusing to overwrite it")
     reviews = payload.setdefault("reviews", {})
     old = reviews.get(entry["entry_id"]) or {}
     history = list(old.get("anomaly_review_history") or [])
@@ -217,7 +219,7 @@ async def run_structural_audit(worker, *, worker_id: str, postprocess_job_id: in
                            "table_proposals": proposals, "evidence_scope": context["evidence_scope"]})
         verdicts = {a["verdict"] for a in audits}
         verdict = next(v for v in ("NEEDS_HUMAN", "REPAIR_SUGGESTED", "ANOMALY_CONFIRMED", "CONFIRM_CURRENT") if v in verdicts)
-        result = {"schema": "marine-structural-anomaly-review/v1", "review_type": "structural", "worker_id": worker_id,
+        result = {"schema": "marine-structural-anomaly-review/v1", "review_type": "structural", "worker_id": worker_id, "postprocess_job_id": postprocess_job_id, "entry_id": entry_id,
                   "worker_name": selected.get("name") or worker_id, "model": selected.get("model"), "provider": provider,
                   "manual_requested": manual_requested, "evidence_signature": signature, "verdict": verdict,
                   "reason": "\n".join(a["reason"] for a in audits), "page_audits": audits,
@@ -232,6 +234,9 @@ async def run_structural_audit(worker, *, worker_id: str, postprocess_job_id: in
                 return result
             result["stored"] = True
             await asyncio.to_thread(save_structural_audit, result_dir, current, result)
+            saved = json.loads((result_dir / AUDIT_FILE).read_text(encoding="utf-8"))
+            if saved.get("reviews", {}).get(entry_id, {}).get("anomaly_review") != result:
+                raise ValueError("Structural audit save could not be verified for the target entry")
         worker._events.notify("structural_anomaly_review_completed")
         return result
     finally:
