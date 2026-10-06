@@ -16,7 +16,7 @@ from .groq_quota import CloudQuotaPausedError, GroqQuotaGuard
 from .verifier_clients import OpenAICompatibleVerifier
 
 
-PROVIDERS = {"pi5", "oneplus", "groq"}
+PROVIDERS = {"pi5", "oneplus", "groq", "colab"}
 
 _CROSS_BOOK_QUERY_RE = re.compile(
     r"\b(compare|comparison|difference(?:s)?|across\s+(?:books|manuals)|all\s+(?:books|manuals)|"
@@ -585,6 +585,22 @@ async def _generate_local(
     )
 
 
+async def _generate_colab(config, question, sources, worker, api_key) -> GenerationResult:
+    if not worker or not str(worker.get("url") or "").strip() or not api_key:
+        raise ValueError("A reserved, configured Colab worker is required")
+    client = OpenAICompatibleVerifier(str(worker["url"]),
+        timeout_seconds=max(30, int(config.colab_timeout_seconds)), api_key=api_key)
+    started = time.monotonic()
+    raw = await client.chat_text(_GROUNDED_SYSTEM, build_grounded_user_prompt(question, sources),
+        model=str(worker.get("model") or "koboldcpp"), max_tokens=int(config.rag_answer_local_max_tokens))
+    answer = completion_text(raw)
+    if not answer:
+        raise RuntimeError("Colab returned an empty answer")
+    return GenerationResult("colab", "Colab · " + str(worker.get("name") or worker["id"]),
+        str(raw.get("model") or worker.get("model") or "koboldcpp"), answer,
+        response_usage(raw), finish_reason(raw), time.monotonic() - started)
+
+
 async def _generate_groq(
     config: AppConfig,
     question: str,
@@ -948,10 +964,12 @@ async def generate_grounded_answer(
     sources: list[dict[str, Any]],
     *,
     quota_guard: GroqQuotaGuard | None = None,
+    colab_worker: dict[str, Any] | None = None,
+    colab_api_key: str = "",
 ) -> dict[str, Any]:
     selected = str(provider or "").strip().lower()
     if selected not in PROVIDERS:
-        raise ValueError("Generator must be pi5, oneplus, or groq")
+        raise ValueError("Generator must be pi5, oneplus, groq, or colab")
     if not sources:
         raise ValueError("At least one retrieved source is required")
     # A nearby model number is not evidence about the model the engineer asked
@@ -966,7 +984,9 @@ async def generate_grounded_answer(
         payload.update(citation_audit(_NOT_ENOUGH, sources))
         payload.update(model_called=False, missing_question_identifiers=missing)
         return payload
-    if selected == "groq":
+    if selected == "colab":
+        result = await _generate_colab(config, question, sources, colab_worker, colab_api_key)
+    elif selected == "groq":
         result = await _generate_groq(config, question, sources, quota_guard)
     else:
         result = await _generate_local(selected, config, question, sources)

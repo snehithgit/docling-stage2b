@@ -102,7 +102,7 @@ def test_generate_local_uses_selected_provider_without_fallback(monkeypatch):
 def test_generate_rejects_unknown_provider():
     config = AppConfig()
     config.validate()
-    with pytest.raises(ValueError, match="pi5, oneplus, or groq"):
+    with pytest.raises(ValueError, match="pi5, oneplus, groq, or colab"):
         asyncio.run(generate_grounded_answer("automatic", config, "Question?", prepare_sources(_rows(), max_sources=1)))
 
 

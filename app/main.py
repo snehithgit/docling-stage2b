@@ -557,7 +557,7 @@ class RetrievalSearchRequest(BaseModel):
 
 class RetrievalGenerateRequest(BaseModel):
     query: str = Field(min_length=2, max_length=1000)
-    provider: str = Field(pattern="^(pi5|oneplus|groq)$")
+    provider: str = Field(pattern="^(pi5|oneplus|groq|colab)$")
     top_k: int = Field(default=5, ge=1, le=10)
     postprocess_job_id: int | None = None
     equipment_id: str | None = Field(default=None, max_length=120)
@@ -5808,10 +5808,25 @@ async def _execute_retrieval_generation(update: RetrievalGenerateRequest) -> dic
             raise HTTPException(status_code=409, detail="Retrieved technical evidence needs source validation or visual parsing before it can support an answer. No model was called.")
         raise HTTPException(status_code=404, detail="No retrieved source chunks are available for answer generation.")
     try:
-        async with runtime.stage2b_worker.device_lock(update.provider):
-            generated = await generate_grounded_answer(
-                update.provider, runtime.config, update.query, sources, quota_guard=runtime.groq_quota
-            )
+        if update.provider == "colab":
+            owner = "rag-answer:" + uuid.uuid4().hex
+            worker = await runtime.stage2b_worker.reserve_colab_answer_worker(owner)
+            provider_key = "colab:" + str(worker["id"])
+            try:
+                api_key = await asyncio.to_thread(runtime.worker_registry.read_api_key, str(worker["id"]))
+                async with runtime.stage2b_worker.device_lock(provider_key):
+                    generated = await generate_grounded_answer(
+                        "colab", runtime.config, update.query, sources,
+                        colab_worker=worker, colab_api_key=api_key)
+                generated["worker_id"] = worker["id"]
+                generated["worker_name"] = worker.get("name") or worker["id"]
+            finally:
+                await runtime.stage2b_worker._release_provider(provider_key, owner)
+        else:
+            async with runtime.stage2b_worker.device_lock(update.provider):
+                generated = await generate_grounded_answer(
+                    update.provider, runtime.config, update.query, sources, quota_guard=runtime.groq_quota
+                )
     except asyncio.CancelledError:
         # Cancellation is a real backend cancellation. It propagates through
         # httpx/stream readers and releases the physical-provider lock.
