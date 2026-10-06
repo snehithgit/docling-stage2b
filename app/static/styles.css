@@ -1286,3 +1286,11 @@ button.mini-action { cursor: pointer; }
 }
 
 #ar-results pre { max-height: 320px; max-width: 100%; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; font-size: 11px; }
+
+.v5-readiness-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:12px; margin:16px 0; }
+.v5-readiness-card { border:1px solid #dedee8; border-radius:14px; padding:16px; background:#fff; }
+.v5-readiness-card h3 { font-size:14px; margin:0 0 10px; }
+.v5-readiness-card strong { font-size:16px; }
+.v5-readiness-card p { font-size:13px; line-height:1.5; margin:10px 0 0; color:#666878; }
+.v5-readiness-card.current { border-top:3px solid #249b77; }
+.v5-readiness-card.attention { border-top:3px solid #bb8b25; }

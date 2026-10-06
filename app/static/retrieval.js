@@ -88,19 +88,20 @@
       const id = value.slice('equipment:'.length);
       const group = (retrievalStatus.equipment || []).find(item => item.equipment_id === id);
       if (!group) return null;
-      return {kind:'equipment', id, label:group.name || 'Machine', searchable:Boolean(group.searchable), hybridAllowed:true, hybridReady:Boolean(group.hybrid_ready), manualCount:Number(group.manual_count || 0), hybridRows:Number(group.hybrid_rows || 0)};
+      return {kind:'equipment', id, label:group.name || 'Machine', readiness:group.readiness, searchable:Boolean(group.searchable), hybridAllowed:true, hybridReady:Boolean(group.hybrid_ready), manualCount:Number(group.manual_count || 0), hybridRows:Number(group.hybrid_rows || 0)};
     }
     if (value.startsWith('book:')) {
       const job = Number(value.slice('book:'.length));
       const book = (retrievalStatus.books || []).find(item => Number(item.postprocess_job_id) === job);
       if (!book) return null;
-      return {kind:'book', job, label:cleanBook(book.source_filename), searchable:Boolean(book.index_ready), hybridAllowed:false, hybridReady:false, manualCount:1};
+      return {kind:'book', job, label:cleanBook(book.source_filename), readiness:book.readiness, searchable:Boolean(book.index_ready), hybridAllowed:false, hybridReady:false, manualCount:1};
     }
     return null;
   }
 
   function updateScopeControls({announceSwitch = true} = {}) {
     const state = selectedScopeStatus();
+    window.EvidenceReadiness?.render($('retrieval-readiness'), state?.readiness);
     const hybridOption = [...$('retrieval-mode').options].find(option => option.value === 'hybrid');
     const lexicalOption = [...$('retrieval-mode').options].find(option => option.value === 'lexical');
     const searchButton = $('retrieval-search-form').querySelector('button[type="submit"]');

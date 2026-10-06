@@ -1,3 +1,9 @@
+## V5.0.0 — Evidence foundation (phase 1 of 10)
+
+Books and machine search now report correction readiness, search readiness and detected evidence coverage separately. Source references alone do not certify an extraction as verified. Existing technical ledgers can migrate with exact backups while preserving human decisions, originals, indexes and worker settings.
+
+See [V5 foundation and migration](docs/v5-foundation.md). The remaining phases cover evidence eligibility in answers, structured parsing, diagrams, retrieval evaluation and UI simplification. Historical release notes below describe earlier behavior.
+
 ## 2026.09.30.40.11AH5 — Dedicated Anomaly Review workspace
 
 - Adds a dedicated **Anomaly Review** sidebar page for suspicious Text/Vision ledger states.

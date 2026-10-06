@@ -80,6 +80,7 @@
     const visionCloudPaused = stage2bStatus?.vision_provider?.provider === 'groq' && stage2bStatus?.vision_provider?.quota?.paused === true;
     const quotaPaused = textCloudPaused || visionCloudPaused;
     const pipeline = book.pipeline || {};
+    window.EvidenceReadiness?.render($('book-readiness'), book.readiness);
     const stage2cBuilt = pipeline.stage2c_ready === true;
     const chunksBuilt = pipeline.stage3_ready === true;
     const machineAssigned = pipeline.machine_assigned === true;
@@ -87,7 +88,7 @@
 
     $('book-title').textContent = String(book.source_filename || 'Book').replace(/\.zip$/i,'');
     $('book-subtitle').textContent = `${book.source_kind === 'converted_folder' ? 'Imported Docling ZIP' : 'Converted source'} · Raw Docling output remains immutable.`;
-    $('book-status-tag').textContent = machineEmbeddingReady ? 'Machine RAG ready' : chunksBuilt && !machineAssigned ? 'Assign machine next' : chunksBuilt ? 'Machine embeddings next' : stage2cBuilt ? 'Stage 3 next' : quotaPaused && (c.pending || c.processing) ? 'Cloud quota paused' : c.processing ? 'Verification running' : stage2bDone ? 'Auto finalizing' : 'In workflow';
+    $('book-status-tag').textContent = machineEmbeddingReady ? 'Machine search ready' : chunksBuilt && !machineAssigned ? 'Assign machine next' : chunksBuilt ? 'Machine embeddings next' : stage2cBuilt ? 'Stage 3 next' : quotaPaused && (c.pending || c.processing) ? 'Cloud quota paused' : c.processing ? 'Verification running' : stage2bDone ? 'Auto finalizing' : 'In workflow';
     $('book-status-tag').className = `workflow-tag ${stage2bFailed ? 'attention' : ''}`;
     const deleteButton = $('delete-book-button');
     if (deleteButton) {
