@@ -85,7 +85,7 @@
   }
 
   async function refresh() {
-    if (loading || document.visibilityState !== 'visible') return;
+    if (loading || (document.visibilityState && document.visibilityState !== 'visible')) return;
     loading = true;
     try {
       const response = await fetch('/api/documents', {cache:'no-store'});
@@ -117,10 +117,14 @@
   const refreshTimer = setInterval(() => {
     if (!window.DoclingUI?.shouldDeferRefresh?.()) refresh();
   }, 30000);
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && !window.DoclingUI?.shouldDeferRefresh?.()) refresh();
-  });
-  window.addEventListener('pagehide', () => clearInterval(refreshTimer), {once:true});
+  if (typeof document.addEventListener === 'function') {
+    document.addEventListener('visibilitychange', () => {
+      if ((!document.visibilityState || document.visibilityState === 'visible') && !window.DoclingUI?.shouldDeferRefresh?.()) refresh();
+    });
+  }
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('pagehide', () => clearInterval(refreshTimer), {once:true});
+  }
   document.querySelectorAll('[data-summary-filter]').forEach(card => card.addEventListener('click', () => {
     $('book-filter').value = card.dataset.summaryFilter || 'all';
     render();
