@@ -85,7 +85,7 @@
   }
 
   async function refresh() {
-    if (loading) return;
+    if (loading || document.visibilityState !== 'visible') return;
     loading = true;
     try {
       const response = await fetch('/api/documents', {cache:'no-store'});
@@ -112,7 +112,15 @@
   $('book-search').addEventListener('input', render);
   $('book-filter').addEventListener('change', render);
   refresh();
-  setInterval(() => { if (!window.DoclingUI?.shouldDeferRefresh?.()) refresh(); }, 8000);
+  // /api/documents performs full per-book freshness and readiness checks. Keep
+  // the library current without continuously re-running that expensive work.
+  const refreshTimer = setInterval(() => {
+    if (!window.DoclingUI?.shouldDeferRefresh?.()) refresh();
+  }, 30000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && !window.DoclingUI?.shouldDeferRefresh?.()) refresh();
+  });
+  window.addEventListener('pagehide', () => clearInterval(refreshTimer), {once:true});
   document.querySelectorAll('[data-summary-filter]').forEach(card => card.addEventListener('click', () => {
     $('book-filter').value = card.dataset.summaryFilter || 'all';
     render();
