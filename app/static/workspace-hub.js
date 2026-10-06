@@ -9,7 +9,7 @@
   }
 
   async function refresh() {
-    if (busy || document.visibilityState !== 'visible') return;
+    if (busy || (document.visibilityState && document.visibilityState !== 'visible')) return;
     busy = true;
     try {
       // Hub pages only need worker/review activity. Avoid /api/documents here:
@@ -37,8 +37,12 @@
 
   refresh();
   const timer = setInterval(refresh, 12000);
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') refresh();
-  });
-  window.addEventListener('pagehide', () => clearInterval(timer), {once:true});
+  if (typeof document.addEventListener === 'function') {
+    document.addEventListener('visibilitychange', () => {
+      if (!document.visibilityState || document.visibilityState === 'visible') refresh();
+    });
+  }
+  if (typeof window?.addEventListener === 'function') {
+    window.addEventListener('pagehide', () => clearInterval(timer), {once:true});
+  }
 })();
