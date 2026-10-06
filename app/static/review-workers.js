@@ -11,6 +11,12 @@ let settingsInFlight=false;
 
 function markDirty(){settingsDirty=true;$('review-unsaved').hidden=false;}
 function clearDirty(){settingsDirty=false;$('review-unsaved').hidden=true;}
+function schedulerState(st, review){
+  if (!review?.enabled) return 'Review dispatch stopped · pending jobs preserved';
+  if (!st.machine_work_complete) return 'Waiting for primary verification';
+  if ((st.active_workers || []).length) return `Reviewing on ${st.active_workers.length} worker(s)`;
+  return 'Review dispatch enabled · waiting for eligible jobs and workers';
+}
 function workerState(w){return w.paused?'Stopped':w.runner_account_id&&!w.runner_ready?'Waiting':w.active?'Busy':w.connection_configured?'Ready':'Needs setup';}
 function refreshWorkerReadiness(current){for(const w of current){const badge=$(`worker-readiness-${w.id}`),reason=$(`worker-reason-${w.id}`);if(badge){badge.textContent=workerState(w);badge.className=`mode-badge ${workerState(w)==='Waiting'||w.paused?'paused':'auto'}`;}if(reason)reason.textContent=w.runner_account_id&&!w.runner_ready?(w.runner_status?.waiting_reason||'Runner status missing or stale'):w.active?'Processing a request':w.runner_status?.warning||'Available for assigned review queues';}}
 function renderAssignments(){
@@ -67,8 +73,9 @@ async function loadStatus(){
     const body=$('review-jobs');
     if(body.dataset.signature!==rows){body.innerHTML=rows;body.dataset.signature=rows;}
     $('review-worker-state').classList.add('ready');
-    $('review-worker-state').innerHTML='<span class="indicator"></span><span>Review scheduler ready</span>';
-  }catch(e){feedback(e.message,'error')}
+    $('review-worker-state').textContent=schedulerState(st,pool.review);
+    $('review-worker-state').classList.toggle('ready',!!pool.review?.enabled);
+  }catch(e){$('review-worker-state').classList.remove('ready');$('review-worker-state').textContent='Status unavailable · last displayed queue may be stale';feedback(e.message,'error')}
   finally{statusInFlight=false}
 }
 async function refresh(){

@@ -4,6 +4,7 @@
   let books = [];
   let last = '';
   let loading = false;
+  let refreshFailed = false;
 
   const deletedMessage = sessionStorage.getItem('book-delete-message');
   if (deletedMessage) {
@@ -35,7 +36,7 @@
     if (pipeline.next_stage === 'stage3') return {code:'Chunk', label:'Stage 3 chunks rebuilding', tone:'active', next:'Open'};
     if (pipeline.next_stage === 'assign_machine') return {code:'Machine', label:'Assign manual to its machine', tone:'attention', next:'Open'};
     if (pipeline.next_stage === 'machine_embedding') return {code:'Embed', label:pipeline.machine_name ? `${pipeline.machine_name} embeddings rebuilding` : 'Machine embeddings rebuilding', tone:'active', next:'Open'};
-    if (pipeline.next_stage === 'rag_ready') return {code:'Ready', label:pipeline.machine_name ? `${pipeline.machine_name} RAG ready` : 'Machine RAG ready', tone:'done', next:'Open', ragReady:true};
+    if (pipeline.next_stage === 'rag_ready') return {code:'Ready', label:pipeline.machine_name ? `${pipeline.machine_name} search available` : 'Search available', tone:'done', next:'Open', ragReady:true};
     return {code:'Pipeline', label:'Checking next stage', tone:'active', next:'Open'};
   }
 
@@ -90,6 +91,7 @@
       const response = await fetch('/api/documents', {cache:'no-store'});
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || 'Could not load books');
+      if (refreshFailed) { $('workflow-feedback').hidden = true; refreshFailed = false; }
       const signature = JSON.stringify(data);
       if (signature !== last) {
         books = data.documents || [];
@@ -99,7 +101,8 @@
     } catch (error) {
       const feedback = $('workflow-feedback');
       feedback.hidden = false;
-      feedback.textContent = error.message;
+      refreshFailed = true;
+      feedback.textContent = `Library status unavailable. Displayed books may be stale. ${error.message}`;
       feedback.className = 'status-message error';
     } finally {
       loading = false;
@@ -110,9 +113,8 @@
   $('book-filter').addEventListener('change', render);
   refresh();
   setInterval(() => { if (!window.DoclingUI?.shouldDeferRefresh?.()) refresh(); }, 8000);
-})();
-
   document.querySelectorAll('[data-summary-filter]').forEach(card => card.addEventListener('click', () => {
     $('book-filter').value = card.dataset.summaryFilter || 'all';
     render();
   }));
+})();
