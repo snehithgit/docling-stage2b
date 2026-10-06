@@ -72,7 +72,7 @@
 })();
 
 (() => {
-  const version = "5.0.7.2";
+  const version = "5.0.8";
   const sidebar = document.querySelector('.sidebar');
   if (!sidebar) return;
   const badge = document.createElement('div');
@@ -160,11 +160,11 @@
     '/add-book': ['Add a book', 'Upload a document or give a public URL. The source is stored in the managed input folder and registered with the normal conversion pipeline automatically.', 'Add one book'],
     '/convert': ['Advanced one-off conversion', 'This tool produces a standalone Docling ZIP and does not register a pipeline book. Use Add book for normal manuals.', 'Run one-off conversion'],
     '/queue': ['Conversion queue & settings', 'Start or monitor managed conversion jobs here. Stage 2A begins after Docling conversion completes.', 'Start or inspect the queue'],
-    '/book': ['Sequential book pipeline', 'Follow Convert → Analyze → Verify → Finalize → Chunk. Failed or stale upstream stages block every downstream stage.', 'Complete the highlighted stage'],
+    '/book': ['Sequential book pipeline', 'Follow Convert → Analyze → Verify → Finalize → Chunk → Embed → Search. Failed or stale upstream stages block every downstream stage.', 'Complete the highlighted stage'],
     '/verification': ['Stage 2B verification', 'Run and retry verification here. Physical worker configuration and Artifact participation live on the Workers page.', 'Clear pending and failed checks'],
     '/workers': ['Inference workers', 'Stop/resume each physical device independently, manage multiple Colab workers, and choose Artifact sweep participants.', 'Configure worker participation'],
-    '/review-workers': ['AI review workers', 'After Text, Vision, and Artifact machine work finishes, assigned Colab workers can prepare second-opinion suggestions for the human review queue. Human decisions remain authoritative.', 'Assign review workers'],
-    '/anomaly-review': ['Anomaly review', 'Inspect suspicious Text/Vision states and request Colab audits individually or as a batch, including after human review.', 'Inspect anomaly results'],
+    '/review-workers': ['AI review workers', 'Assign Colab workers and enable review dispatch here. AI reviews prepare suggestions; they do not apply human corrections. Existing human decisions remain authoritative.', 'Assign review workers'],
+    '/anomaly-review': ['Anomaly review', 'Detected anomalies enter the review queue automatically. Request another Colab audit when you want to re-review a human decision; the decision is preserved.', 'Inspect anomaly results'],
     '/artifact-audit': ['Technical visual audit', 'Inspect technical pictures produced by verification. Rerunning a visual verification makes downstream Stage 2C/Stage 3/machine embeddings stale.', 'Resolve visual evidence'],
     '/text-audit': ['Text verification audit', 'Inspect verifier decisions and source-image transcription. Human corrections take precedence and trigger downstream rebuilding.', 'Resolve questionable text'],
     '/vision-audit': ['Vision evidence audit', 'Review what the vision verifier extracted before it becomes RAG visual evidence.', 'Confirm evidence quality'],

@@ -4,8 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>My books · Docling Auto-Convert</title>
-<link rel="stylesheet" href="/assets/styles.css?v=5.0.7.2" />
-<link rel="stylesheet" href="/assets/workflow.css?v=5.0.7.2" />
+<link rel="stylesheet" href="/assets/styles.css?v=5.0.8" />
+<link rel="stylesheet" href="/assets/workflow.css?v=5.0.8" />
 </head>
 <body class="ui29">
 <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -48,7 +48,7 @@
       <button class="ui29-summary-card" type="button" data-summary-filter="all"><span>Books</span><strong id="summary-total">0</strong></button>
       <button class="ui29-summary-card" type="button" data-summary-filter="attention"><span>Needs attention</span><strong id="summary-attention">0</strong></button>
       <button class="ui29-summary-card" type="button" data-summary-filter="active"><span>In progress</span><strong id="summary-active">0</strong></button>
-      <button class="ui29-summary-card" type="button" data-summary-filter="done"><span>Ready</span><strong id="summary-ready">0</strong></button>
+      <button class="ui29-summary-card" type="button" data-summary-filter="done"><span>Search available</span><strong id="summary-ready">0</strong></button>
     </section>
 
     <div id="workflow-feedback" role="status" aria-live="polite" class="status-message" hidden></div>
@@ -61,7 +61,7 @@
         </div>
         <div class="ui29-filter-row">
           <label class="workflow-search"><span class="visually-hidden">Find a book</span><input type="search" id="book-search" placeholder="Search books" /></label>
-          <label><span class="visually-hidden">Filter books</span><select id="book-filter"><option value="all">All books</option><option value="attention">Needs attention</option><option value="active">In progress</option><option value="done">Ready</option></select></label>
+          <label><span class="visually-hidden">Filter books</span><select id="book-filter"><option value="all">All books</option><option value="attention">Needs attention</option><option value="active">In progress</option><option value="done">Search available</option></select></label>
         </div>
       </div>
       <div id="book-list" class="ui29-book-list" aria-label="Books"><p class="empty-state">Loading your library…</p></div>
@@ -70,12 +70,12 @@
     <details class="ui29-details ui29-help-details">
       <summary>How the pipeline works</summary>
       <div class="ui29-details-body ui29-stage-line">
-        <span>Convert</span><b>→</b><span>Analyze</span><b>→</b><span>Verify</span><b>→</b><span>Finalize</span><b>→</b><span>Chunk</span>
-        <p>Open any book to see its current stage and the single next action. Raw Docling files stay unchanged; corrections are applied as overlays.</p>
+        <span>Convert</span><b>→</b><span>Analyze</span><b>→</b><span>Verify</span><b>→</b><span>Finalize</span><b>→</b><span>Chunk</span><b>→</b><span>Embed</span><b>→</b><span>Search</span>
+        <p>Open any book to see its current stage and the single next action. Raw Docling files stay unchanged; corrections are applied as overlays. AI reviews propose changes; save or apply a human correction to change the effective book. Search availability does not certify complete extraction or validated evidence.</p>
       </div>
     </details>
   </main>
 </div>
-<script src="/assets/nav.js?v=5.0.7.2"></script><script src="/assets/workflow.js?v=5.0.7.2"></script>
+<script src="/assets/nav.js?v=5.0.8"></script><script src="/assets/workflow.js?v=5.0.8"></script>
 </body></html>
 
