@@ -48,6 +48,13 @@ def test_books_library_throttles_expensive_document_refresh() -> None:
     assert "visibilitychange" in script
 
 
+def test_quality_polling_stops_in_hidden_tabs() -> None:
+    script = _text("quality.js")
+    assert "document.visibilityState !== 'visible'" in script
+    assert "visibilitychange" in script
+    assert "pagehide" in script
+
+
 def test_nav_loads_shared_audit_css_and_refreshes_attention_status() -> None:
     script = _text("nav.js")
     assert "ui-audit-fixes.css" in script
@@ -62,3 +69,17 @@ def test_shared_audit_css_hides_closed_drawer_and_preserves_table_actions() -> N
     assert ".table-wrap:has(#quality-jobs)" in css
     assert ".table-wrap:has(#verification-books)" in css
     assert "position: sticky" in css
+
+
+def test_shared_audit_css_targets_real_verifier_audit_cards() -> None:
+    css = _text("ui-audit-fixes.css")
+    assert ".vision-audit-card > .vision-audit-card-head" in css
+    assert ".vision-audit-card > .vision-audit-main-grid" in css
+    assert ".vision-audit-card .vision-audit-source-image" in css
+    assert "overflow-wrap: anywhere" in css
+
+
+def test_human_review_textareas_have_accessible_labels() -> None:
+    page = _text("review.html")
+    assert '<label class="visually-hidden" for="original">Raw Docling target text</label>' in page
+    assert '<label class="visually-hidden" for="correction">Human correction text</label>' in page
