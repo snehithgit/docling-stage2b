@@ -727,6 +727,8 @@ def _critical_tokens(text: str) -> list[str]:
                         lambda m: number_words[m.group(1).lower()] + " ", token_text, flags=re.I)
     for match in re.finditer(r"\b(once|twice)\b", token_text, re.I):
         values.append("count:" + ("1" if match.group(1).lower() == "once" else "2"))
+    # A literal table cell boundary does not change a numeric value's unit.
+    token_text = re.sub(r"(?<![\w.+-])([+-]?\d+(?:[.,]\d+)?)\s*\|\s*(V|A|bar|psi|Hz|kW|W|mm|cm|kg)\b", r"\1 \2", token_text, flags=re.I)
     # Multi-item lists must tokenize identically with or without spaces after
     # commas. Preserve genuine thousands grouping and decimal comma values.
     def numeric_list(match):
@@ -780,7 +782,7 @@ def _claim_segments(answer: str) -> list[str]:
 
 def _relationship_check(claim: str, cited: list[dict[str, Any]]) -> dict[str, Any]:
     """Check local literal associations; never claim semantic entailment."""
-    units = [unit.strip() for row in cited
+    units = [re.sub(r"(?<![\w.+-])([+-]?\d+(?:[.,]\d+)?)\s*\|\s*(V|A|bar|psi|Hz|kW|W|mm|cm|kg)\b", r"\1 \2", unit.strip(), flags=re.I) for row in cited
              for unit in re.split(r"\n+|(?<=[.!?])\s+(?=[A-Z])", _source_support_text(row, exact=True))
              if unit.strip()]
     words = _grounding_words(claim)
@@ -923,7 +925,64 @@ def claim_support_audit(answer: str, sources: list[dict[str, Any]]) -> dict[str,
     }
 
 
-def citation_audit(answer: str, sources: list[dict[str, Any]]) -> dict[str, Any]:
+def _answer_sequence_issues(answer: str, sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Check explicitly stated cooling-tube isolation prerequisite, not inferred order."""
+    source_text = " ".join(_source_support_text(row, exact=True) for row in sources)
+    prerequisite = re.search(r"\b(?:turn|switch)\s+off\b[^.!?\n]{0,100}\bpower\b[^.!?\n]{0,100}\bbefore\s+cleaning\s+(?:the\s+)?cooling\s+tubes?\b", source_text, re.I)
+    if not prerequisite:
+        return []
+    lines = _claim_segments(answer)
+    action = next((i for i, line in enumerate(lines) if re.search(r"^(?:[-*]|\d+[.)])?\s*(?:then\s+)?clean\b.*\bcooling\s+tubes?\b", line, re.I)), None)
+    if action is None:
+        return []
+    isolation = next((i for i, line in enumerate(lines) if re.search(r"\b(?:turn|switch)\s+off\b.*\bpower\b", line, re.I)), None)
+    if isolation is not None and isolation <= action:
+        return []
+    return [{"claim": lines[action], "citations": _CITATION_RE.findall(lines[action]),
+             "supported": False, "reason": "procedure_power_isolation_missing_or_late",
+             "source_prerequisite": prerequisite.group(0)}]
+
+
+def _change_interval_issues(answer: str) -> list[dict[str, Any]]:
+    """Surface conflicting coolant change intervals instead of choosing one."""
+    rows = []
+    numbers = {word: str(i) for i, word in enumerate("zero one two three four five six seven eight nine ten eleven twelve".split())}
+    def duration_key(value):
+        value = re.sub(r"\b(" + "|".join(numbers) + r")\b", lambda m: numbers[m.group(0)], value.lower())
+        return re.sub(r"[\s,-]|operating", "", value).rstrip("s")
+    pattern = r"\b(?:\d+(?:,\d{3})*|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*[- ]?\s*(?:operating\s+)?(?:hours?|months?|years?)\b"
+    for line in _claim_segments(answer):
+        if not re.search(r"\bcoolant\b", line, re.I) or not re.search(r"\bchang(?:e|ed|es|ing)\b", line, re.I):
+            continue
+        periods = {duration_key(m) for m in re.findall(pattern, line, re.I)}
+        if periods:
+            rows.append((line, periods))
+    if len(rows) < 2 or len({tuple(sorted(periods)) for _, periods in rows}) == 1:
+        return []
+    return [{"claim": rows[-1][0], "citations": _CITATION_RE.findall(rows[-1][0]),
+             "supported": False, "reason": "coolant_change_intervals_need_reconciliation",
+             "related_claims": [line for line, _ in rows]}]
+
+
+def _operation_scope_issues(answer: str, sources: list[dict[str, Any]], question: str) -> list[dict[str, Any]]:
+    """Do not promote an oil-level check instruction into an oil-change prerequisite."""
+    if not re.search(r"\bchang(?:e|ing)\b[^?]{0,80}\boil\b|\boil\b[^?]{0,80}\bchang(?:e|ing)\b", question, re.I):
+        return []
+    by_label = {str(row.get("label") or "").upper(): row for row in sources}
+    issues = []
+    for line in _claim_segments(answer):
+        labels = [label.upper() for label in _CITATION_RE.findall(line)]
+        cited = [by_label[label] for label in labels if label in by_label]
+        if not cited or re.search(r"\boil\s+level\b", line, re.I):
+            continue
+        headings = [" ".join(str(v) for v in row.get("headings") or []) for row in cited]
+        if all(re.search(r"check\s+oil\s+level", heading, re.I) and not re.search(r"oil\s+change|chang(?:e|ing)\s+oil", heading, re.I) for heading in headings):
+            issues.append({"claim": line, "citations": labels, "supported": False,
+                           "reason": "oil_check_instruction_used_for_oil_change"})
+    return issues
+
+
+def citation_audit(answer: str, sources: list[dict[str, Any]], *, question: str = "") -> dict[str, Any]:
     allowed = {str(source.get("label") or "").upper() for source in sources}
     seen = list(dict.fromkeys(_CITATION_RE.findall(answer or "")))
     normalized = [label.upper() for label in seen]
@@ -931,6 +990,19 @@ def citation_audit(answer: str, sources: list[dict[str, Any]]) -> dict[str, Any]
     valid = [label for label in normalized if label in allowed]
     insufficient = _NOT_ENOUGH.casefold() in str(answer or "").casefold()
     support = claim_support_audit(answer, sources)
+    sequence_issues = _answer_sequence_issues(answer, sources)
+    interval_issues = _change_interval_issues(answer)
+    scope_issues = _operation_scope_issues(answer, sources, question)
+    sequence_issues = sequence_issues + interval_issues + scope_issues
+    if sequence_issues:
+        support["unsupported_claims"].extend(sequence_issues)
+        support["unsupported_claim_count"] += len(sequence_issues)
+        support["claims_checked"] += len(sequence_issues)
+        support["claim_support"].extend(sequence_issues)
+        support["grounding_passed"] = False
+    support["procedure_sequence_issues"] = [row for row in sequence_issues if row not in interval_issues and row not in scope_issues]
+    support["maintenance_interval_issues"] = interval_issues
+    support["operation_scope_issues"] = scope_issues
     warning = None
     if invalid:
         warning = "The model cited source labels that were not supplied: " + ", ".join(invalid)
@@ -981,7 +1053,7 @@ async def generate_grounded_answer(
         r"(?<![A-Za-z0-9_/-])" + re.escape(value) + r"(?![A-Za-z0-9_/-])", evidence, re.IGNORECASE)]
     if missing:
         payload = GenerationResult(selected, selected, None, _NOT_ENOUGH, {}, "stop", 0).as_dict()
-        payload.update(citation_audit(_NOT_ENOUGH, sources))
+        payload.update(citation_audit(_NOT_ENOUGH, sources, question=question))
         payload.update(model_called=False, missing_question_identifiers=missing)
         return payload
     if selected == "colab":
@@ -994,7 +1066,7 @@ async def generate_grounded_answer(
     result.answer = re.sub(r"\[\s*([SV]\d+)\s*\]", lambda m: "[" + m.group(1).upper() + "]", result.answer, flags=re.I)
     payload = result.as_dict()
     payload["model_called"] = True
-    payload.update(citation_audit(result.answer, sources))
+    payload.update(citation_audit(result.answer, sources, question=question))
     if payload.get("truncated"):
         payload["answer_usable"] = False
         payload["grounding_warning"] = "The answer was truncated; complete claim and citation validation is unavailable."

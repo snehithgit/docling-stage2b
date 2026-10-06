@@ -538,3 +538,48 @@ def test_flash_count_cannot_be_invented():
 def test_spelled_measurement_preserves_exact_value():
  assert citation_audit('Pressure is five bar [S1].',[{'label':'S1','text':'Pressure is 5 bar.'}])['answer_usable'] is True
  assert citation_audit('Pressure is five bar [S1].',[{'label':'S1','text':'Pressure is 6 bar.'}])['answer_usable'] is False
+
+
+def test_table_cell_unit_boundary_preserves_literal_voltage():
+ source='MAIN SUPPLY\n| Rated voltage | 440 | V |\n| Control voltage | 220 | V |'
+ assert citation_audit('Rated voltage is 440 V [S1].',[{'label':'S1','text':source}])['answer_usable']
+ assert not citation_audit('Rated voltage is 441 V [S1].',[{'label':'S1','text':source}])['answer_usable']
+
+
+@pytest.mark.parametrize('answer',[
+ '- Clean the cooling tubes [S1].\n- Turn off the power switch of the pump before cleaning [S1].',
+ '- Clean the cooling tubes [S1].',
+])
+def test_cooling_tube_cleaning_requires_prior_power_isolation(answer):
+ source='Be sure to turn off the power switch of the pump before cleaning the cooling tubes. Clean the cooling tubes with a brush.'
+ result=citation_audit(answer,[{'label':'S1','text':source}])
+ assert not result['answer_usable']
+ assert result['procedure_sequence_issues'][0]['reason']=='procedure_power_isolation_missing_or_late'
+
+
+def test_cooling_tube_cleaning_preserves_source_isolation_order():
+ source='Be sure to turn off the power switch of the pump before cleaning the cooling tubes. Clean the cooling tubes with a brush.'
+ answer='- Turn off the power switch of the pump before cleaning the cooling tubes [S1].\n- Clean the cooling tubes with a brush [S1].'
+ assert citation_audit(answer,[{'label':'S1','text':source}])['answer_usable']
+
+
+def test_conflicting_coolant_change_intervals_require_review():
+ source='Coolant must be changed every 1,200 hours or six months. Coolant change is listed as one year elsewhere.'
+ answer='- Change coolant every 1,200 hours or six months [S1].\n- Coolant change is listed as one year elsewhere [S1].'
+ result=citation_audit(answer,[{'label':'S1','text':source}])
+ assert not result['answer_usable']
+ assert result['maintenance_interval_issues'][0]['reason']=='coolant_change_intervals_need_reconciliation'
+
+
+def test_coolant_inspection_interval_is_not_a_second_change_interval():
+ source='Change coolant every six months. Inspect coolant every 600 hours.'
+ answer='- Change coolant every six months [S1].\n- Inspect coolant every 600 hours [S1].'
+ assert citation_audit(answer,[{'label':'S1','text':source}])['answer_usable']
+
+
+def test_oil_change_does_not_borrow_oil_level_check_instruction():
+ source={'label':'S1','headings':['4.2.1Check oil level'],'text':'The grab must be levelled horizontally.'}
+ result=citation_audit('The grab must be levelled horizontally [S1].',[source],question='How should the grab be positioned before changing its oil?')
+ assert not result['answer_usable']
+ assert result['operation_scope_issues'][0]['reason']=='oil_check_instruction_used_for_oil_change'
+ assert citation_audit('The grab must be levelled horizontally [S1].',[source],question='How should the grab be positioned for checking oil level?')['answer_usable']
