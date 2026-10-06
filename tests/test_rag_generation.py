@@ -483,3 +483,25 @@ def test_procedure_markdown_title_is_not_an_uncited_factual_claim():
 def test_bold_procedure_assertion_still_requires_a_citation():
     answer = "**Procedure requires disconnecting the pump**"
     assert citation_audit(answer, [{"label": "S1", "text": "Disconnect the pump."}])["answer_usable"] is False
+
+@pytest.mark.parametrize('source,answer,reason', [
+ ('Pump A1 pressure is 12 bar. Pump A2 pressure is 24 bar.', 'Pump A1 pressure is 24 bar [S1].', 'technical_association_not_located'),
+ ('Oil overheats because the fan stops.', 'The fan stops because oil overheats [S1].', 'causal_direction_not_located'),
+ ('When the oil overheats, press Start to cool the oil.', 'Press Start to cool the oil [S1].', 'source_condition_omitted'),
+ ('Thermostat BT2 opens at 85°C. Press Start to cool the oil.', 'Oil overheats because thermostat BT2 opens at 85°C [S1].', 'causal_direction_not_located'),
+])
+def test_relationship_checks_reject_recombined_or_reversed_claims(source, answer, reason):
+ result = citation_audit(answer, [{'label':'S1','text':source}])
+ assert result['answer_usable'] is False
+ assert result['unsupported_claims'][0]['reason'] == reason
+ assert result['semantic_entailment_verified'] is False
+
+
+def test_relationship_checks_preserve_direct_cause_and_condition():
+ for text in ['Oil overheats because the fan stops.', 'When oil overheats, press Start to cool the oil.']:
+  assert citation_audit(text+' [S1]', [{'label':'S1','text':text}])['answer_usable'] is True
+
+
+def test_visual_summary_cannot_supply_causal_relationship():
+ result = citation_audit('Oil overheats because the fan stops [V1].', [{'label':'V1','source_kind':'visual','visible_text':['Oil temperature'], 'summary':'Oil overheats because the fan stops.'}])
+ assert result['answer_usable'] is False

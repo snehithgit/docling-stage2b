@@ -752,6 +752,41 @@ def _claim_segments(answer: str) -> list[str]:
     return [piece.strip() for piece in pieces if piece.strip()]
 
 
+def _relationship_check(claim: str, cited: list[dict[str, Any]]) -> dict[str, Any]:
+    """Check local literal associations; never claim semantic entailment."""
+    units = [unit.strip() for row in cited
+             for unit in re.split(r"\n+|(?<=[.!?])\s+(?=[A-Z])", _source_support_text(row, exact=True))
+             if unit.strip()]
+    words = _grounding_words(claim)
+    critical = set(_critical_tokens(claim))
+    candidates = [unit for unit in units
+                  if critical.issubset(set(_critical_tokens(unit)))
+                  and len(words & _grounding_words(unit)) >= min(2, len(words))]
+    causal = re.search(r"\b(?:because(?: of)?|due to|caused by)\b", claim, re.I)
+    reason = None
+    if critical and not candidates:
+        reason = "technical_association_not_located"
+    if causal:
+        effect, cause = claim[:causal.start()], claim[causal.end():]
+        def same_direction(unit):
+            marker = re.search(r"\b(?:because(?: of)?|due to|caused by)\b", unit, re.I)
+            if not marker:
+                return False
+            left, right = unit[:marker.start()], unit[marker.end():]
+            ew, cw = _grounding_words(effect), _grounding_words(cause)
+            return bool(ew and cw and ew & _grounding_words(left) and cw & _grounding_words(right))
+        if not any(same_direction(unit) for unit in candidates):
+            reason = "causal_direction_not_located"
+    # Require a stated condition to survive a near-verbatim procedure rewrite.
+    # We do not merge unrelated lines to manufacture conditional support.
+    if not reason and not re.search(r"\b(?:if|when|unless|until|before|after|while|only)\b", claim, re.I):
+        near = [unit for unit in candidates if words and words.issubset(_grounding_words(unit))]
+        if near and all(re.search(r"\b(?:if|when|unless|until|before|after|while|only)\b", unit, re.I) for unit in near):
+            reason = "source_condition_omitted"
+    return {"relationship_check": "needs_review" if reason else "literal_checks_passed",
+            "relationship_reason": reason, "semantic_entailment_verified": False}
+
+
 def claim_support_audit(answer: str, sources: list[dict[str, Any]]) -> dict[str, Any]:
     """Deterministically bind each factual claim to the evidence it cites.
 
@@ -836,9 +871,10 @@ def claim_support_audit(answer: str, sources: list[dict[str, Any]]) -> dict[str,
                 if len(words) >= 2 and words.issubset(claim_words):
                     prohibition_conflict = True
                     break
-        supported = not missing_critical and lexical_ok and not prohibition_conflict
+        relationship = _relationship_check(clean, cited)
+        supported = not missing_critical and lexical_ok and not prohibition_conflict and not relationship["relationship_reason"]
         reason = ("supported" if supported else "critical_token_not_in_cited_source" if missing_critical
-                  else "source_prohibition_reversed" if prohibition_conflict else "weak_claim_source_overlap")
+                  else "source_prohibition_reversed" if prohibition_conflict else relationship["relationship_reason"] or "weak_claim_source_overlap")
         claims.append({
             "claim": clean,
             "citations": labels,
@@ -846,6 +882,7 @@ def claim_support_audit(answer: str, sources: list[dict[str, Any]]) -> dict[str,
             "reason": reason,
             "critical_tokens": critical,
             "missing_critical_tokens": missing_critical,
+            **relationship,
             "lexical_overlap": overlap[:20],
             "lexical_coverage": round(coverage, 3),
         })
@@ -889,6 +926,8 @@ def citation_audit(answer: str, sources: list[dict[str, Any]]) -> dict[str, Any]
         **support,
         "grounding_passed": grounding_passed,
         "answer_usable": grounding_passed,
+        "verification_method": "deterministic_literal_relationship_checks/v1",
+        "semantic_entailment_verified": False,
     }
 
 
