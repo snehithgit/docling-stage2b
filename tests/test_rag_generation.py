@@ -505,3 +505,36 @@ def test_relationship_checks_preserve_direct_cause_and_condition():
 def test_visual_summary_cannot_supply_causal_relationship():
  result = citation_audit('Oil overheats because the fan stops [V1].', [{'label':'V1','source_kind':'visual','visible_text':['Oil temperature'], 'summary':'Oil overheats because the fan stops.'}])
  assert result['answer_usable'] is False
+
+def test_operating_hours_preserves_exact_numeric_interval():
+ source='The coolant must be changed at intervals of 1,200 hours operation or six months whichever comes first.'
+ assert citation_audit('Change coolant every 1,200 operating hours or six months whichever comes first [S1].',[{'label':'S1','text':source}])['answer_usable'] is True
+ assert citation_audit('Change coolant every 200 operating hours [S1].',[{'label':'S1','text':source}])['answer_usable'] is False
+
+
+def test_grounded_prompt_requests_single_sentence_cited_bullets():
+ from app.rag_generation import build_grounded_user_prompt
+ prompt=build_grounded_user_prompt('What should I do?',[{'label':'S1','text':'Disconnect the supply.'}])
+ assert 'ONE factual sentence' in prompt
+ assert 'without headings' in prompt
+
+@pytest.mark.asyncio
+async def test_generation_canonicalizes_only_explicit_citation_labels(monkeypatch):
+ from app.rag_generation import GenerationResult
+ async def fake(*args,**kwargs):
+  return GenerationResult('pi5','model',None,'Disconnect the supply [ S1 ].',{},'stop',0)
+ monkeypatch.setattr('app.rag_generation._generate_local',fake)
+ result=await generate_grounded_answer('pi5',AppConfig(),'What should I disconnect?',[{'label':'S1','text':'Disconnect the supply.'}])
+ assert result['answer']=='Disconnect the supply [S1].'
+ assert result['answer_usable'] is True
+
+
+def test_flash_count_cannot_be_invented():
+ result=citation_audit('The green LED flashes once [S1].',[{'label':'S1','text':'The green LED flashes then stays lit.'}])
+ assert result['answer_usable'] is False
+ assert 'count:1' in result['unsupported_claims'][0]['missing_critical_tokens']
+
+
+def test_spelled_measurement_preserves_exact_value():
+ assert citation_audit('Pressure is five bar [S1].',[{'label':'S1','text':'Pressure is 5 bar.'}])['answer_usable'] is True
+ assert citation_audit('Pressure is five bar [S1].',[{'label':'S1','text':'Pressure is 6 bar.'}])['answer_usable'] is False

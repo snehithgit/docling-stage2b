@@ -446,6 +446,9 @@ def build_grounded_user_prompt(question: str, sources: list[dict[str, Any]]) -> 
         + coverage_note + "\n\n"
         "ANSWER REQUIREMENTS:\n"
         "- Use only the source excerpts above.\n"
+        "- Return only short answer bullets, without headings, introductions or concluding summaries.\n"
+        "- Each bullet must contain ONE factual sentence followed immediately by its own citation, for example: - Disconnect the supply [S1].\n"
+        "- Do not put a single citation after multiple sentences or steps. Do not add actions merely because they appear elsewhere in the passage.\n"
         "- End EVERY factual sentence and numbered step with its own supporting [S#] or [V#] citation. A citation only after the whole procedure is invalid.\n"
         "- Prefer the source that directly answers the question over merely related background.\n"
         "- Do not transfer instructions or values between different equipment/systems.\n"
@@ -701,6 +704,13 @@ def _grounding_words(text: str) -> set[str]:
 def _critical_tokens(text: str) -> list[str]:
     values: list[str] = []
     token_text = str(text or "").translate({ord(char): "-" for char in "‐‑‒–—−"})
+    token_text = re.sub(r"(?<=\d)\s+operating\s+(?=hours?\b)", " ", token_text, flags=re.I)
+    number_words = {word: str(i) for i, word in enumerate(
+        "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty".split())}
+    token_text = re.sub(r"\b(" + "|".join(number_words) + r")\s+(?=bar\b|psi\b|volts?\b|minutes?\b|hours?\b|seconds?\b|mm\b|cm\b|kg\b)",
+                        lambda m: number_words[m.group(1).lower()] + " ", token_text, flags=re.I)
+    for match in re.finditer(r"\b(once|twice)\b", token_text, re.I):
+        values.append("count:" + ("1" if match.group(1).lower() == "once" else "2"))
     # Multi-item lists must tokenize identically with or without spaces after
     # commas. Preserve genuine thousands grouping and decimal comma values.
     def numeric_list(match):
@@ -960,6 +970,8 @@ async def generate_grounded_answer(
         result = await _generate_groq(config, question, sources, quota_guard)
     else:
         result = await _generate_local(selected, config, question, sources)
+    # Canonicalize only explicitly emitted labels, never infer a missing citation.
+    result.answer = re.sub(r"\[\s*([SV]\d+)\s*\]", lambda m: "[" + m.group(1).upper() + "]", result.answer, flags=re.I)
     payload = result.as_dict()
     payload["model_called"] = True
     payload.update(citation_audit(result.answer, sources))
