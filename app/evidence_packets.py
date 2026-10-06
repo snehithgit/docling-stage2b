@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -84,7 +85,10 @@ def generation_policy(row: dict) -> tuple[bool, str, dict | None]:
         return False, "technical_record_rejected_or_invalid", None
     if is_validated_record(record) and row.get("technical_source_current"):
         return True, "validated_technical_evidence", record
-    if record.get("validation_status") == "needs_visual_parse":
+    mixed_literal = (record.get("source_format") != "flowchart"
+                     and any(str(ref).startswith(("#/texts/", "#/tables/")) for ref in record.get("doc_items") or [])
+                     and len(re.findall(r"\w+", record.get("source_text") or "")) >= 40)
+    if record.get("validation_status") == "needs_visual_parse" and not mixed_literal:
         return False, "visual_relationships_unvalidated", None
     # Extracted paragraphs may be quoted as literal source, but unverified
     # fault/cause/remedy mappings, aliases and interpretations never enter.
