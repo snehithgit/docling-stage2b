@@ -10,8 +10,35 @@
   visibility: visible;
 }
 
-/* Improve low-contrast helper text on repaired/review surfaces without changing
-   status colors or primary action hierarchy. */
+/* The audited UI leaned too heavily on 9–11px low-contrast metadata. Keep the
+   compact hierarchy but raise operational text to a readable floor. */
+body.ui29 .eyebrow,
+body.ui29 .sidebar-label,
+body.ui29 .metric-kicker,
+body.ui29 th {
+  color: #5b6070;
+  font-size: 12px;
+}
+body.ui29 .file-subtitle,
+body.ui29 .format-note,
+body.ui29 .model-meta,
+body.ui29 .help-list,
+body.ui29 .field-note,
+body.ui29 .context-meta,
+body.ui29 .app-version small {
+  color: #555c6b;
+  font-size: 12px;
+}
+body.ui29 .status,
+body.ui29 .quality-muted {
+  font-size: 12px;
+}
+body.ui29 .status.completed {
+  color: #08724f;
+}
+
+/* Repaired/review surfaces get the same readable helper-text treatment even
+   when they use page-local component classes. */
 .ui-audit-surface .subtle,
 .ui-audit-surface .format-note,
 .ui-audit-surface .model-meta,
@@ -137,7 +164,42 @@ body:has(#quality-jobs) .format-note,
   background: #f8f8fb;
 }
 
-/* Keep audit result content away from card borders at narrow widths. */
+/* Text/Vision audit cards previously let headings, verdicts and technical
+   payloads run into the card edge at narrow widths. These are the actual card
+   classes emitted by text-audit.js/vision-audit.js. */
+.vision-audit-card {
+  overflow: hidden;
+}
+.vision-audit-card > .vision-audit-card-head {
+  gap: 12px;
+  padding: clamp(16px, 2vw, 22px) clamp(16px, 2.5vw, 24px) 12px;
+}
+.vision-audit-card > .vision-audit-main-grid {
+  min-width: 0;
+  padding: 0 clamp(16px, 2.5vw, 24px) clamp(16px, 2.5vw, 24px);
+}
+.vision-audit-card .vision-audit-image-column,
+.vision-audit-card .vision-audit-explanation,
+.vision-audit-card .vision-audit-decision,
+.vision-audit-card section {
+  min-width: 0;
+}
+.vision-audit-card .vision-audit-source-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+.vision-audit-card .audit-transcription,
+.vision-audit-card .vision-audit-summary-text,
+.vision-audit-card pre,
+.vision-audit-card code {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* Other review result cards use several names across legacy pages. */
 .audit-result-card,
 .review-result-card,
 .anomaly-result-card {
@@ -153,6 +215,10 @@ body:has(#quality-jobs) .format-note,
   }
   .technical-evidence-controls > button {
     width: 100%;
+  }
+  .vision-audit-card > .vision-audit-card-head {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 
