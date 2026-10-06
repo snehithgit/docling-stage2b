@@ -1310,3 +1310,6 @@ button.mini-action { cursor: pointer; }
 .workspace-task-nav .active { font-weight:700; color:var(--purple); }
 .workspace-task-nav details { position:relative; }
 .workspace-task-nav details[open] { flex-basis:100%; }
+
+.hub-worker-status { white-space:pre-line; padding:0 16px 16px; line-height:1.8; }
+.hub-grid { margin-top:16px; }

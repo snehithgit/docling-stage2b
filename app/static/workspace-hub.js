@@ -12,9 +12,11 @@
       const workers = (pool.colab_workers || []).filter(w => w.enabled);
       const active = workers.filter(w => w.active).length;
       const pending = Object.entries(review.counts || {}).filter(([k]) => k.endsWith('_pending')).reduce((n,[,v])=>n+Number(v || 0),0);
-      const details = workers.map(w => `${w.name || w.id}: ${w.paused ? 'stopped' : w.active ? 'busy' : w.runner_account_id && !w.runner_ready ? 'waiting for runner' : w.runner_account_id && w.runner_ready ? 'runner available' : w.connection_configured ? 'endpoint configured' : 'needs setup'}`).join(' · ');
-      status.textContent = `${(library.documents || []).length} books · ${active}/${workers.length} Colab workers busy · ${pending} review jobs pending · Review dispatch ${pool.review?.enabled ? 'enabled' : 'stopped'}. ${details}`;
+      const details = workers.map(w => `${w.name || w.id}: ${w.paused ? 'stopped' : w.active ? 'busy' : w.runner_account_id && !w.runner_ready ? 'waiting for runner' : w.runner_account_id && w.runner_ready ? 'runner available' : w.connection_configured ? 'endpoint configured' : 'needs setup'}`).join('\n');
+      status.textContent = `${(library.documents || []).length} books · ${active}/${workers.length} Colab workers busy · ${pending} review jobs pending · Review dispatch ${pool.review?.enabled ? 'enabled' : 'stopped'}.`;
+      document.getElementById('hub-worker-status').textContent = details || 'No enabled Colab workers configured.';
     } catch (error) {
+      document.getElementById('hub-worker-status').textContent = 'Worker status unavailable.';
       status.textContent = `Activity unavailable; open the relevant controls for details. ${error.message}`;
     } finally { busy = false; }
   }

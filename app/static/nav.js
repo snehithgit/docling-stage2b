@@ -217,7 +217,7 @@
       strip.hidden = false;
       const audits = Number(s.audit_review_required || 0);
       const failures = Math.max(0, total - audits);
-      strip.innerHTML = `<div><strong>Needs attention</strong><span>${failures ? `${failures} pipeline issue${failures === 1 ? '' : 's'}` : 'No pipeline failures'}${audits ? ` · ${audits} human decision${audits === 1 ? '' : 's'}` : ''}</span></div><a class="mini-action" href="/errors">Open diagnostics</a>`;
+      strip.innerHTML = `<div><strong>Needs attention</strong><span>${failures ? `${failures} pipeline issue${failures === 1 ? '' : 's'}` : 'No pipeline failures'}${audits ? ` · ${audits} human decision${audits === 1 ? '' : 's'}` : ''}</span></div><a class="mini-action" href="${failures ? "/errors" : "/review-center"}">${failures ? "Open diagnostics" : "Open Review"}</a>`;
     } catch (_) {
       if (strip) { strip.hidden = true; strip.textContent = ''; }
     }
