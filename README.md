@@ -1,3 +1,7 @@
+## V5.0.1 — Evidence packets (phase 2 of 10)
+
+Generation and prompt export now share question-based evidence selection without a fixed visual quota. Unvalidated derived relationships and incomplete diagrams are withheld; literal source text remains usable. Fully withheld packets stop before a model call. See [Phase 2 evidence policy and validation](docs/v5-evidence-packets.md).
+
 ## V5.0.0 — Evidence foundation (phase 1 of 10)
 
 Books and machine search now report correction readiness, search readiness and detected evidence coverage separately. Source references alone do not certify an extraction as verified. Existing technical ledgers can migrate with exact backups while preserving human decisions, originals, indexes and worker settings.

@@ -1,6 +1,28 @@
 import asyncio
+import pytest
+from fastapi import HTTPException
 
 from app import main
+
+
+def test_all_withheld_evidence_stops_before_model_call(monkeypatch):
+    async def fake_results(*args, **kwargs):
+        return [_result()], 1, [], {"mode": "single_book"}
+
+    def fake_bind(results, visuals, books, processed):
+        return [{**r, "generation_blocked_reason": "visual_relationships_unvalidated"} for r in results], []
+
+    async def forbidden_generate(*args, **kwargs):
+        raise AssertionError("A model must not be called for a withheld packet")
+
+    monkeypatch.setattr(main, "_retrieval_results_for_question", fake_results)
+    monkeypatch.setattr(main, "bind_evidence", fake_bind)
+    monkeypatch.setattr(main, "generate_grounded_answer", forbidden_generate)
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(main._execute_retrieval_generation(main.RetrievalGenerateRequest(
+            query="Why oil overheats?", provider="pi5", top_k=5, postprocess_job_id=7)))
+    assert error.value.status_code == 409
+    assert "No model was called" in error.value.detail
 
 
 def _result():

@@ -526,7 +526,8 @@ ${manuals} manual${manuals === 1 ? '' : 's'} will be unassigned from this machin
       : scope.mode === 'top_result_book'
         ? `Evidence locked to Top-1 book: ${cleanBook(scope.book || (sources[0] || {}).source_filename || 'source')}${scope.includes_adjacent_context ? ' · structural context included' : ''}`
         : scope.mode === 'cross_book' ? 'Cross-book evidence enabled because the question explicitly asks for comparison/across manuals.' : '';
-    $('grounded-answer-sources').innerHTML = `${scopeText ? `<p class="subtle grounded-evidence-scope">${esc(scopeText)}</p>` : ''}` + sources.map((source, index) => {
+    const withheldNote = (scope.withheld_evidence || []).length ? `<p class="subtle">${(scope.withheld_evidence || []).length} candidate records withheld pending source validation or visual parsing.</p>` : '';
+    $('grounded-answer-sources').innerHTML = withheldNote + `${scopeText ? `<p class="subtle grounded-evidence-scope">${esc(scopeText)}</p>` : ''}` + sources.map((source, index) => {
       const row = registerRow(source, rowKey('answer', index));
       const pages = (row.page_numbers || []).length ? `Page ${(row.page_numbers || []).join(', ')}` : 'Page unknown';
       const role = source.evidence_role === 'structural_context' ? ' · structural context' : source.evidence_role === 'adjacent_context' ? ' · adjacent' : '';
@@ -662,7 +663,8 @@ ${manuals} manual${manuals === 1 ? '' : 's'} will be unassigned from this machin
       await copyText(data.prompt || '');
       const scope = data.evidence_scope || {};
       const scopeNote = scope.mode === 'equipment' ? ` Evidence is restricted to ${scope.equipment || 'the selected equipment'}.` : scope.mode === 'top_result_book' && scope.book ? ` Evidence is locked to ${cleanBook(scope.book)}.` : '';
-      answerMessage(`Copied the question, [S#]/[V#] citation labels, and ${Number((data.sources || []).length)} grounded evidence record${(data.sources || []).length === 1 ? '' : 's'}.${scopeNote} Paste it into any other LLM.`, 'success');
+      const withheldNote = (scope.withheld_evidence || []).length ? ` ${(scope.withheld_evidence || []).length} candidates withheld pending source validation or visual parsing.` : '';
+      answerMessage(`Copied the question, [S#]/[V#] citation labels, and ${Number((data.sources || []).length)} grounded evidence record${(data.sources || []).length === 1 ? '' : 's'}.${scopeNote}${withheldNote} Paste it into any other LLM.`, 'success');
     } catch (error) { answerMessage(error.message, 'error'); }
     finally { button.disabled = false; button.textContent = 'Copy for other LLM'; }
   }
