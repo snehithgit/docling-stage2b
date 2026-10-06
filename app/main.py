@@ -7212,6 +7212,28 @@ async def migrate_book_technical_evidence(job_id: int) -> dict:
     return {"postprocess_job_id": job_id, **result, "model_calls": 0, "correction_ledger_unchanged": True}
 
 
+@app.get("/api/postprocess/jobs/{job_id}/technical-evidence/search-index")
+async def book_verified_search_index(job_id: int):
+    job = await runtime.postprocess_store.get_job(job_id)
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Book not found")
+    directory = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+    index = directory / "retrieval_index.jsonl"
+    if not index.is_file():
+        raise HTTPException(status_code=409, detail="Build the Stage 3 index first")
+    from .retrieval import _load_index
+    from .structured_search import overlay_signature
+    rows = await asyncio.to_thread(_load_index, index)
+    indexed = [{"chunk_id": row["chunk_id"], "page_numbers": row.get("page_numbers"),
+                "doc_items": row.get("doc_items"), "evidence_ids": row["verified_evidence_ids"],
+                "applicability": row.get("verified_applicability") or []}
+               for row in rows if row.get("verified_search_text")]
+    return {"postprocess_job_id": job_id, "indexed_verified_chunks": len(indexed),
+            "verified_evidence_sha256": overlay_signature(rows), "entries": indexed,
+            "raw_chunks_unchanged": True, "model_calls": 0, "equipment_scope": "book_assignment",
+            "applicability_scope": "source_chunk_only"}
+
+
 @app.get("/api/postprocess/jobs/{job_id}/technical-evidence")
 async def book_technical_evidence(job_id: int) -> dict:
     job = await runtime.postprocess_store.get_job(job_id)

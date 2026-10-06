@@ -1,3 +1,7 @@
+## V5.0.5 — Verified structured search (phase 6 of 10)
+
+Validated table fields and diagram labels now participate in lexical search, embedding text and question-based source selection. Current source/image checks remove stale or withdrawn facts. Changed evidence invalidates machine embeddings and incremental rebuilds reuse unchanged vectors. Explicit model values retain source-chunk applicability and equipment scope. See [Phase 6 structured search](docs/v5-structured-search.md).
+
 ## V5.0.4 — Visual graph extraction (phase 5 of 10)
 
 Artifact audit now links to image-bound node/connection extraction using the selected Vision provider. Review exact labels, boxes and arrow/branch directions, edit candidates and validate them against the original image. Changed images, uncertain graphs and incomplete multi-image records are withheld from verified answers. Book corrections remain unchanged. See [Phase 5 visual graphs](docs/v5-visual-graphs.md).
