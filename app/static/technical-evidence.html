@@ -1,3 +1,89 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Diagram extraction · Docling</title><link rel="stylesheet" href="/assets/styles.css?v=5.0.8.1"></head>
-<body><nav class="workspace-task-nav" aria-label="Main navigation"><a href="/">Books</a><a href="/processing">Processing</a><a href="/review-center">Review</a><a href="/retrieval">Ask</a><a href="/settings">Settings</a><details class="nav-advanced"><summary>Advanced</summary><a href="/errors">Errors &amp; diagnostics</a></details></nav><a class="skip-link" href="#main-content">Skip to main content</a><main id="main-content" style="max-width:1200px;margin:auto;padding:24px"><a href="/artifact-audit">← Artifact audit</a><h1>Diagram extraction</h1><p>Read nodes, labels and connections from the original image using your selected vision provider. Results remain candidates until you check the pixels. Extraction does not apply book corrections.</p><label>Manual <select id="book"></select></label> <button id="load">Load candidates</button><p id="status" role="status"></p><label>Source item <select id="entry"></select></label> <label>Picture <select id="picture"></select></label><label><input type="checkbox" id="fresh"> Re-extract with a fresh model request</label><button id="extract">Extract with selected vision worker</button>
-<section id="review" hidden><div style="position:relative;max-width:100%"><img id="source" style="display:block;width:100%" alt="Original Docling picture"><svg id="boxes" viewBox="0 0 1000 1000" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></svg></div><h2>Extracted nodes and connections</h2><label>Graph JSON (editable)<textarea id="graph" rows="18" style="width:100%"></textarea></label><button id="edit">Save edited graph for review</button><p id="requirements"></p><label>Reviewer name <input id="actor" maxlength="100"></label><label><input type="checkbox" id="checked"> I checked all labels, boxes, arrow directions and branch labels against the original image.</label><button id="validate">Validate reviewed graph</button></section></main><script src="/assets/technical-evidence.js?v=5.0.8.1"></script><script src="/assets/nav.js?v=5.0.8.1"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Technical evidence · Docling Auto-Convert</title>
+<link rel="stylesheet" href="/assets/styles.css?v=5.0.8.1" />
+<link rel="stylesheet" href="/assets/workflow.css?v=5.0.8.1" />
+<link rel="stylesheet" href="/assets/ui-audit-fixes.css?v=1" />
+</head>
+<body class="ui29 ui-audit-surface">
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<header class="mobile-topbar">
+  <button class="hamburger" id="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg></button>
+  <a class="brand" href="/" aria-label="Docling Auto-Convert"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a>
+</header>
+<div id="nav-backdrop" hidden></div>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <button class="sidebar-close" id="sidebar-close" type="button" aria-label="Close navigation">×</button>
+    <a class="brand" href="/" aria-label="Docling Auto-Convert"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a>
+    <div class="sidebar-label">Workspace</div>
+    <nav class="nav" aria-label="Main navigation">
+      <a href="/">Books</a><a href="/processing">Processing</a><a href="/review-center">Review</a><a href="/retrieval">Ask</a><a href="/settings">Settings</a>
+      <details class="nav-advanced"><summary>Advanced</summary><a href="/errors">Errors &amp; diagnostics</a><a href="/quality">Extraction quality</a><a href="/chunks">Chunk inspection</a><a href="/artifact-audit">Artifact audit</a><a href="/technical-evidence">Technical evidence</a><a href="/convert">One-off conversion</a></details>
+    </nav>
+    <div class="sidebar-footer"><span class="footer-dot"></span><span><strong>Local pipeline</strong><br><a href="/processing">Processing overview</a></span></div>
+  </aside>
+
+  <main class="main-content technical-evidence-main" id="main-content">
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">Technical visual evidence</p>
+        <h1>Diagram extraction</h1>
+        <p class="subtle">Read nodes, labels and connections from the original image with the selected vision worker. Extraction stays a review candidate until you check it against the source pixels.</p>
+      </div>
+      <a class="secondary-button" href="/artifact-audit">Open artifact audit</a>
+    </header>
+
+    <div id="status" class="status-message page-feedback" role="status" aria-live="polite"></div>
+
+    <section class="panel queue-panel" aria-labelledby="evidence-source-title">
+      <div class="panel-heading">
+        <div><p class="eyebrow">Source</p><h2 id="evidence-source-title">Choose evidence</h2><p class="format-note">Load one manual, then select the source item and picture you want to inspect.</p></div>
+      </div>
+      <div class="doc-panel-body">
+        <div class="technical-evidence-controls">
+          <div class="field"><label for="book">Manual</label><select id="book"></select></div>
+          <button class="secondary-button" id="load" type="button">Load candidates</button>
+        </div>
+        <div class="technical-evidence-selection">
+          <div class="field"><label for="entry">Source item</label><select id="entry"></select></div>
+          <div class="field"><label for="picture">Picture</label><select id="picture"></select></div>
+        </div>
+        <div class="technical-evidence-actions">
+          <label class="check-row" for="fresh"><input type="checkbox" id="fresh" /> Re-extract with a fresh model request</label>
+          <button class="primary-button" id="extract" type="button">Extract with selected vision worker</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel queue-panel" id="review" hidden aria-labelledby="evidence-review-title">
+      <div class="panel-heading">
+        <div><p class="eyebrow">Human verification</p><h2 id="evidence-review-title">Review extracted graph</h2><p class="format-note">Compare every label, box, arrow direction and branch label with the original image before validation.</p></div>
+      </div>
+      <div class="doc-panel-body technical-evidence-review-grid">
+        <div class="technical-evidence-source">
+          <img id="source" alt="Original Docling picture" />
+          <svg id="boxes" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true"></svg>
+        </div>
+        <div>
+          <div class="field">
+            <label for="graph">Graph JSON (editable)</label>
+            <textarea id="graph" class="technical-evidence-json" rows="18" spellcheck="false"></textarea>
+          </div>
+          <div class="technical-evidence-actions"><button class="secondary-button" id="edit" type="button">Save edited graph for review</button></div>
+          <p id="requirements" class="format-note"></p>
+          <div class="field"><label for="actor">Reviewer name</label><input id="actor" maxlength="100" /></div>
+          <label class="check-row" for="checked"><input type="checkbox" id="checked" /> I checked all labels, boxes, arrow directions and branch labels against the original image.</label>
+          <div class="technical-evidence-actions"><button class="primary-button" id="validate" type="button">Validate reviewed graph</button></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+<script src="/assets/technical-evidence.js?v=5.0.8.1"></script>
+<script src="/assets/nav.js?v=5.0.8.1"></script>
+</body>
+</html>

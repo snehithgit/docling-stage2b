@@ -1,4 +1,13 @@
 (() => {
+  if (!document.querySelector('link[href*="ui-audit-fixes.css"]')) {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = '/assets/ui-audit-fixes.css?v=1';
+    document.head.appendChild(link);
+  }
+})();
+
+(() => {
   let interactionUntil = 0;
   const interactiveSelector = 'button, a[href], input, select, textarea, summary, [role="button"], [contenteditable="true"]';
   document.addEventListener('pointerdown', event => {
@@ -11,8 +20,24 @@
   window.DoclingUI.shouldDeferRefresh = () => {
     const active = document.activeElement;
     const editing = active && active.matches && active.matches('input, select, textarea, [contenteditable="true"]');
-    return editing || Date.now() < interactionUntil;
+    return document.visibilityState !== 'visible' || editing || Date.now() < interactionUntil;
   };
+})();
+
+(() => {
+  const regions = [
+    ['.table-wrap:has(#quality-jobs)', 'Extraction quality results'],
+    ['.table-wrap:has(#verification-books)', 'Verification books'],
+    ['.table-wrap:has(#pi5-results)', 'Text verification results'],
+    ['.table-wrap:has(#oneplus-results)', 'Vision verification results'],
+  ];
+  for (const [selector, label] of regions) {
+    const node = document.querySelector(selector);
+    if (!node) continue;
+    if (!node.hasAttribute('tabindex')) node.tabIndex = 0;
+    if (!node.hasAttribute('role')) node.setAttribute('role', 'region');
+    if (!node.hasAttribute('aria-label')) node.setAttribute('aria-label', `${label}; use arrow keys to scroll horizontally`);
+  }
 })();
 
 (function () {
@@ -94,7 +119,6 @@
   });
 })();
 
-
 (() => {
   const nav = document.querySelector('.nav, .workspace-task-nav');
   const path = window.location.pathname;
@@ -170,8 +194,10 @@
     '/review-workers': ['AI review workers', 'Assign Colab workers and enable review dispatch here. AI reviews prepare suggestions; they do not apply human corrections. Existing human decisions remain authoritative.', 'Assign review workers'],
     '/anomaly-review': ['Anomaly review', 'Detected anomalies enter the review queue automatically. Request another Colab audit when you want to re-review a human decision; the decision is preserved.', 'Inspect anomaly results'],
     '/artifact-audit': ['Technical visual audit', 'Inspect technical pictures produced by verification. Rerunning a visual verification makes downstream Stage 2C/Stage 3/machine embeddings stale.', 'Resolve visual evidence'],
+    '/technical-evidence': ['Technical evidence review', 'Extract graph candidates from technical diagrams, then validate every label and connection against the source image before accepting the evidence.', 'Choose a manual and picture'],
     '/text-audit': ['Text verification audit', 'Inspect verifier decisions and source-image transcription. Human corrections take precedence and trigger downstream rebuilding.', 'Resolve questionable text'],
     '/vision-audit': ['Vision evidence audit', 'Review what the vision verifier extracted before it becomes RAG visual evidence.', 'Confirm evidence quality'],
+    '/docling-review': ['Docling page review', 'Inspect and repair Docling page geometry using source-PDF crops. Approved repairs stay downstream overlays; the converted Docling ZIP remains immutable.', 'Select a region and compare the source crop'],
     '/retrieval': ['Retrieval-Augmented Generation (RAG)', 'Normal Hybrid RAG is one physical machine at a time. All assigned manuals share one machine embedding index; unrelated machines are never searched together.', 'Select a machine'],
     '/chunks': ['Chunk inspection', 'Inspect the exact current Stage 3 chunk and original PDF page used by retrieval. Search one machine or one manual audit scope only.', 'Choose a scope and chunk'],
     '/oneplus': ['OnePlus inference worker', 'Control only the local llama.cpp worker. Verification uses it when explicitly selected; there is no automatic provider fallback.', 'Check worker status'],
@@ -196,8 +222,11 @@
   if (path === '/errors') return;
   const main = document.querySelector('main.main-content');
   if (!main) return;
+  let refreshing = false;
 
   async function refreshAttentionStrip() {
+    if (refreshing || document.visibilityState !== 'visible') return;
+    refreshing = true;
     let strip = document.getElementById('global-attention-strip');
     try {
       const response = await fetch('/api/errors', {cache:'no-store'});
@@ -220,8 +249,15 @@
       strip.innerHTML = `<div><strong>Needs attention</strong><span>${failures ? `${failures} pipeline issue${failures === 1 ? '' : 's'}` : 'No pipeline failures'}${audits ? ` · ${audits} human decision${audits === 1 ? '' : 's'}` : ''}</span></div><a class="mini-action" href="${failures ? "/errors" : "/review-center"}">${failures ? "Open diagnostics" : "Open Review"}</a>`;
     } catch (_) {
       if (strip) { strip.hidden = true; strip.textContent = ''; }
+    } finally {
+      refreshing = false;
     }
   }
 
   refreshAttentionStrip();
+  const attentionTimer = setInterval(refreshAttentionStrip, 30000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') refreshAttentionStrip();
+  });
+  window.addEventListener('pagehide', () => clearInterval(attentionTimer), {once:true});
 })();

@@ -33,14 +33,14 @@
       <div>
         <p class="eyebrow">Library</p>
         <h1>Books</h1>
-        <p class="subtle">One place to see what is ready, what is running, and what needs attention.</p>
+        <p class="subtle">One place to see what is ready, what is running, and which books have a blocked pipeline stage.</p>
       </div>
       <a class="primary-button" href="/add-book">Add book</a>
     </header>
 
     <section class="ui29-summary-grid" aria-label="Library summary">
       <button class="ui29-summary-card" type="button" data-summary-filter="all"><span>Books</span><strong id="summary-total">0</strong></button>
-      <button class="ui29-summary-card" type="button" data-summary-filter="attention"><span>Needs attention</span><strong id="summary-attention">0</strong></button>
+      <button class="ui29-summary-card" type="button" data-summary-filter="attention"><span>Stage blockers</span><strong id="summary-attention">0</strong></button>
       <button class="ui29-summary-card" type="button" data-summary-filter="active"><span>In progress</span><strong id="summary-active">0</strong></button>
       <button class="ui29-summary-card" type="button" data-summary-filter="done"><span>Search available</span><strong id="summary-ready">0</strong></button>
     </section>
@@ -55,7 +55,7 @@
         </div>
         <div class="ui29-filter-row">
           <label class="workflow-search"><span class="visually-hidden">Find a book</span><input type="search" id="book-search" placeholder="Search books" /></label>
-          <label><span class="visually-hidden">Filter books</span><select id="book-filter"><option value="all">All books</option><option value="attention">Needs attention</option><option value="active">In progress</option><option value="done">Search available</option></select></label>
+          <label><span class="visually-hidden">Filter books</span><select id="book-filter"><option value="all">All books</option><option value="attention">Stage blockers</option><option value="active">In progress</option><option value="done">Search available</option></select></label>
         </div>
       </div>
       <div id="book-list" class="ui29-book-list" aria-label="Books"><p class="empty-state">Loading your library…</p></div>
@@ -65,11 +65,10 @@
       <summary>How the pipeline works</summary>
       <div class="ui29-details-body ui29-stage-line">
         <span>Convert</span><b>→</b><span>Analyze</span><b>→</b><span>Verify</span><b>→</b><span>Finalize</span><b>→</b><span>Chunk</span><b>→</b><span>Embed</span><b>→</b><span>Search</span>
-        <p>Open any book to see its current stage and the single next action. Raw Docling files stay unchanged; corrections are applied as overlays. AI reviews propose changes; save or apply a human correction to change the effective book. Search availability does not certify complete extraction or validated evidence.</p>
+        <p>Open any book to see its current stage and the single next action. Raw Docling files stay unchanged; corrections are applied as overlays. AI reviews propose changes; save or apply a human correction to change the effective book. Search availability does not certify complete extraction or validated evidence. The Stage blockers count is library-scoped; the global Needs attention banner also includes diagnostics and human decisions outside the library stage summary.</p>
       </div>
     </details>
   </main>
 </div>
 <script src="/assets/nav.js?v=5.0.8.1"></script><script src="/assets/workflow.js?v=5.0.8.1"></script>
 </body></html>
-
