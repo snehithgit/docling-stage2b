@@ -89,6 +89,7 @@ from .review_workers import ReviewAssistantStore, ReviewAssistantService
 from .anomaly_review import anomaly_evidence_signature, detect_anomaly_types
 from .structural_anomaly import structural_entries
 from .version import APP_VERSION
+from .evidence_contract import SCHEMA as EVIDENCE_SCHEMA, LEGACY_SCHEMA as LEGACY_EVIDENCE_SCHEMA, evidence_coverage, book_readiness, machine_readiness, migrate_ledger
 from .table_repair import (
     TABLE_ROW_COLLAPSE_CODE, ensure_collapse_scan, table_repair_context, parse_tsv_matrix,
     load_document_from_zip, save_table_repair, deactivate_table_repair,
@@ -2488,6 +2489,12 @@ def attach_stage2(rows: list[dict], postprocess_rows: list[dict]) -> list[dict]:
     return rows
 
 
+@app.get("/api/pipeline/roadmap")
+async def pipeline_roadmap() -> dict:
+    from .v5_roadmap import phases
+    return {"schema": "project-roadmap/v1", "release_line": "V5", "version": APP_VERSION, "phases": phases()}
+
+
 @app.get("/api/version")
 async def version():
     return {"version": APP_VERSION}
@@ -2896,6 +2903,11 @@ async def documents() -> dict:
             verification_rows = await runtime.stage2b_store.list_book_jobs_raw(job_id) if total else []
             s2c = stage2c_freshness(result_dir, verification_rows, rule_version=STAGE2C_RULE_VERSION, artifact_sweep_required=bool(getattr(runtime.config, "stage2b_artifact_sweep_required_for_finalize", True)))
             s3 = stage3_freshness(result_dir, s2c, stage3_rule_version=STAGE3_RULE_VERSION, retrieval_rule_version=RETRIEVAL_RULE_VERSION)
+            audit_gate = await asyncio.to_thread(verifier_audit_summary, result_dir, text_require_human=bool(runtime.config.stage2c_require_human_review))
+            pipeline["blocking_reviews"] = int(structural_review.get("blocking_review_required") or 0) + int(audit_gate.get("blocking_review_required") or 0)
+            pipeline["audit_bypassed"] = bool(audit_gate.get("bypassed_for_testing"))
+            required_rows = verification_rows_for_stage2c(verification_rows, artifact_sweep_required=bool(getattr(runtime.config, "stage2b_artifact_sweep_required_for_finalize", True)))
+            pipeline["required_verification_ready"] = all(item.get("status") == "completed" for item in required_rows)
             pipeline["stage2c_ready"] = bool(s2c.get("ready"))
             pipeline["stage3_ready"] = bool(s3.get("ready"))
             row["stage2c_status"] = s2c.get("status") or row.get("stage2c_status")
@@ -3004,6 +3016,15 @@ async def documents() -> dict:
                 pipeline["next_stage"] = "machine_embedding"
                 pipeline["blocked_reason"] = "Machine embeddings are waiting for all assigned manuals to finish Stage 3, or are rebuilding after an upstream change."
         row["pipeline"] = pipeline
+        coverage = await asyncio.to_thread(evidence_coverage, Path(runtime.config.processed_dir) / Path(str(row["result_dir"])).name) if row.get("result_dir") else {"status": "not_scanned", "detected": None, "validated": None, "whole_manual_coverage_measured": False}
+        row["readiness"] = book_readiness(
+            correction_current=bool(pipeline.get("stage2c_ready")),
+            verification_ready=bool(pipeline.get("required_verification_ready")),
+            blocking_reviews=int(pipeline.get("blocking_reviews") or 0),
+            index_current=bool(pipeline.get("stage3_ready")), coverage=coverage,
+            hybrid_ready=bool(pipeline.get("machine_embedding_ready")),
+            audit_bypassed=bool(pipeline.get("audit_bypassed")),
+        )
 
     return {
         "documents": rows,
@@ -5280,6 +5301,13 @@ async def _retrieval_books() -> list[dict]:
             "hybrid_index_ready": False,
             "hybrid_index_status": {"ready": False, "scope": "equipment", "reason": "machine_scoped_embeddings"},
             "visual_index_ready": (result_dir / "visual_evidence_index.jsonl").is_file(),
+            "readiness": book_readiness(
+                correction_current=bool(stage2c_info.get("ready")),
+                verification_ready=all(item.get("status") == "completed" for item in verification_rows_for_stage2c(verification_rows, artifact_sweep_required=bool(getattr(runtime.config, "stage2b_artifact_sweep_required_for_finalize", True)))),
+                blocking_reviews=pending_human_review, index_current=bool(stage3_info.get("ready")),
+                coverage=await asyncio.to_thread(evidence_coverage, result_dir),
+                audit_bypassed=bool(audit_review.get("bypassed_for_testing")),
+            ),
             "quality": quality,
             "visual_quality": visual_summary,
         })
@@ -5444,6 +5472,10 @@ async def retrieval_status() -> dict:
         visual_excluded += int(visual_quality.get("rag_excluded_visuals") or 0)
     equipment = _equipment_catalog_with_hybrid(books)
     machine_rows = equipment.get("equipment") or []
+    by_job = {book["postprocess_job_id"]: book for book in books}
+    for machine in machine_rows:
+        selected_books = [by_job.get(manual.get("postprocess_job_id")) for manual in machine.get("manuals", []) if manual.get("active_for_rag", True)]
+        machine["readiness"] = machine_readiness(selected_books, lexical_ready=bool(machine.get("searchable")), hybrid_ready=bool(machine.get("hybrid_ready")))
     machine_hybrid_ready = sum(bool(row.get("hybrid_ready")) for row in machine_rows)
     return {
         "books": books,
@@ -7043,6 +7075,22 @@ async def detect_book_technical_evidence(job_id: int) -> dict:
     return {"postprocess_job_id": job_id, "summary": summary, "model_calls": 0, "raw_docling_immutable": True}
 
 
+@app.post("/api/postprocess/jobs/{job_id}/technical-evidence/migrate")
+async def migrate_book_technical_evidence(job_id: int) -> dict:
+    job = await runtime.postprocess_store.get_job(job_id)
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Book not found.")
+    result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+    async with runtime.book_lifecycle_locks.get(int(job_id)):
+        if not (result_dir / "technical_evidence_ledger.json").is_file():
+            raise HTTPException(status_code=409, detail="Detect technical evidence before migration.")
+        try:
+            result = await asyncio.to_thread(migrate_ledger, result_dir)
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            raise HTTPException(status_code=409, detail="Migration refused; history or source requires inspection.") from exc
+    return {"postprocess_job_id": job_id, **result, "model_calls": 0, "correction_ledger_unchanged": True}
+
+
 @app.get("/api/postprocess/jobs/{job_id}/technical-evidence")
 async def book_technical_evidence(job_id: int) -> dict:
     job = await runtime.postprocess_store.get_job(job_id)
@@ -7053,11 +7101,11 @@ async def book_technical_evidence(job_id: int) -> dict:
         return {"postprocess_job_id": job_id, "ready": False, "entries": [], "summary": {}}
     try:
         data = await asyncio.to_thread(_load_json_file, path)
-        if data.get("schema") != "technical-evidence-ledger/v1":
+        if data.get("schema") not in {EVIDENCE_SCHEMA, LEGACY_EVIDENCE_SCHEMA}:
             raise ValueError("Invalid evidence ledger")
     except (ValueError, OSError) as exc:
         raise HTTPException(status_code=409, detail="Technical evidence ledger is invalid.") from exc
-    return {"postprocess_job_id": job_id, "ready": True, **data}
+    return {"postprocess_job_id": job_id, "ready": True, **data, "available": True, "coverage": await asyncio.to_thread(evidence_coverage, path.parent)}
 
 
 @app.get("/api/postprocess/jobs/{job_id}/source-page/{page}")

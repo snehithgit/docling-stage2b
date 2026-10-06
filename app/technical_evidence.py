@@ -8,6 +8,7 @@ import time
 import uuid
 from collections import Counter
 from pathlib import Path
+from .evidence_contract import SCHEMA, normalized_record, normalize_ledger, source_signature, atomic_json, backup_legacy_ledger
 
 RULE_VERSION = "technical-evidence-v1"
 CATEGORIES = {
@@ -102,7 +103,7 @@ def detect_record(row: dict) -> dict | None:
     # Explicit topic aliases add discoverability, never new source facts.
     if re.search(r"overheat", context + text, re.I):
         terms += ["high oil temperature", "oil temperature high", "overheating"] if re.search(r"hydraulic|oil", context + text, re.I) else ["overheating"]
-    return {
+    return normalized_record({
         "entry_id": "TE-" + hashlib.sha256(identity.encode()).hexdigest()[:24],
         "schema": "technical-evidence-ledger/v1", "rule_version": RULE_VERSION,
         "evidence_types": categories, "source_format": "flowchart" if graph else "image" if visual_required else "table" if "|" in text else "paragraph",
@@ -117,7 +118,7 @@ def detect_record(row: dict) -> dict | None:
         "validation_reason": "diagram_relationships_require_pixel_verification" if visual_required else "literal_source_with_provenance" if provenance_valid else "source_page_or_item_missing",
         "answer_eligible": provenance_valid and not visual_required,
         "human_verified": False,
-    }
+    })
 
 
 def annotate_rows(rows: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -137,22 +138,29 @@ def annotate_rows(rows: list[dict]) -> tuple[list[dict], list[dict]]:
 def write_evidence_ledger(result_dir: Path, rows: list[dict]) -> dict:
     """Called under the book lifecycle lock. Corrupt existing history is an error."""
     path = result_dir / "technical_evidence_ledger.json"
-    existing = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"entries": []}
-    if not isinstance(existing, dict) or not isinstance(existing.get("entries"), list):
-        raise ValueError("Invalid technical evidence ledger; refusing to replace history")
+    existing = {"schema": SCHEMA, "entries": []}
+    if path.exists():
+        original = path.read_bytes()
+        existing = json.loads(original)
+        normalized = normalize_ledger(existing)
+        if existing["schema"] != SCHEMA:
+            backup_legacy_ledger(path, original)
+        existing = normalized
     _, records = annotate_rows(rows)
+    previous = {record["entry_id"]: record for record in existing["entries"] if not record.get("superseded")}
+    # Same source identity + parser version preserves every reviewed field.
+    # A changed source/parser gets a new ID and supersedes its old history.
+    records = [normalized_record({**record, **previous[record["entry_id"]]}) if record["entry_id"] in previous else record for record in records]
     active = {r["entry_id"] for r in records}
-    history = [{**r, "superseded": True} for r in existing["entries"] if r.get("entry_id") not in active]
-    payload = {"schema": "technical-evidence-ledger/v1", "rule_version": RULE_VERSION,
+    history = [normalized_record({**r, "superseded": True}) for r in existing["entries"] if r.get("entry_id") not in active]
+    payload = {**existing, "schema": SCHEMA, "rule_version": RULE_VERSION,
                "updated_at_epoch": time.time(), "entries": records + history,
-               "summary": dict(Counter(r["validation_status"] for r in records)),
+               "summary": dict(Counter(r["validation"]["state"] for r in records)),
+               "source_index_signature": source_signature(rows),
                "raw_docling_immutable": True}
-    temporary = path.with_suffix("." + uuid.uuid4().hex + ".tmp")
-    try:
-        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    if existing.get("migration"):
+        payload["migration"] = existing["migration"]
+    atomic_json(path, payload)
     return payload["summary"]
 
 
