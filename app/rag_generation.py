@@ -55,11 +55,11 @@ def _clean_book(value: Any) -> str:
 
 
 def _literal_measurements(text: str) -> set[tuple[str, str]]:
-    pattern = r"(?<![\w.])(\d+(?:\.\d+)?)\s*(millimetres?|millimeters?|metres?|meters?|mm|cm|m|volts?|v|bar|psi|hz|°\s*c)(?!\w)"
+    pattern = r"(?<![\w.+-])([+-]?\d+(?:\.\d+)?)\s*(millimetres?|millimeters?|metres?|meters?|mm|cm|m|volts?|v|bar|psi|hz|°\s*c)(?!\w)"
     aliases = {"metre": "m", "metres": "m", "meter": "m", "meters": "m",
                "millimetre": "mm", "millimetres": "mm", "millimeter": "mm", "millimeters": "mm",
                "volt": "v", "volts": "v"}
-    return {(value.rstrip("0").rstrip(".") if "." in value else value,
+    return {(value.lstrip("+").rstrip("0").rstrip(".") if "." in value else value.lstrip("+"),
              aliases.get(unit, unit)) for value, raw_unit in re.findall(pattern, text.lower())
             for unit in [re.sub(r"\s+", "", raw_unit)]}
 

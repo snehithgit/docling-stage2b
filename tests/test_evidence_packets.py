@@ -46,6 +46,7 @@ def test_exact_cable_length_can_promote_sixth_result_without_unit_conversion():
     from app.rag_generation import _literal_measurements
     assert _literal_measurements("3 metres") == _literal_measurements("3.0 m")
     assert _literal_measurements("3 mm") != _literal_measurements("3 m")
+    assert _literal_measurements("-3 V") != _literal_measurements("+3 V")
 
 
 def test_unverified_relationships_do_not_enter_prompt_but_literal_text_remains(tmp_path):
