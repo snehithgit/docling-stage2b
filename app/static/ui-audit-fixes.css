@@ -1,0 +1,162 @@
+/* Targeted repairs from the 2026-10-06 UI audit. Keep these rules narrow so
+   legacy/advanced pages can migrate to the shared workspace shell incrementally. */
+
+/* Closed off-canvas settings must not remain keyboard-focusable. */
+.settings-drawer[aria-hidden="true"] {
+  visibility: hidden;
+  pointer-events: none;
+}
+.settings-drawer[aria-hidden="false"] {
+  visibility: visible;
+}
+
+/* Improve low-contrast helper text on the repaired surfaces without changing
+   status colors or primary action hierarchy. */
+.ui-audit-surface .subtle,
+.ui-audit-surface .format-note,
+.ui-audit-surface .model-meta,
+.ui-audit-surface .help-list,
+.ui-audit-surface .field label {
+  color: #505867;
+}
+.ui-audit-surface .format-note,
+.ui-audit-surface .model-meta,
+.ui-audit-surface .help-list,
+.ui-audit-surface .field label,
+.ui-audit-surface .check-row {
+  font-size: 12px;
+}
+
+/* Technical Evidence now lives in the normal workspace shell. */
+.technical-evidence-main {
+  width: 100%;
+  min-width: 0;
+}
+.technical-evidence-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+.technical-evidence-controls .field,
+.technical-evidence-selection .field {
+  margin: 0;
+}
+.technical-evidence-selection {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+.technical-evidence-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+}
+.technical-evidence-source {
+  position: relative;
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f4f5f7;
+}
+.technical-evidence-source img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.technical-evidence-source svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.technical-evidence-json {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 320px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.technical-evidence-review-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  gap: 18px;
+  align-items: start;
+}
+.technical-evidence-review-grid > * {
+  min-width: 0;
+}
+
+/* Wide operational tables keep the action column visible and advertise
+   horizontal overflow instead of silently clipping controls. */
+.ui-audit-quality .table-wrap,
+.ui-audit-verification .verification-book-panel .table-wrap,
+.ui-audit-verification .full-verification-queue {
+  position: relative;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-gutter: stable;
+}
+.ui-audit-quality .table-wrap:focus,
+.ui-audit-verification .verification-book-panel .table-wrap:focus,
+.ui-audit-verification .full-verification-queue:focus {
+  outline: 3px solid color-mix(in srgb, var(--purple) 35%, transparent);
+  outline-offset: 2px;
+}
+.ui-audit-quality .table-wrap table,
+.ui-audit-verification .verification-book-panel table,
+.ui-audit-verification .full-verification-queue table {
+  min-width: 780px;
+}
+.ui-audit-quality .table-wrap th:last-child,
+.ui-audit-quality .table-wrap td:last-child,
+.ui-audit-verification .verification-book-panel th:last-child,
+.ui-audit-verification .verification-book-panel td:last-child,
+.ui-audit-verification .full-verification-queue th:last-child,
+.ui-audit-verification .full-verification-queue td:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  background: #fff;
+  box-shadow: -10px 0 14px -14px rgba(31, 35, 48, .55);
+}
+.ui-audit-quality .table-wrap th:last-child,
+.ui-audit-verification .verification-book-panel th:last-child,
+.ui-audit-verification .full-verification-queue th:last-child {
+  z-index: 3;
+  background: #f8f8fb;
+}
+
+/* Keep audit result content away from card borders at narrow widths. */
+.ui-audit-surface .audit-result-card,
+.ui-audit-surface .review-result-card,
+.ui-audit-surface .anomaly-result-card {
+  padding-inline: clamp(12px, 2.5vw, 22px);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .technical-evidence-controls,
+  .technical-evidence-selection,
+  .technical-evidence-review-grid {
+    grid-template-columns: 1fr;
+  }
+  .technical-evidence-controls > button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  .technical-evidence-actions > button,
+  .technical-evidence-actions > a {
+    width: 100%;
+  }
+  .technical-evidence-json {
+    min-height: 240px;
+  }
+}
