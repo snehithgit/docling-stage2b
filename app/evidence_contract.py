@@ -25,6 +25,19 @@ def normalized_record(record: dict) -> dict:
     result = dict(record)
     if not isinstance(result.get("entry_id"), str) or not result["entry_id"]:
         raise ValueError("Evidence entry identity is missing")
+    links = result.get("context_links") or []
+    if not isinstance(links, list) or any(not isinstance(link, dict) for link in links):
+        raise ValueError("Malformed technical context links")
+    for link in links:
+        if (link.get("status") != "candidate"
+                or link.get("link_type") not in {"note_for_diagram", "warning_for_diagram", "caption_for_diagram"}
+                or link.get("source_chunk_id") != result.get("source_chunk_id")
+                or not isinstance(link.get("target_chunk_id"), str) or not link["target_chunk_id"]
+                or not isinstance(link.get("target_source_sha256"), str) or len(link["target_source_sha256"]) != 64
+                or not isinstance(link.get("target_page_numbers"), list)
+                or not isinstance(link.get("target_doc_items"), list)
+                or link.get("branch_relationship_verified") is not False):
+            raise ValueError("Invalid technical context provenance")
     validation = dict(result.get("validation") or {})
     if validation:
         if validation.get("state") not in STATES:
@@ -40,6 +53,8 @@ def normalized_record(record: dict) -> dict:
         elif legacy == "missing_provenance":
             result["pending_requirements"] = ["source_provenance_recovery"]
     if result.get("superseded"):
+        if validation.get("state") != "superseded":
+            validation.setdefault("superseded_from_state", validation.get("state"))
         validation["state"] = "superseded"
     result.update(schema=SCHEMA, validation=validation)
     # Preserve original human flags/decisions; they are not proof that this new
@@ -148,6 +163,8 @@ def _coverage_snapshot(ledger_path: str, ledger_mtime: int, ledger_size: int,
             "source_current": current, "detected": len(active), "validated": valid,
             "unvalidated": len(active) - valid, "rejected": rejected, "pending": len(active) - valid - rejected, "states": dict(counts),
             "visual_parse_pending": sum(entry.get("validation_status") == "needs_visual_parse" and entry["validation"]["state"] not in {"validated", "rejected"} for entry in active),
+            "technical_notes": sum(entry.get("context_kind") == "note" for entry in active),
+            "context_link_candidates": len({(tuple(sorted((link.get("source_chunk_id", ""), link.get("target_chunk_id", "")))), link.get("link_type")) for entry in active for link in entry.get("context_links") or [] if link.get("status") == "candidate"}),
             "schema": data["schema"], "migration_required": data["schema"] == LEGACY_SCHEMA,
             "measurement_scope": "detected_candidates_only", "whole_manual_coverage_measured": False}
 
@@ -194,5 +211,7 @@ def machine_readiness(books: list[dict | None], *, lexical_ready: bool, hybrid_r
                          "detected": sum(item.get("detected") or 0 for item in evidence),
                          "validated": sum(item.get("validated") or 0 for item in evidence),
                          "visual_parse_pending": sum(item.get("visual_parse_pending") or 0 for item in evidence),
+                         "technical_notes": sum(item.get("technical_notes") or 0 for item in evidence),
+                         "context_link_candidates": sum(item.get("context_link_candidates") or 0 for item in evidence),
                          "manuals": len(books), "unknown_manuals": unknown,
                          "measurement_scope": "detected_candidates_only", "whole_manual_coverage_measured": False}}

@@ -1,3 +1,7 @@
+## V5.0.2 — Detection and context (phase 3 of 10)
+
+Body-based detection identifies N.B. operating notes and safety callouts independently of inherited chapter headings. Same-page diagram/note/caption/warning links carry exact source provenance and remain candidates. Generation can recover linked literal context while withholding unparsed diagrams. Detector refresh preserves human history and backs up prior technical ledgers; originals, corrections and embeddings are unchanged. See [Phase 3 detection and context](docs/v5-context-detection.md).
+
 ## V5.0.1 — Evidence packets (phase 2 of 10)
 
 Generation and prompt export now share question-based evidence selection without a fixed visual quota. Unvalidated derived relationships and incomplete diagrams are withheld; literal source text remains usable. Fully withheld packets stop before a model call. See [Phase 2 evidence policy and validation](docs/v5-evidence-packets.md).

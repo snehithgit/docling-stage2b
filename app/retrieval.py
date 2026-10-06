@@ -1547,23 +1547,23 @@ def refresh_retrieval_artifacts(
 @lru_cache(maxsize=128)
 def _load_index_cached(path: str, mtime_ns: int, size: int) -> tuple[dict[str, Any], ...]:
     del mtime_ns, size
-    rows: list[dict[str, Any]] = []
+    raw = []
     with Path(path).open("r", encoding="utf-8") as handle:
         for line in handle:
-            if not line.strip():
-                continue
-            value = json.loads(line)
-            if isinstance(value, dict):
-                value = dict(value)
-                if "technical_evidence_id" not in value:
-                    from .technical_evidence import annotate_rows
-                    value = annotate_rows([value])[0][0]
-                value["_tokens"] = _tokens(str(value.get("text") or "") + " " + " ".join(value.get("search_terms") or []))
-                value["_counter"] = Counter(value["_tokens"])
-                value["_length"] = max(1, sum(value["_counter"].values()))
-                value["_heading_tokens"] = set(_tokens(" ".join(value.get("headings") or [])))
-                value["_normalized_text"] = _normalized(str(value.get("text") or ""))
-                rows.append(value)
+            if line.strip():
+                value = json.loads(line)
+                if isinstance(value, dict):
+                    raw.append(value)
+    from .technical_evidence import annotate_rows
+    annotated, _ = annotate_rows(raw)
+    rows = []
+    for value in annotated:
+        value["_tokens"] = _tokens(str(value.get("text") or "") + " " + " ".join(value.get("search_terms") or []))
+        value["_counter"] = Counter(value["_tokens"])
+        value["_length"] = max(1, sum(value["_counter"].values()))
+        value["_heading_tokens"] = set(_tokens(" ".join(value.get("headings") or [])))
+        value["_normalized_text"] = _normalized(str(value.get("text") or ""))
+        rows.append(value)
     return tuple(rows)
 
 
