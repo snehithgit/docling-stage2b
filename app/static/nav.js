@@ -20,8 +20,24 @@
   window.DoclingUI.shouldDeferRefresh = () => {
     const active = document.activeElement;
     const editing = active && active.matches && active.matches('input, select, textarea, [contenteditable="true"]');
-    return editing || Date.now() < interactionUntil;
+    return document.visibilityState !== 'visible' || editing || Date.now() < interactionUntil;
   };
+})();
+
+(() => {
+  const regions = [
+    ['.table-wrap:has(#quality-jobs)', 'Extraction quality results'],
+    ['.table-wrap:has(#verification-books)', 'Verification books'],
+    ['.table-wrap:has(#pi5-results)', 'Text verification results'],
+    ['.table-wrap:has(#oneplus-results)', 'Vision verification results'],
+  ];
+  for (const [selector, label] of regions) {
+    const node = document.querySelector(selector);
+    if (!node) continue;
+    if (!node.hasAttribute('tabindex')) node.tabIndex = 0;
+    if (!node.hasAttribute('role')) node.setAttribute('role', 'region');
+    if (!node.hasAttribute('aria-label')) node.setAttribute('aria-label', `${label}; use arrow keys to scroll horizontally`);
+  }
 })();
 
 (function () {
