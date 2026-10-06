@@ -36,6 +36,7 @@ def test_technical_evidence_uses_shared_shell_and_visible_status() -> None:
 def test_workspace_hubs_do_not_poll_full_document_pipeline() -> None:
     script = _text("workspace-hub.js")
     assert "/api/documents" not in script
+    assert "/api/postprocess/status" in script
     assert "/api/workers" in script
     assert "/api/review-workers/status" in script
     assert "document.visibilityState !== 'visible'" in script
