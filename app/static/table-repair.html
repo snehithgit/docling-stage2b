@@ -4,8 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Table structure repair · Docling Auto-Convert</title>
-<link rel="stylesheet" href="/assets/styles.css?v=5.0.3" />
-<link rel="stylesheet" href="/assets/workflow.css?v=5.0.3" />
+<link rel="stylesheet" href="/assets/styles.css?v=5.0.4" />
+<link rel="stylesheet" href="/assets/workflow.css?v=5.0.4" />
 <style>
 .table-repair-grid{display:grid;grid-template-columns:minmax(340px,1fr) minmax(420px,1.2fr);gap:18px;align-items:start}.table-repair-source img{width:100%;height:auto;border:1px solid var(--border,#d8dee8);border-radius:10px;background:#fff}.table-repair-editor textarea{width:100%;min-height:420px;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;overflow:auto}.repair-preview{max-height:360px;overflow:auto;border:1px solid var(--border,#d8dee8);border-radius:10px}.repair-preview table{border-collapse:collapse;width:max-content;min-width:100%;font-size:12px}.repair-preview td,.repair-preview th{border:1px solid #d8dee8;padding:5px 7px;vertical-align:top;max-width:300px;white-space:pre-wrap}.repair-controls{display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin:12px 0}.repair-controls label{display:flex;flex-direction:column;gap:5px}.repair-note{min-width:280px;flex:1}.repair-warning{padding:10px 12px;border-radius:8px;background:#fff7df}.detected-list{max-height:220px;overflow:auto;font-size:12px}@media(max-width:900px){.table-repair-grid{grid-template-columns:1fr}}
 </style>
@@ -23,6 +23,6 @@
 <section class="table-repair-editor review-workspace-card"><h2>Human table structure overlay</h2><p class="subtle">Edit as TSV: one logical table row per line and one column per tab. The saved matrix replaces only the in-memory table used by Stage 3.</p><div class="repair-controls"><label>Header rows<input id="header-rows" type="number" min="0" max="100" value="1" /></label><label class="repair-note">Reviewer note<input id="note" type="text" maxlength="2000" placeholder="Optional note" /></label></div><textarea id="tsv" spellcheck="false" aria-label="Table repair TSV"></textarea><div class="repair-controls"><button class="primary-button" id="save" type="button">Save table repair</button><button class="secondary-button" id="reset" type="button">Reset to immutable Docling table</button><button class="secondary-button" id="dismiss" type="button">Dismiss as false positive</button></div><h3>Preview</h3><div class="repair-preview" id="preview"></div></section>
 </div>
 </main></div>
-<script src="/assets/table-repair.js?v=5.0.3"></script>
+<script src="/assets/table-repair.js?v=5.0.4"></script>
 </body>
 </html>

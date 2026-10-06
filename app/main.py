@@ -5757,7 +5757,7 @@ async def retrieval_prompt_bundle(update: RetrievalPromptExportRequest) -> dict:
         update.query, results, update.postprocess_job_id, min(5, candidate_k),
         books=selected_books, equipment_scoped=scope.get("mode") == "equipment",
     )
-    results, visual_results = await asyncio.to_thread(bind_evidence, results, visual_results, selected_books, Path(runtime.config.processed_dir))
+    results, visual_results = await asyncio.to_thread(bind_evidence, results, visual_results, selected_books, Path(runtime.config.processed_dir), Path(runtime.config.output_dir))
     allowed_job_ids = {int(row.get("postprocess_job_id") or 0) for row in selected_books} if scope.get("mode") == "equipment" else None
     sources, evidence_scope = prepare_generation_sources(
         results, update.query, visual_results=visual_results, max_sources=top_k,
@@ -5792,7 +5792,7 @@ async def _execute_retrieval_generation(update: RetrievalGenerateRequest) -> dic
         update.query, results, update.postprocess_job_id, min(5, candidate_k),
         books=selected_books, equipment_scoped=scope.get("mode") == "equipment",
     )
-    results, visual_results = await asyncio.to_thread(bind_evidence, results, visual_results, selected_books, Path(runtime.config.processed_dir))
+    results, visual_results = await asyncio.to_thread(bind_evidence, results, visual_results, selected_books, Path(runtime.config.processed_dir), Path(runtime.config.output_dir))
     allowed_job_ids = {int(row.get("postprocess_job_id") or 0) for row in selected_books} if scope.get("mode") == "equipment" else None
     sources, evidence_scope = prepare_generation_sources(
         results, update.query, visual_results=visual_results, max_sources=top_k,
@@ -7083,6 +7083,117 @@ async def detect_book_technical_evidence(job_id: int) -> dict:
     return {"postprocess_job_id": job_id, "summary": summary, "model_calls": 0, "raw_docling_immutable": True,
             "detection_rule": TECH_RULE, "context_relationships_are_candidates": True,
             "coverage": await asyncio.to_thread(evidence_coverage, result_dir)}
+
+
+@app.post("/api/postprocess/jobs/{job_id}/technical-evidence/{entry_id}/visual-extract")
+async def extract_book_visual_evidence(job_id: int, entry_id: str, picture_index: int, force: bool = False):
+    from .visual_graph import current_entry, save_graph
+    if picture_index < 0:
+        raise HTTPException(status_code=400, detail="Invalid picture index")
+    job = await runtime.postprocess_store.get_job(job_id)
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Book not found")
+    directory = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+    lock = runtime.book_lifecycle_locks.get(int(job_id))
+    try:
+        async with lock:
+            _, record = await asyncio.to_thread(current_entry, directory, entry_id)
+            if f"#/pictures/{picture_index}" not in record.get("doc_items", []):
+                raise ValueError("Picture does not belong to this source entry")
+            manifest = await asyncio.to_thread(_load_json_file, directory / "source_manifest.json")
+            name = Path(str(manifest.get("converted_zip") or job.get("output_filename") or "")).name
+            archive = Path(runtime.config.output_dir) / name
+            image, mime, _ = await asyncio.to_thread(_picture_image_from_converted_zip, archive, picture_index)
+            image_hash = hashlib.sha256(image).hexdigest()
+            prior = record.get("visual_extraction") or {}
+            if not force and prior.get("image_sha256") == image_hash and prior.get("source_sha256") == record["source_sha256"]:
+                return {"extraction": prior, "model_calls": 0, "cached": True}
+            if record["validation"]["state"] in {"rejected", "validated"}:
+                raise ValueError("Reviewed evidence cannot be replaced by extraction")
+            source_hash = record["source_sha256"]
+        identity = hashlib.sha256((entry_id + image_hash + (uuid.uuid4().hex if force else "")).encode()).hexdigest()
+        inference_job = {"id": -int(identity[:12], 16), "result_dir": job["result_dir"],
+                         "postprocess_job_id": job_id, "generation": identity, "source_json": "{}"}
+        graph, provider, model = await runtime.stage2b_worker.extract_technical_visual(image, mime, inference_job)
+        async with lock:
+            current_image, _, _ = await asyncio.to_thread(_picture_image_from_converted_zip, archive, picture_index)
+            if hashlib.sha256(current_image).hexdigest() != image_hash:
+                raise ValueError("Source image changed during inference; extraction discarded")
+            extraction = await asyncio.to_thread(save_graph, directory, entry_id, graph, picture_index,
+                                                   image_hash, source_hash, provider, model)
+    except (ValueError, RuntimeError, OSError, KeyError, IndexError, zipfile.BadZipFile, httpx.HTTPError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    runtime.events.notify("technical_visual_extracted", postprocess_job_id=job_id)
+    return {"extraction": extraction, "model_calls": 1, "answer_eligible": False, "corrections_changed": False}
+
+
+class VisualGraphEdit(BaseModel):
+    graph: dict
+    graph_sha256: str = Field(min_length=64, max_length=64)
+    actor: str = Field(min_length=1, max_length=100)
+
+
+@app.post("/api/postprocess/jobs/{job_id}/technical-evidence/{entry_id}/visual-edit")
+async def edit_book_visual_evidence(job_id: int, entry_id: str, edit: VisualGraphEdit):
+    from .visual_graph import current_entry, save_graph
+    job = await runtime.postprocess_store.get_job(job_id)
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Book not found")
+    directory = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+    async with runtime.book_lifecycle_locks.get(int(job_id)):
+        try:
+            _, record = await asyncio.to_thread(current_entry, directory, entry_id)
+            prior = record.get("visual_extraction") or {}
+            if not edit.actor.strip() or prior.get("graph_sha256") != edit.graph_sha256:
+                raise ValueError("Reviewer name is required and graph must still match the reviewed version")
+            manifest = await asyncio.to_thread(_load_json_file, directory / "source_manifest.json")
+            name = Path(str(manifest.get("converted_zip") or job.get("output_filename") or "")).name
+            image, _, _ = await asyncio.to_thread(_picture_image_from_converted_zip, Path(runtime.config.output_dir) / name, prior["picture_index"])
+            image_hash = hashlib.sha256(image).hexdigest()
+            if image_hash != prior.get("image_sha256"):
+                raise ValueError("Image changed; re-extract first")
+            extraction = await asyncio.to_thread(save_graph, directory, entry_id, edit.graph, prior["picture_index"], image_hash, record["source_sha256"], "human:" + edit.actor.strip(), "manual_graph_edit")
+        except (ValueError, OSError, KeyError, IndexError, zipfile.BadZipFile) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    runtime.events.notify("technical_visual_edited", postprocess_job_id=job_id)
+    return {"extraction": extraction, "model_calls": 0, "answer_eligible": False}
+
+
+class VisualGraphDecision(BaseModel):
+    actor: str = Field(min_length=1, max_length=100)
+    graph_sha256: str = Field(min_length=64, max_length=64)
+    image_sha256: str = Field(min_length=64, max_length=64)
+    checked_labels_geometry_arrows_branches: bool
+
+
+@app.post("/api/postprocess/jobs/{job_id}/technical-evidence/{entry_id}/visual-validate")
+async def validate_book_visual_evidence(job_id: int, entry_id: str, decision: VisualGraphDecision):
+    from .visual_graph import current_entry, validate_graph
+    if decision.checked_labels_geometry_arrows_branches is not True:
+        raise HTTPException(status_code=409, detail="Check the original image labels, geometry, arrows and branches first")
+    job = await runtime.postprocess_store.get_job(job_id)
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Book not found")
+    directory = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+    async with runtime.book_lifecycle_locks.get(int(job_id)):
+        try:
+            _, record = await asyncio.to_thread(current_entry, directory, entry_id)
+            extraction = record.get("visual_extraction") or {}
+            manifest = await asyncio.to_thread(_load_json_file, directory / "source_manifest.json")
+            name = Path(str(manifest.get("converted_zip") or job.get("output_filename") or "")).name
+            image, _, _ = await asyncio.to_thread(_picture_image_from_converted_zip, Path(runtime.config.output_dir) / name, extraction["picture_index"])
+            if hashlib.sha256(image).hexdigest() != decision.image_sha256:
+                raise ValueError("Source image changed; re-extract before review")
+            result = await asyncio.to_thread(validate_graph, directory, entry_id, decision.graph_sha256, decision.image_sha256, decision.actor)
+        except (ValueError, OSError, KeyError, IndexError, zipfile.BadZipFile) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    runtime.events.notify("technical_visual_validated", postprocess_job_id=job_id)
+    return {"entry": result, "corrections_changed": False, "model_calls": 0}
+
+
+@app.get("/technical-evidence")
+async def technical_evidence_page():
+    return FileResponse(Path(__file__).parent / "static" / "technical-evidence.html")
 
 
 @app.post("/api/postprocess/jobs/{job_id}/technical-evidence/migrate")

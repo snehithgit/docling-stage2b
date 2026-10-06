@@ -1,3 +1,7 @@
+## V5.0.4 — Visual graph extraction (phase 5 of 10)
+
+Artifact audit now links to image-bound node/connection extraction using the selected Vision provider. Review exact labels, boxes and arrow/branch directions, edit candidates and validate them against the original image. Changed images, uncertain graphs and incomplete multi-image records are withheld from verified answers. Book corrections remain unchanged. See [Phase 5 visual graphs](docs/v5-visual-graphs.md).
+
 ## V5.0.3 — Structured literal parsing (phase 4 of 10)
 
 Explicit troubleshooting, alarm, parts and specification tables and labeled fault/cause/remedy paragraphs now produce source-quoted structured candidates. Ambiguous rows are flagged; structured values require independent validation before use as verified answer evidence. Refresh preserves human history and backs up prior ledgers. See [Phase 4 parsing](docs/v5-structured-parsing.md).

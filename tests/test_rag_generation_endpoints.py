@@ -9,7 +9,7 @@ def test_all_withheld_evidence_stops_before_model_call(monkeypatch):
     async def fake_results(*args, **kwargs):
         return [_result()], 1, [], {"mode": "single_book"}
 
-    def fake_bind(results, visuals, books, processed):
+    def fake_bind(results, visuals, books, processed, output=None):
         return [{**r, "generation_blocked_reason": "visual_relationships_unvalidated"} for r in results], []
 
     async def forbidden_generate(*args, **kwargs):

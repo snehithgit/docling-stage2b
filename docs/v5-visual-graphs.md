@@ -1,0 +1,11 @@
+# V5.0.4: Source image graph extraction and review
+
+Open **Artifact audit → Diagram extraction and graph review**. Select a manual and source picture, then request extraction through the currently selected Vision provider. Local Pi5/OnePlus, Colab and the configured cloud Vision provider use existing physical-worker reservation, locks, timeouts/checkpoints and quota guards. Busy providers refuse the request; there is no fallback or automatic repeated inference. Existing identical image extractions are reused unless a fresh request is explicitly chosen.
+
+The full image yields at most 40 labeled nodes and 60 connections. Nodes retain literal model-read text and normalized image boxes. Connections retain endpoint IDs, literal branch labels and an explicit direction: forward, undirected or unknown. Unreadable/omitted content is reported separately. Structural validation rejects invalid geometry, duplicate IDs and dangling/duplicate connections. These checks do not prove pixel accuracy.
+
+Review boxes over the original image and inspect the editable JSON. Save manual graph edits without model calls. Validation requires a reviewer name and an explicit check of labels, geometry, arrow directions and branches. Empty/unresolved graphs, unknown directions, multi-picture chunks and mixed entries needing additional structured-field validation cannot be certified by this graph-only workflow. Reviewed/rejected entries cannot be overwritten by extraction. Extraction history and existing human book decisions remain preserved; this does not apply book corrections.
+
+Extraction binds the current source chunk hash, picture index and exact image hash. Changed source indexes or images during inference refuse saving. Prompt binding checks the current converted image again and withholds missing/changed image evidence. A human validation proof binds both image and graph hashes. Only eligible, current graphs enter the answer packet; graph-based indexing/ranking follows in Phase 6.
+
+No automatic rerun of historical vision routes or blanket Colab job queue occurs on deployment. Existing manuals gain graphs as extraction is requested. Large, unreadable and multi-image diagrams may need source repair or more granular future extraction; this release does not claim complete diagram coverage or semantic answer verification.
