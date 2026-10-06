@@ -98,3 +98,7 @@ def test_wrong_length_part_is_not_complete_value_coverage(tmp_path):
  results,report=recover_scoped_evidence([selected],query,[wrong],5)
  assert any(r['chunk_id']=='RIGHT' for r in results[0]['recovery_candidates'])
  assert not report['post_recovery_coverage']['missing_requested_values']
+
+def test_art_no_column_is_explicit_identifier_coverage():
+ parts=row('PARTS','Table columns: Art. No. | Quantity | Description\n| 4000002205 | 1 | USB cable 3 m |')
+ assert not assess_candidates([parts],'Part number for USB cable 3m')['missing_candidate_roles']

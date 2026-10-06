@@ -1,7 +1,7 @@
 """Bounded query planning and same-scope candidate recovery, without inference."""
 from __future__ import annotations
 import re
-from .retrieval import search_indices, _tokens
+from .retrieval import search_indices, _tokens, _PARTS_NUMBER_COLUMN_RE
 
 VERSION = 'scoped-recovery/v1'
 EXPANSIONS = {
@@ -51,7 +51,7 @@ def candidate_roles(row):
  if row.get('technical_validation_status')=='needs_visual_parse' and not row.get('verified_search_text'):roles.discard('cause')
  if re.search(r'\b(?:check|inspect|replace|repair|clean|set|press|start|stop|reset|install|adjust|disconnect|tighten)\b',text):roles.add('action')
  if re.search(r'alarm|meaning|indicat|fault code|error code',text):roles.add('meaning')
- if re.search(r'(?:part(?:\s*/\s*order)?|article|order)\s*(?:no\.?|number)|part_number',text) and re.search(r'\d',text):roles.add('identifier')
+ if (re.search(r'(?:part(?:\s*/\s*order)?|article|order)\s*(?:no\.?|number)|part_number',text) or _PARTS_NUMBER_COLUMN_RE.search(text)) and re.search(r'\d',text):roles.add('identifier')
  if len(_tokens(text))>=4:roles.add('description')
  if re.search(r'[-+]?\d+(?:[.,]\d+)?\s*(?:bar|pa|mpa|v|volt|a|amp|mm|cm|rpm|°c|deg|nm|n\.m|hz|kw|kg|m\b)',text):roles.add('value')
  if re.search(r'warning|caution|must not|do not|interlock',text):roles.add('constraint')
