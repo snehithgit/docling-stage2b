@@ -5669,6 +5669,8 @@ async def _retrieval_results_for_question(
             "pending_human_review": int(row.get("pending_human_review") or 0),
             "warning": row.get("index_warning"),
         } for row in selected]
+        from .retrieval_recovery import recover_scoped_evidence
+        results, scope["evidence_recovery"] = await asyncio.to_thread(recover_scoped_evidence, paths, query, results, top_k)
         return results, len(paths), selected, scope
 
     if equipment_id:
@@ -5720,6 +5722,8 @@ async def _retrieval_results_for_question(
         "pending_human_review": int(row.get("pending_human_review") or 0),
         "warning": row.get("index_warning"),
     } for row in selected]
+    from .retrieval_recovery import recover_scoped_evidence
+    results, scope["evidence_recovery"] = await asyncio.to_thread(recover_scoped_evidence, paths, query, results, top_k)
     return results, len(paths), selected, scope
 
 
