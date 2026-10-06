@@ -48,6 +48,14 @@ def test_books_library_throttles_expensive_document_refresh() -> None:
     assert "visibilitychange" in script
 
 
+def test_books_explains_library_scoped_stage_blockers() -> None:
+    page = _text("workflow.html")
+    script = _text("workflow.js")
+    assert "Stage blockers" in page
+    assert "global Needs attention banner" in page
+    assert "stage blocker" in script
+
+
 def test_quality_polling_stops_in_hidden_tabs() -> None:
     script = _text("quality.js")
     assert "document.visibilityState !== 'visible'" in script
@@ -55,11 +63,24 @@ def test_quality_polling_stops_in_hidden_tabs() -> None:
     assert "pagehide" in script
 
 
+def test_shared_refresh_guard_defers_hidden_tabs() -> None:
+    script = _text("nav.js")
+    assert "document.visibilityState !== 'visible' || editing" in script
+
+
 def test_nav_loads_shared_audit_css_and_refreshes_attention_status() -> None:
     script = _text("nav.js")
     assert "ui-audit-fixes.css" in script
     assert "setInterval(refreshAttentionStrip, 30000)" in script
     assert "visibilitychange" in script
+
+
+def test_wide_operational_tables_are_keyboard_scrollable() -> None:
+    script = _text("nav.js")
+    assert ".table-wrap:has(#quality-jobs)" in script
+    assert ".table-wrap:has(#verification-books)" in script
+    assert "node.tabIndex = 0" in script
+    assert "use arrow keys to scroll horizontally" in script
 
 
 def test_shared_audit_css_hides_closed_drawer_and_preserves_table_actions() -> None:
