@@ -10,20 +10,26 @@
   visibility: visible;
 }
 
-/* Improve low-contrast helper text on the repaired surfaces without changing
+/* Improve low-contrast helper text on repaired/review surfaces without changing
    status colors or primary action hierarchy. */
 .ui-audit-surface .subtle,
 .ui-audit-surface .format-note,
 .ui-audit-surface .model-meta,
 .ui-audit-surface .help-list,
-.ui-audit-surface .field label {
+.ui-audit-surface .field label,
+body:has(#quality-jobs) .subtle,
+body:has(#quality-jobs) .format-note,
+.verification-workspace .subtle,
+.verification-workspace .format-note {
   color: #505867;
 }
 .ui-audit-surface .format-note,
 .ui-audit-surface .model-meta,
 .ui-audit-surface .help-list,
 .ui-audit-surface .field label,
-.ui-audit-surface .check-row {
+.ui-audit-surface .check-row,
+body:has(#quality-jobs) .format-note,
+.verification-workspace .format-note {
   font-size: 12px;
 }
 
@@ -92,50 +98,49 @@
   min-width: 0;
 }
 
-/* Wide operational tables keep the action column visible and advertise
-   horizontal overflow instead of silently clipping controls. */
-.ui-audit-quality .table-wrap,
-.ui-audit-verification .verification-book-panel .table-wrap,
-.ui-audit-verification .full-verification-queue {
+/* Wide operational tables keep their action column visible instead of silently
+   clipping it. :has() scopes these rules to the exact audited tables. */
+.table-wrap:has(#quality-jobs),
+.table-wrap:has(#verification-books),
+.table-wrap:has(#pi5-results),
+.table-wrap:has(#oneplus-results) {
   position: relative;
   overflow-x: auto;
   overscroll-behavior-inline: contain;
   scrollbar-gutter: stable;
 }
-.ui-audit-quality .table-wrap:focus,
-.ui-audit-verification .verification-book-panel .table-wrap:focus,
-.ui-audit-verification .full-verification-queue:focus {
-  outline: 3px solid color-mix(in srgb, var(--purple) 35%, transparent);
-  outline-offset: 2px;
-}
-.ui-audit-quality .table-wrap table,
-.ui-audit-verification .verification-book-panel table,
-.ui-audit-verification .full-verification-queue table {
+.table-wrap:has(#quality-jobs) table,
+.table-wrap:has(#verification-books) table,
+.table-wrap:has(#pi5-results) table,
+.table-wrap:has(#oneplus-results) table {
   min-width: 780px;
 }
-.ui-audit-quality .table-wrap th:last-child,
-.ui-audit-quality .table-wrap td:last-child,
-.ui-audit-verification .verification-book-panel th:last-child,
-.ui-audit-verification .verification-book-panel td:last-child,
-.ui-audit-verification .full-verification-queue th:last-child,
-.ui-audit-verification .full-verification-queue td:last-child {
+.table-wrap:has(#quality-jobs) th:last-child,
+.table-wrap:has(#quality-jobs) td:last-child,
+.table-wrap:has(#verification-books) th:last-child,
+.table-wrap:has(#verification-books) td:last-child,
+.table-wrap:has(#pi5-results) th:last-child,
+.table-wrap:has(#pi5-results) td:last-child,
+.table-wrap:has(#oneplus-results) th:last-child,
+.table-wrap:has(#oneplus-results) td:last-child {
   position: sticky;
   right: 0;
   z-index: 2;
   background: #fff;
   box-shadow: -10px 0 14px -14px rgba(31, 35, 48, .55);
 }
-.ui-audit-quality .table-wrap th:last-child,
-.ui-audit-verification .verification-book-panel th:last-child,
-.ui-audit-verification .full-verification-queue th:last-child {
+.table-wrap:has(#quality-jobs) th:last-child,
+.table-wrap:has(#verification-books) th:last-child,
+.table-wrap:has(#pi5-results) th:last-child,
+.table-wrap:has(#oneplus-results) th:last-child {
   z-index: 3;
   background: #f8f8fb;
 }
 
 /* Keep audit result content away from card borders at narrow widths. */
-.ui-audit-surface .audit-result-card,
-.ui-audit-surface .review-result-card,
-.ui-audit-surface .anomaly-result-card {
+.audit-result-card,
+.review-result-card,
+.anomaly-result-card {
   padding-inline: clamp(12px, 2.5vw, 22px);
   overflow-wrap: anywhere;
 }
