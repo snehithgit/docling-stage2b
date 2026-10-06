@@ -12,20 +12,22 @@
     if (busy || (document.visibilityState && document.visibilityState !== 'visible')) return;
     busy = true;
     try {
-      // Hub pages only need worker/review activity. Avoid /api/documents here:
-      // that endpoint computes per-book pipeline freshness and machine readiness
-      // and is intentionally reserved for screens that render the library.
-      const [pool,review] = await Promise.all([
+      // Hub pages need only a lightweight library count plus worker/review
+      // activity. /api/documents performs expensive per-book freshness and
+      // readiness computation, so use the persisted postprocess job list here.
+      const [postprocess,pool,review] = await Promise.all([
+        getJson('/api/postprocess/status'),
         getJson('/api/workers'),
         getJson('/api/review-workers/status'),
       ]);
+      const bookCount = Array.isArray(postprocess.jobs) ? postprocess.jobs.length : 0;
       const workers = (pool.colab_workers || []).filter(w => w.enabled);
       const active = workers.filter(w => w.active).length;
       const pending = Object.entries(review.counts || {})
         .filter(([k]) => k.endsWith('_pending'))
         .reduce((n,[,v]) => n + Number(v || 0), 0);
       const details = workers.map(w => `${w.name || w.id}: ${w.paused ? 'stopped' : w.active ? 'busy' : w.runner_account_id && !w.runner_ready ? 'waiting for runner' : w.runner_account_id && w.runner_ready ? 'runner available' : w.connection_configured ? 'endpoint configured' : 'needs setup'}`).join('\n');
-      status.textContent = `${active}/${workers.length} Colab workers busy · ${pending} review jobs pending · Review dispatch ${pool.review?.enabled ? 'enabled' : 'stopped'}.`;
+      status.textContent = `${bookCount} book${bookCount === 1 ? '' : 's'} · ${active}/${workers.length} Colab workers busy · ${pending} review jobs pending · Review dispatch ${pool.review?.enabled ? 'enabled' : 'stopped'}.`;
       document.getElementById('hub-worker-status').textContent = details || 'No enabled Colab workers configured.';
     } catch (error) {
       document.getElementById('hub-worker-status').textContent = 'Worker status unavailable.';
