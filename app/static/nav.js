@@ -72,7 +72,7 @@
 })();
 
 (() => {
-  const version = "5.0.7";
+  const version = "5.0.7.1";
   const sidebar = document.querySelector('.sidebar');
   if (!sidebar) return;
   const badge = document.createElement('div');
