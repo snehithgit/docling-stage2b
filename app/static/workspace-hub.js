@@ -42,7 +42,7 @@
       if (!document.visibilityState || document.visibilityState === 'visible') refresh();
     });
   }
-  if (typeof window?.addEventListener === 'function') {
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
     window.addEventListener('pagehide', () => clearInterval(timer), {once:true});
   }
 })();
