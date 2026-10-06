@@ -1450,6 +1450,9 @@ def annotate_retrieval_rows(
         "warnings": dict(sorted(warning_counts.items())),
         "raw_docling_immutable": True,
     }
+    from .technical_evidence import annotate_rows
+    index_rows, evidence_records = annotate_rows(index_rows)
+    summary["technical_evidence_records"] = len(evidence_records)
     return output, index_rows, summary
 
 
@@ -1552,7 +1555,10 @@ def _load_index_cached(path: str, mtime_ns: int, size: int) -> tuple[dict[str, A
             value = json.loads(line)
             if isinstance(value, dict):
                 value = dict(value)
-                value["_tokens"] = _tokens(str(value.get("text") or ""))
+                if "technical_evidence_id" not in value:
+                    from .technical_evidence import annotate_rows
+                    value = annotate_rows([value])[0][0]
+                value["_tokens"] = _tokens(str(value.get("text") or "") + " " + " ".join(value.get("search_terms") or []))
                 value["_counter"] = Counter(value["_tokens"])
                 value["_length"] = max(1, sum(value["_counter"].values()))
                 value["_heading_tokens"] = set(_tokens(" ".join(value.get("headings") or [])))
@@ -1819,6 +1825,9 @@ def search_indices(index_paths: list[Path], query: str, *, top_k: int = 5) -> li
                     score += 8.0
                 if not exact and not embedded_fragment and not revision_extension and structured_occurrences:
                     score -= min(2.8, 0.9 + 0.45 * len(structured_occurrences))
+        if score > 0:
+            from .technical_evidence import category_bonus
+            score += category_bonus(row, query)
         score += _query_feature_score(row, query)
         score += _incidental_identifier_penalty(raw_text, identifiers)
         score *= 0.85 + (float(row.get("quality_score") or 100) / 100.0) * 0.15

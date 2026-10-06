@@ -7022,6 +7022,44 @@ async def docling_page_review_deactivate(job_id: int, repair_id: str) -> dict:
     return {"deactivated": True, "repair": repair, "stage3_stale": True}
 
 
+@app.post("/api/postprocess/jobs/{job_id}/technical-evidence/detect")
+async def detect_book_technical_evidence(job_id: int) -> dict:
+    from .technical_evidence import write_evidence_ledger
+    job = await runtime.postprocess_store.get_job(job_id)
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Book not found.")
+    result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+    async with runtime.book_lifecycle_locks.get(int(job_id)):
+        index = result_dir / "retrieval_index.jsonl"
+        if not index.is_file():
+            raise HTTPException(status_code=409, detail="Build the Stage 3 index first.")
+        def detect():
+            rows = [json.loads(line) for line in index.read_text(encoding="utf-8").splitlines() if line.strip()]
+            return write_evidence_ledger(result_dir, rows)
+        try:
+            summary = await asyncio.to_thread(detect)
+        except (ValueError, OSError) as exc:
+            raise HTTPException(status_code=409, detail="Evidence ledger could not be safely rebuilt.") from exc
+    return {"postprocess_job_id": job_id, "summary": summary, "model_calls": 0, "raw_docling_immutable": True}
+
+
+@app.get("/api/postprocess/jobs/{job_id}/technical-evidence")
+async def book_technical_evidence(job_id: int) -> dict:
+    job = await runtime.postprocess_store.get_job(job_id)
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Book not found.")
+    path = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name / "technical_evidence_ledger.json"
+    if not path.is_file():
+        return {"postprocess_job_id": job_id, "ready": False, "entries": [], "summary": {}}
+    try:
+        data = await asyncio.to_thread(_load_json_file, path)
+        if data.get("schema") != "technical-evidence-ledger/v1":
+            raise ValueError("Invalid evidence ledger")
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=409, detail="Technical evidence ledger is invalid.") from exc
+    return {"postprocess_job_id": job_id, "ready": True, **data}
+
+
 @app.get("/api/postprocess/jobs/{job_id}/source-page/{page}")
 async def source_page(job_id: int, page: int, highlight: str | None = None):
     """Render the original PDF page for plain-language human review."""
