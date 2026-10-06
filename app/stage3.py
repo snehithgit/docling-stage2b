@@ -18,6 +18,7 @@ from .docling_client import DoclingApiError, DoclingClient
 from .events import EventBroker
 from .postprocess_store import PostprocessStore
 from .pipeline_state import stage2c_semantic_signature, stage2a_human_review_summary, stage2c_freshness, stage2c_output_signature, verification_rows_for_stage2c, verification_signature
+from .technical_evidence import write_evidence_ledger
 from .retrieval import RETRIEVAL_RULE_VERSION, annotate_retrieval_rows, _write_jsonl_atomic as _write_retrieval_jsonl
 from .stage2c import STAGE2C_RULE_VERSION, human_review_summary, rebuild_chunk_overlays, verifier_audit_summary
 from .book_lifecycle_lock import LifecycleLockGetter
@@ -499,6 +500,7 @@ class Stage3ChunkBuilder:
                 max_tokens=config.stage3_chunk_max_tokens,
             )
             await asyncio.to_thread(self._write_jsonl_atomic, result_dir / "chunks.jsonl", output_rows)
+            await asyncio.to_thread(write_evidence_ledger, result_dir, retrieval_rows)
             await asyncio.to_thread(_write_retrieval_jsonl, result_dir / "retrieval_index.jsonl", retrieval_rows)
             await asyncio.to_thread(_write_retrieval_jsonl, result_dir / "table_evidence.jsonl", [row for row in retrieval_rows if row.get("stitched_table")])
             quality_tmp = result_dir / "retrieval_quality.json.tmp"
@@ -1268,6 +1270,7 @@ class Stage3ChunkBuilder:
             max_tokens=max_tokens,
         )
         cls._write_jsonl_atomic(chunks_path, optimized)
+        write_evidence_ledger(result_dir, retrieval_rows)
         _write_retrieval_jsonl(result_dir / "retrieval_index.jsonl", retrieval_rows)
         _write_retrieval_jsonl(result_dir / "table_evidence.jsonl", [row for row in retrieval_rows if row.get("stitched_table")])
         tmp = result_dir / "retrieval_quality.json.tmp"
