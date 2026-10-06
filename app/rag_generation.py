@@ -705,6 +705,12 @@ def _critical_tokens(text: str) -> list[str]:
     values: list[str] = []
     token_text = str(text or "").translate({ord(char): "-" for char in "‐‑‒–—−"})
     token_text = re.sub(r"(?<=\d)\s+operating\s+(?=hours?\b)", " ", token_text, flags=re.I)
+    number_words = {word: str(i) for i, word in enumerate(
+        "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty".split())}
+    token_text = re.sub(r"\b(" + "|".join(number_words) + r")\s+(?=bar\b|psi\b|volts?\b|minutes?\b|hours?\b|seconds?\b|mm\b|cm\b|kg\b)",
+                        lambda m: number_words[m.group(1).lower()] + " ", token_text, flags=re.I)
+    for match in re.finditer(r"\b(once|twice)\b", token_text, re.I):
+        values.append("count:" + ("1" if match.group(1).lower() == "once" else "2"))
     # Multi-item lists must tokenize identically with or without spaces after
     # commas. Preserve genuine thousands grouping and decimal comma values.
     def numeric_list(match):

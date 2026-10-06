@@ -527,3 +527,14 @@ async def test_generation_canonicalizes_only_explicit_citation_labels(monkeypatc
  result=await generate_grounded_answer('pi5',AppConfig(),'What should I disconnect?',[{'label':'S1','text':'Disconnect the supply.'}])
  assert result['answer']=='Disconnect the supply [S1].'
  assert result['answer_usable'] is True
+
+
+def test_flash_count_cannot_be_invented():
+ result=citation_audit('The green LED flashes once [S1].',[{'label':'S1','text':'The green LED flashes then stays lit.'}])
+ assert result['answer_usable'] is False
+ assert 'count:1' in result['unsupported_claims'][0]['missing_critical_tokens']
+
+
+def test_spelled_measurement_preserves_exact_value():
+ assert citation_audit('Pressure is five bar [S1].',[{'label':'S1','text':'Pressure is 5 bar.'}])['answer_usable'] is True
+ assert citation_audit('Pressure is five bar [S1].',[{'label':'S1','text':'Pressure is 6 bar.'}])['answer_usable'] is False
