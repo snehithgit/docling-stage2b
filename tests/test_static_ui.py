@@ -99,9 +99,10 @@ def test_stage2b_ui_uses_inline_feedback_not_alerts():
     assert "alert(" not in js
 
 
-def test_all_primary_pages_link_to_verification():
+def test_primary_pages_reach_verification_through_processing():
     for name in ["index.html", "convert.html", "quality.html", "errors.html"]:
-        assert 'href="/verification"' in read(name), name
+        assert 'href="/processing"' in read(name), name
+    assert 'href="/verification"' in read('processing.html')
 
 
 def test_verification_polling_never_overlaps_and_backs_off_when_hidden():
@@ -384,7 +385,8 @@ def test_vision_verifier_audit_page_is_read_only_and_evidence_first():
 
 def test_primary_pages_link_to_unified_verifier_audit():
     for name in ["index.html", "convert.html", "quality.html", "verification.html", "errors.html", "book.html", "oneplus.html", "workflow.html"]:
-        assert 'href="/text-audit"' in read(name), name
+        assert 'href="/review-center"' in read(name), name
+    assert 'href="/text-audit"' in read('review-center.html')
 
 
 def test_verifier_audit_is_unified_and_text_audit_is_read_only():
@@ -587,7 +589,7 @@ def test_chunk_viewer_exposes_stage3_text_and_source_page_workspace():
 def test_navigation_injects_chunk_viewer_and_page_guidance():
     js = read("nav.js")
     css = read("styles.css")
-    assert "Chunk Viewer" in js
+    assert "Chunk inspection" in js
     assert "workspace-guide" in js
     assert "Retrieval-Augmented Generation (RAG)" in js
     assert ".workspace-guide" in css
@@ -924,12 +926,13 @@ def test_verification_results_show_execution_provider_and_truthful_legacy_timing
 def test_sidebar_navigation_is_normalized_with_worker_review_and_chunk_icons():
     js = read("nav.js")
     for href, label in [
-        ("/workers", "Workers"),
-        ("/review-workers", "Review workers"),
-        ("/chunks", "Chunk Viewer"),
+        ("/", "Books"), ("/processing", "Processing"),
+        ("/review-center", "Review"), ("/retrieval", "Ask"),
+        ("/settings", "Settings"), ("/chunks", "Chunk inspection"),
     ]:
         assert href in js
         assert label in js
+    assert "Advanced" in js
     assert "icons.workers" in js
     assert "icons.reviewWorkers" in js
     assert "icons.chunks" in js

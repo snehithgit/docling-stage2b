@@ -72,7 +72,7 @@
 })();
 
 (() => {
-  const version = "5.0.8";
+  const version = "5.0.8.1";
   const sidebar = document.querySelector('.sidebar');
   if (!sidebar) return;
   const badge = document.createElement('div');
@@ -96,7 +96,7 @@
 
 
 (() => {
-  const nav = document.querySelector('.nav');
+  const nav = document.querySelector('.nav, .workspace-task-nav');
   const path = window.location.pathname;
   const icons = {
     books: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M8 4v16M11 8h5M11 12h5"/></svg>',
@@ -112,49 +112,53 @@
     phone: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M10 5h4M11 18.5h2"/></svg>'
   };
   const items = [
-    ['/', 'Books', icons.books],
-    ['/add-book', 'Add book', icons.add],
-    ['/queue', 'Conversion queue', icons.add],
-    ['/verification', 'Verification', icons.verify],
-    ['/anomaly-review', 'Anomaly review', icons.anomaly],
-    ['/artifact-audit', 'Artifact audit', icons.artifact],
-    ['/text-audit', 'Text review', icons.audit],
-    ['/retrieval', 'Ask your books', icons.rag],
-    ['/workers', 'Workers', icons.workers],
-    ['/review-workers', 'Review workers', icons.reviewWorkers],
-    ['/chunks', 'Chunk Viewer', icons.chunks],
-    ['/oneplus', 'OnePlus', icons.phone],
+    ['/', 'Books', icons.books], ['/processing', 'Processing', icons.verify],
+    ['/review-center', 'Review', icons.reviewWorkers], ['/retrieval', 'Ask', icons.rag],
+    ['/settings', 'Settings', icons.workers],
   ];
-
+  const groups = {
+    '/add-book':'/', '/book':'/', '/queue':'/processing', '/verification':'/processing',
+    '/anomaly-review':'/review-center', '/text-audit':'/review-center', '/review':'/review-center',
+    '/vision-audit':'/review-center', '/table-repair':'/review-center', '/structural-review':'/review-center',
+    '/reading-order-review':'/review-center', '/docling-review':'/review-center',
+    '/workers':'/settings', '/review-workers':'/settings', '/oneplus':'/settings',
+  };
+  const advanced = [['/errors','Errors & diagnostics',icons.audit], ['/quality','Extraction quality',icons.audit],
+    ['/chunks','Chunk inspection',icons.chunks], ['/artifact-audit','Artifact audit',icons.artifact],
+    ['/technical-evidence','Technical evidence',icons.artifact], ['/convert','One-off conversion',icons.add]];
   if (nav) {
-    const existing = new Map([...nav.querySelectorAll('a[href]')].map(link => [link.getAttribute('href'), link]));
     const fragment = document.createDocumentFragment();
-    const sections = {'/': 'Library', '/verification': 'Correct books', '/retrieval': 'Questions and evidence', '/workers': 'Devices and advanced tools'};
-    items.forEach(([href, label, icon]) => {
-      if (sections[href]) {
-        const heading = document.createElement('div');
-        heading.className = 'sidebar-label';
-        heading.textContent = sections[href];
-        fragment.appendChild(heading);
-      }
-      const link = existing.get(href) || document.createElement('a');
-      link.href = href;
+    const addLink = (parent, [href,label,icon], active) => {
+      const link = document.createElement('a'); link.href = href;
       link.innerHTML = `<span class="nav-item-label">${icon}${label}</span>`;
-      const active = href === path;
-      link.classList.toggle('active', active);
-      if (active) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current');
-      fragment.appendChild(link);
-    });
-    nav.replaceChildren(fragment);
+      link.classList.toggle('active',active);
+      if (active) link.setAttribute('aria-current',href === path ? 'page' : 'location');
+      parent.appendChild(link);
+    };
+    items.forEach(item => addLink(fragment,item,item[0] === (groups[path] || path)));
+    const details = document.createElement('details'); details.className = 'nav-advanced';
+    details.open = advanced.some(item => item[0] === path);
+    const summary = document.createElement('summary'); summary.textContent = 'Advanced'; details.appendChild(summary);
+    advanced.forEach(item => addLink(details,item,item[0] === path));
+    fragment.appendChild(details); nav.replaceChildren(fragment);
   }
 
   const settings = document.querySelector('.settings-trigger.nav-settings');
   if (settings) {
+    settings.hidden = true;
     const icon = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.5 1a7 7 0 0 0-1.7-1L14.4 3h-4.8l-.4 3.1a7 7 0 0 0-1.7 1l-2.5-1-2 3.4L5 11a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.5-1a7 7 0 0 0 1.7 1l.4 3.1h4.8l.4-3.1a7 7 0 0 0 1.7-1l2.5 1 2-3.4L18.9 13a7 7 0 0 0 .1-1Z"/></svg>';
     const label = settings.querySelector('.nav-item-label');
     if (label) label.innerHTML = `${icon}Settings`;
   }
 
+  const mainPage = document.querySelector('main.main-content');
+  const parent = groups[path];
+  if (mainPage && parent) {
+    const home = items.find(item => item[0] === parent);
+    const trail = document.createElement('a'); trail.className = 'workspace-return';
+    trail.href = parent; trail.textContent = `← Back to ${home[1]}`;
+    mainPage.insertBefore(trail,mainPage.firstChild);
+  }
   const guides = {
     '/': ['Library overview', 'Open a book to see the next valid stage. Stages only advance when the previous stage is complete and current.', 'Open a book'],
     '/add-book': ['Add a book', 'Upload a document or give a public URL. The source is stored in the managed input folder and registered with the normal conversion pipeline automatically.', 'Add one book'],
@@ -213,7 +217,7 @@
       strip.hidden = false;
       const audits = Number(s.audit_review_required || 0);
       const failures = Math.max(0, total - audits);
-      strip.innerHTML = `<div><strong>Needs attention</strong><span>${failures ? `${failures} pipeline issue${failures === 1 ? '' : 's'}` : 'No pipeline failures'}${audits ? ` · ${audits} human decision${audits === 1 ? '' : 's'}` : ''}</span></div><a class="mini-action" href="/errors">Open diagnostics</a>`;
+      strip.innerHTML = `<div><strong>Needs attention</strong><span>${failures ? `${failures} pipeline issue${failures === 1 ? '' : 's'}` : 'No pipeline failures'}${audits ? ` · ${audits} human decision${audits === 1 ? '' : 's'}` : ''}</span></div><a class="mini-action" href="${failures ? "/errors" : "/review-center"}">${failures ? "Open diagnostics" : "Open Review"}</a>`;
     } catch (_) {
       if (strip) { strip.hidden = true; strip.textContent = ''; }
     }

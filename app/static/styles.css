@@ -1294,3 +1294,22 @@ button.mini-action { cursor: pointer; }
 .v5-readiness-card p { font-size:13px; line-height:1.5; margin:10px 0 0; color:#666878; }
 .v5-readiness-card.current { border-top:3px solid #249b77; }
 .v5-readiness-card.attention { border-top:3px solid #bb8b25; }
+
+.nav-advanced summary { padding:12px; cursor:pointer; color:var(--ink); font-weight:700; }
+.hub-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:16px; }
+.hub-grid .panel { padding:20px; }
+.hub-grid h2 { font-size:20px; }
+.hub-grid p { margin:12px 0; }
+
+.settings-trigger[hidden] { display:none; }
+.workspace-return { display:inline-block; margin-bottom:12px; color:var(--purple); }
+
+.workspace-task-nav { display:flex; gap:12px; flex-wrap:wrap; padding:12px 24px; border-bottom:1px solid var(--line); background:white; }
+.workspace-task-nav a { padding:8px; color:var(--ink); }
+.workspace-task-nav svg { display:none; }
+.workspace-task-nav .active { font-weight:700; color:var(--purple); }
+.workspace-task-nav details { position:relative; }
+.workspace-task-nav details[open] { flex-basis:100%; }
+
+.hub-worker-status { white-space:pre-line; padding:0 16px 16px; line-height:1.8; }
+.hub-grid { margin-top:16px; }

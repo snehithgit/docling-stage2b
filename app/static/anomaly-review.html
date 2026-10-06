@@ -4,8 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Anomaly Review · Docling Auto-Convert</title>
-<link rel="stylesheet" href="/assets/styles.css?v=5.0.8" />
-<link rel="stylesheet" href="/assets/workflow.css?v=5.0.8" />
+<link rel="stylesheet" href="/assets/styles.css?v=5.0.8.1" />
+<link rel="stylesheet" href="/assets/workflow.css?v=5.0.8.1" />
 </head>
 <body class="ui29">
 <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -19,9 +19,11 @@
     <button class="sidebar-close" id="sidebar-close" type="button" aria-label="Close navigation">×</button>
     <a class="brand" href="/"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a>
     <div class="sidebar-label">Workspace</div>
-    <nav class="nav" aria-label="Primary navigation"></nav>
-    <a class="settings-trigger nav-settings" href="/queue#settings">Settings</a>
-    <div class="sidebar-footer"><span class="footer-dot"></span><span><strong>Local pipeline</strong><br><a href="/errors">Errors & diagnostics</a></span></div>
+    <nav class="nav" aria-label="Main navigation">
+<a href="/">Books</a><a href="/processing">Processing</a><a href="/review-center">Review</a><a href="/retrieval">Ask</a><a href="/settings">Settings</a>
+<details class="nav-advanced"><summary>Advanced</summary><a href="/errors">Errors &amp; diagnostics</a><a href="/quality">Extraction quality</a><a href="/chunks">Chunk inspection</a><a href="/artifact-audit">Artifact audit</a><a href="/technical-evidence">Technical evidence</a><a href="/convert">One-off conversion</a></details></nav>
+
+    <div class="sidebar-footer"><span class="footer-dot"></span><span><strong>Local pipeline</strong><br><a href="/processing">Processing overview</a></span></div>
   </aside>
 
   <main class="main-content vision-audit-workspace" id="main-content">
@@ -36,7 +38,7 @@
 
     <section class="crossover-explainer vision-audit-notice">
       <strong>Review anomalies with Colab.</strong>
-      <p>New detected anomalies queue automatically. Use the Yes button below only to re-review human-verified anomalies. Colab never overwrites an existing human decision automatically.</p>
+      <p>New detected anomalies queue automatically. Use the filters below to choose human-reviewed findings for another review. Colab never overwrites an existing human decision automatically.</p>
     </section>
 
     <section class="vision-audit-summary" aria-label="Anomaly review totals">
@@ -48,13 +50,13 @@
 
     <section class="panel">
       <div class="text-panel-heading">
-        <div><span class="eyebrow">BATCH ANOMALY AUDIT</span><h2>Re-review human-verified anomalies with Colab?</h2></div>
+        <div><span class="eyebrow">BATCH ANOMALY AUDIT</span><h2>Repeat review for matching human decisions</h2></div>
         <span class="status-pill suggestion-pill">Human authority preserved</span>
       </div>
-      <p class="field-note"><strong>Yes</strong> queues only detected anomalies that already have a human decision. Unreviewed detected anomalies queue automatically. <strong>No</strong> does not request human-verified re-reviews; automatic review of unreviewed anomalies continues. Requested audits run after primary verification is complete and may run while other entries await normal AI review.</p>
+      <p class="field-note">Choose a book, type or other filter below first. This action repeats only matching findings with a human decision; queued or processing findings are skipped. New detected anomalies queue automatically. Human decisions are preserved.</p>
       <div class="review-actions">
-        <button id="ar-batch-yes" class="primary-button" type="button">Yes · re-review human-verified anomalies</button>
-        <button id="ar-batch-no" class="secondary-button" type="button">No · keep human decisions</button>
+        <button id="ar-batch-yes" class="primary-button" type="button">Re-review matching human decisions</button>
+        <button id="ar-batch-no" class="secondary-button" type="button">Keep current decisions</button>
       </div>
       <p id="ar-batch-status" class="field-note" aria-live="polite"></p>
     </section>
@@ -76,7 +78,7 @@
     <section id="ar-results" class="vision-audit-results" aria-live="polite"><div class="empty-state">Loading anomaly candidates…</div></section>
   </main>
 </div>
-<script src="/assets/nav.js?v=5.0.8"></script>
-<script src="/assets/anomaly-review.js?v=5.0.8"></script>
+<script src="/assets/nav.js?v=5.0.8.1"></script>
+<script src="/assets/anomaly-review.js?v=5.0.8.1"></script>
 </body>
 </html>

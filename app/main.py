@@ -7612,6 +7612,21 @@ async def events() -> StreamingResponse:
     return StreamingResponse(runtime.events.stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+@app.get("/processing")
+async def processing_hub():
+    return FileResponse(STATIC_DIR / "processing.html")
+
+
+@app.get("/review-center")
+async def review_center_hub():
+    return FileResponse(STATIC_DIR / "review-center.html")
+
+
+@app.get("/settings")
+async def settings_hub():
+    return FileResponse(STATIC_DIR / "settings.html")
+
+
 @app.get("/queue")
 async def conversion_queue():
     return FileResponse(STATIC_DIR / "index.html")
