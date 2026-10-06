@@ -88,6 +88,8 @@ def compact_source(row: dict[str, Any], label: str) -> dict[str, Any]:
         "quality_score": row.get("quality_score"),
         "score": row.get("score"),
         "text": str(row.get("text") or row.get("snippet") or "").strip(),
+        "context_link_status": row.get("context_link_status"),
+        "structural_relation": row.get("structural_relation"),
     }
 
 
@@ -288,6 +290,7 @@ def prepare_generation_sources(
     def add(row, role, visual=False, retrieval_rank=1):
         if not in_equipment_scope(row):
             return
+        row = normalize_equipment_scope(row)
         if not equipment_scoped and not cross_book and not _same_source(anchor, row):
             return
         key = (str(row.get("postprocess_job_id") or row.get("source_filename") or ""),
@@ -325,6 +328,9 @@ def prepare_generation_sources(
                 add(_neighbor_as_row(row, neighbor), "structural_context" if equipment_scoped else "adjacent_context", retrieval_rank=index + 3)
     for index, row in enumerate(visuals):
         add(row, "visual_result", True, retrieval_rank=index + 3)
+        for neighbor in row.get("context_neighbors") or []:
+            if isinstance(neighbor, dict):
+                add(_neighbor_as_row(row, neighbor), "structural_context", retrieval_rank=index + 3)
 
     # Stable ties preserve upstream ranking and context ordering.
     candidates.sort(key=lambda row: row["packet_priority"], reverse=True)
@@ -398,6 +404,8 @@ def source_block(source: dict[str, Any]) -> str:
     if refs:
         meta.append(f"Docling refs: {refs}")
     block = f"[{source.get('label')}] " + " | ".join(meta) + "\n" + str(source.get("text") or "").strip()
+    if source.get("context_link_status") == "candidate":
+        block += "\nContext association is a candidate from the same source page; it does not verify a diagram branch or component relationship."
     if source.get("validated_relationships"):
         block += "\nValidated source relationships: " + json.dumps(source["validated_relationships"], ensure_ascii=False)
     return block

@@ -7063,7 +7063,7 @@ async def docling_page_review_deactivate(job_id: int, repair_id: str) -> dict:
 
 @app.post("/api/postprocess/jobs/{job_id}/technical-evidence/detect")
 async def detect_book_technical_evidence(job_id: int) -> dict:
-    from .technical_evidence import write_evidence_ledger
+    from .technical_evidence import write_evidence_ledger, RULE_VERSION as TECH_RULE
     job = await runtime.postprocess_store.get_job(job_id)
     if not job or not job.get("result_dir"):
         raise HTTPException(status_code=404, detail="Book not found.")
@@ -7073,13 +7073,16 @@ async def detect_book_technical_evidence(job_id: int) -> dict:
         if not index.is_file():
             raise HTTPException(status_code=409, detail="Build the Stage 3 index first.")
         def detect():
-            rows = [json.loads(line) for line in index.read_text(encoding="utf-8").splitlines() if line.strip()]
+            from .evidence_contract import read_source_rows
+            rows = read_source_rows(result_dir)
             return write_evidence_ledger(result_dir, rows)
         try:
             summary = await asyncio.to_thread(detect)
         except (ValueError, OSError) as exc:
             raise HTTPException(status_code=409, detail="Evidence ledger could not be safely rebuilt.") from exc
-    return {"postprocess_job_id": job_id, "summary": summary, "model_calls": 0, "raw_docling_immutable": True}
+    return {"postprocess_job_id": job_id, "summary": summary, "model_calls": 0, "raw_docling_immutable": True,
+            "detection_rule": TECH_RULE, "context_relationships_are_candidates": True,
+            "coverage": await asyncio.to_thread(evidence_coverage, result_dir)}
 
 
 @app.post("/api/postprocess/jobs/{job_id}/technical-evidence/migrate")

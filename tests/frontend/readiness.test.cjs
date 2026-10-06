@@ -32,3 +32,9 @@ test('unknown coverage state cannot inject markup',()=>{
   assert.ok(!html.includes('<script>'));
   assert.match(html,/Coverage unknown/);
 });
+test('context links remain candidates rather than verified facts',()=>{
+  const html=render({evidence:{status:'pending',detected:10,validated:0,visual_parse_pending:3,technical_notes:2,context_link_candidates:4}});
+  assert.match(html,/2 technical notes; 4 candidate context links/);
+  assert.match(html,/Validation pending/);
+  assert.match(html,/0 validated/);
+});

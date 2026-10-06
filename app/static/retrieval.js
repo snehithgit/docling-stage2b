@@ -530,7 +530,7 @@ ${manuals} manual${manuals === 1 ? '' : 's'} will be unassigned from this machin
     $('grounded-answer-sources').innerHTML = withheldNote + `${scopeText ? `<p class="subtle grounded-evidence-scope">${esc(scopeText)}</p>` : ''}` + sources.map((source, index) => {
       const row = registerRow(source, rowKey('answer', index));
       const pages = (row.page_numbers || []).length ? `Page ${(row.page_numbers || []).join(', ')}` : 'Page unknown';
-      const role = source.evidence_role === 'structural_context' ? ' · structural context' : source.evidence_role === 'adjacent_context' ? ' · adjacent' : '';
+      const role = source.context_link_status === 'candidate' ? ' · candidate context; diagram applicability unverified' : source.evidence_role === 'structural_context' ? ' · structural context' : source.evidence_role === 'adjacent_context' ? ' · adjacent' : '';
       const visual = source.source_kind === 'visual';
       const detail = visual ? `picture #${source.picture_index ?? '—'} · ${String(source.category || 'visual').replaceAll('_',' ')}` : `${source.chunk_id || 'chunk'}${role}`;
       return `<div class="grounded-source-row"><div><strong>[${esc(source.label || (visual ? `V${index + 1}` : `S${index + 1}`))}] ${esc(cleanBook(source.source_filename))}</strong><span>${esc(pages)} · ${esc(detail)}</span></div>${pageButton(row, '+ Page')}</div>`;
