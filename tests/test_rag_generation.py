@@ -505,3 +505,15 @@ def test_relationship_checks_preserve_direct_cause_and_condition():
 def test_visual_summary_cannot_supply_causal_relationship():
  result = citation_audit('Oil overheats because the fan stops [V1].', [{'label':'V1','source_kind':'visual','visible_text':['Oil temperature'], 'summary':'Oil overheats because the fan stops.'}])
  assert result['answer_usable'] is False
+
+def test_operating_hours_preserves_exact_numeric_interval():
+ source='The coolant must be changed at intervals of 1,200 hours operation or six months whichever comes first.'
+ assert citation_audit('Change coolant every 1,200 operating hours or six months whichever comes first [S1].',[{'label':'S1','text':source}])['answer_usable'] is True
+ assert citation_audit('Change coolant every 200 operating hours [S1].',[{'label':'S1','text':source}])['answer_usable'] is False
+
+
+def test_grounded_prompt_requests_single_sentence_cited_bullets():
+ from app.rag_generation import build_grounded_user_prompt
+ prompt=build_grounded_user_prompt('What should I do?',[{'label':'S1','text':'Disconnect the supply.'}])
+ assert 'ONE factual sentence' in prompt
+ assert 'without headings' in prompt
