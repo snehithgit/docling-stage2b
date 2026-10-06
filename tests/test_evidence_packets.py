@@ -72,6 +72,21 @@ def test_rejected_evidence_is_not_resurrected_as_literal_source(tmp_path):
     assert not generation_policy(rows[0])[0]
 
 
+def test_mixed_safety_paragraph_is_usable_while_its_drawing_is_withheld(tmp_path):
+    text = ("CAUTION: Arrange the drain to ensure complete drainage. If the outdoor drain pipe becomes blocked by dirt and debris, water may leak from the indoor unit. Stop unit operation and consult your dealer for assistance. Break all power circuits when wiring; otherwise electric shock or injury may result.")
+    r = row(text=text, refs=["#/texts/1", "#/pictures/3"])
+    r["headings"] = ["Circuit safety"]
+    books, _ = setup(tmp_path, [r])
+    visual = {**r, "doc_items": ["#/pictures/3"], "visual_evidence_id": "V3", "summary": "Wiring interpretation"}
+    rows, visuals = bind_evidence([r], [visual], books, tmp_path)
+    assert rows[0]["technical_evidence"]["validation_status"] == "needs_visual_parse"
+    sources, scope = prepare_generation_sources(rows, "What to do when drain pipe blockage causes water leakage?", visual_results=visuals)
+    assert len(sources) == 1
+    assert "consult your dealer" in sources[0]["text"]
+    assert "validated_relationships" not in sources[0]
+    assert scope["withheld_evidence"][0]["source_kind"] == "visual"
+
+
 def test_changed_source_cannot_reuse_earlier_validation(tmp_path):
     r = row()
     books, _ = setup(tmp_path, [r])
