@@ -541,7 +541,7 @@ ${manuals} manual${manuals === 1 ? '' : 's'} will be unassigned from this machin
     else if (data.truncated) answerMessage('The selected model reached its output limit. Verify the visible citations before relying on an incomplete ending.', 'warning');
     else if (data.grounding_warning) answerMessage(data.grounding_warning, 'warning');
     else if (data.insufficient_evidence) answerMessage('The generator correctly stopped because the selected manual evidence does not contain enough information. Open + Page to inspect the original source; do not borrow steps from another manual.', 'warning');
-    else answerMessage(`Answer generated from ${sources.length} grounded evidence record${sources.length === 1 ? '' : 's'} using [S#]/[V#] citation labels.`, 'success');
+    else answerMessage(`Literal and citation checks passed for ${sources.length} evidence record${sources.length === 1 ? '' : 's'}. Semantic correctness is not verified; inspect the cited manual before acting.`, 'warning');
   }
 
   function generationElapsedText(seconds) {
