@@ -54,6 +54,16 @@ def _clean_book(value: Any) -> str:
     return re.sub(r"\.(?:pdf|zip)$", "", text, flags=re.IGNORECASE)
 
 
+def _literal_measurements(text: str) -> set[tuple[str, str]]:
+    pattern = r"(?<![\w.+-])([+-]?\d+(?:\.\d+)?)\s*(millimetres?|millimeters?|metres?|meters?|mm|cm|m|volts?|v|bar|psi|hz|°\s*c)(?!\w)"
+    aliases = {"metre": "m", "metres": "m", "meter": "m", "meters": "m",
+               "millimetre": "mm", "millimetres": "mm", "millimeter": "mm", "millimeters": "mm",
+               "volt": "v", "volts": "v"}
+    return {(value.lstrip("+").rstrip("0").rstrip(".") if "." in value else value.lstrip("+"),
+             aliases.get(unit, unit)) for value, raw_unit in re.findall(pattern, text.lower())
+            for unit in [re.sub(r"\s+", "", raw_unit)]}
+
+
 def _page_label(row: dict[str, Any]) -> str:
     pages: list[str] = []
     for value in row.get("page_numbers") or []:
@@ -273,6 +283,7 @@ def prepare_generation_sources(
     withheld = []
     query_terms = set(re.findall(r"[a-z0-9]+", question.lower())) - {"the", "is", "a", "an", "what", "how", "to", "of", "in", "and", "do", "i", "it", "for", "with"}
     intents = question_categories(question)
+    measurements = _literal_measurements(question)
 
     def add(row, role, visual=False, retrieval_rank=1):
         if not in_equipment_scope(row):
@@ -298,6 +309,8 @@ def prepare_generation_sources(
         # Literal body matches outrank generic inherited headings and visual
         # page affinity. No fixed visual quota displaces a direct text answer.
         priority = relevance * 3 + 8 / (1 + retrieval_rank) + (1 if types & intents else 0)
+        if measurements and measurements.intersection(_literal_measurements(content)):
+            priority += 3
         if role in {"adjacent_context", "structural_context"} and re.search(r"\b(?:warning|caution|n\.?b\.?|note)\b", content, re.I):
             priority += 0.5
         candidates.append({**row, "evidence_role": role, "source_kind": "visual" if visual else "text",
