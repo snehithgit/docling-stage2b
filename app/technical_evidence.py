@@ -11,7 +11,9 @@ from pathlib import Path
 from .technical_context import body_text, callout_kind, context_links, FIGURE
 from .evidence_contract import SCHEMA, normalized_record, normalize_ledger, source_signature, atomic_json, backup_legacy_ledger
 
-RULE_VERSION = "technical-evidence-v2"
+from .structured_tables import parse_tables, parse_source, structured_hash, PARSER_VERSION
+
+RULE_VERSION = "technical-evidence-v3"
 CATEGORIES = {
     "troubleshooting": r"trouble[ -]?shoot|fault finding|probable cause|causes and remedies",
     "alarm": r"\balarm\b|fault code|pilot lamp|indicator light|high oil temp",
@@ -54,33 +56,10 @@ def _cells(line: str) -> list[str]:
 
 
 def parse_fault_table(text: str) -> list[dict]:
-    """Bind explicit columns only; never infer column roles from numeric position."""
-    columns = None
-    column_count = 0
-    records = []
-    for line in text.splitlines():
-        if "|" not in line:
-            continue
-        cells = _cells(line)
-        roles = {}
-        for i, cell in enumerate(cells):
-            lowered = cell.casefold()
-            if re.fullmatch(r"(?:fault|symptom|problem|trouble)", lowered): roles["symptom"] = i
-            if re.fullmatch(r"(?:probable |possible )?cause(?:s)?", lowered): roles["cause"] = i
-            if re.fullmatch(r"remed(?:y|ies)|corrective action|action", lowered): roles["remedy"] = i
-        if len(roles) == 3:
-            columns = roles
-            column_count = len(cells)
-            continue
-        if not columns or len(cells) != column_count or all(re.fullmatch(r"[-: ]*", c) for c in cells):
-            continue
-        values = {key: cells[index] for key, index in columns.items()}
-        # Blank merged cells/continuations need explicit recovery; do not borrow
-        # the preceding fault and accidentally connect independent branches.
-        if not all(values.values()):
-            continue
-        records.append({**values, "source_quote": line, "validation_status": "source_bound"})
-    return records
+    records, _ = parse_tables(text)
+    return [{**record["fields"], "source_quote": record["source_quote"],
+             "validation_status": "source_bound"} for record in records
+            if record["kind"] == "troubleshooting"]
 
 
 def detect_record(row: dict) -> dict | None:
@@ -109,6 +88,10 @@ def detect_record(row: dict) -> dict | None:
     if not categories and picture and not re.fullmatch(r"(?:icon|logo|decorative image)[.!]?", body, re.I):
         categories = ["technical_artifact"]
         basis = "unclassified_source_picture"
+    parsed, parse_issues = parse_source(text)
+    for item in parsed:
+        if item["kind"] not in categories:
+            categories.append(item["kind"])
     if not categories:
         return None
     graph = bool(re.search(r"flow[ -]?chart", text, re.I))
@@ -148,6 +131,8 @@ def detect_record(row: dict) -> dict | None:
         "source_filename": row.get("source_filename"), "postprocess_job_id": row.get("postprocess_job_id"),
         "page_numbers": row.get("page_numbers") or [], "doc_items": row.get("doc_items") or [],
         "validation_status": status, "relationships": relations,
+        "structured_records": parsed, "structured_parse_issues": parse_issues,
+        "structured_sha256": structured_hash(parsed), "parser_version": PARSER_VERSION,
         "relationship_status": "source_bound" if relations else "not_parsed",
         "validation_reason": "diagram_relationships_require_pixel_verification" if visual_required else "literal_source_with_provenance" if provenance_valid else "source_page_or_item_missing",
         "answer_eligible": provenance_valid and not visual_required,
@@ -192,7 +177,7 @@ def write_evidence_ledger(result_dir: Path, rows: list[dict]) -> dict:
         existing = normalized
         if existing.get("rule_version") != RULE_VERSION:
             digest = hashlib.sha256(original).hexdigest()[:16]
-            backup = path.with_name(f"technical_evidence_ledger.pre-v5.0.2.{digest}.json")
+            backup = path.with_name(f"technical_evidence_ledger.pre-v5.0.3.{digest}.json")
             if backup.exists():
                 if backup.read_bytes() != original:
                     raise ValueError("Detection upgrade backup mismatch")

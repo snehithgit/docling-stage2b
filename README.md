@@ -1,3 +1,7 @@
+## V5.0.3 — Structured literal parsing (phase 4 of 10)
+
+Explicit troubleshooting, alarm, parts and specification tables and labeled fault/cause/remedy paragraphs now produce source-quoted structured candidates. Ambiguous rows are flagged; structured values require independent validation before use as verified answer evidence. Refresh preserves human history and backs up prior ledgers. See [Phase 4 parsing](docs/v5-structured-parsing.md).
+
 ## V5.0.2 — Detection and context (phase 3 of 10)
 
 Body-based detection identifies N.B. operating notes and safety callouts independently of inherited chapter headings. Same-page diagram/note/caption/warning links carry exact source provenance and remain candidates. Generation can recover linked literal context while withholding unparsed diagrams. Detector refresh preserves human history and backs up prior technical ledgers; originals, corrections and embeddings are unchanged. See [Phase 3 detection and context](docs/v5-context-detection.md).

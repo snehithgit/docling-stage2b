@@ -150,7 +150,7 @@ def test_detector_upgrade_backups_and_preserves_human_history(tmp_path):
     path.write_text(json.dumps(data), encoding="utf-8")
     before = path.read_bytes()
     write_evidence_ledger(directory, [note()])
-    assert next(directory.glob("technical_evidence_ledger.pre-v5.0.2.*.json")).read_bytes() == before
+    assert next(directory.glob("technical_evidence_ledger.pre-v5.0.3.*.json")).read_bytes() == before
     updated = json.loads(path.read_text())
     active = next(r for r in updated["entries"] if not r.get("superseded"))
     assert active["rule_version"] == RULE_VERSION
