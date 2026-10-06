@@ -62,7 +62,7 @@
       );
     });
     const attention = books.filter(b => stage(b).tone === 'attention').length;
-    $('library-count').textContent = `${books.length} books${attention ? ` · ${attention} need attention` : ''}`;
+    $('library-count').textContent = `${books.length} books${attention ? ` · ${attention} stage blocker${attention === 1 ? '' : 's'}` : ''}`;
     updateSummary();
     if (!visible.length) {
       $('book-list').innerHTML = `<div class="workflow-empty"><h3>${books.length ? 'No matching books' : 'No books yet'}</h3><p>${books.length ? 'Change the search or filter.' : 'Add a document to begin.'}</p></div>`;
