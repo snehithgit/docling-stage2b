@@ -517,3 +517,13 @@ def test_grounded_prompt_requests_single_sentence_cited_bullets():
  prompt=build_grounded_user_prompt('What should I do?',[{'label':'S1','text':'Disconnect the supply.'}])
  assert 'ONE factual sentence' in prompt
  assert 'without headings' in prompt
+
+@pytest.mark.asyncio
+async def test_generation_canonicalizes_only_explicit_citation_labels(monkeypatch):
+ from app.rag_generation import GenerationResult
+ async def fake(*args,**kwargs):
+  return GenerationResult('pi5','model',None,'Disconnect the supply [ S1 ].',{},'stop',0)
+ monkeypatch.setattr('app.rag_generation._generate_local',fake)
+ result=await generate_grounded_answer('pi5',AppConfig(),'What should I disconnect?',[{'label':'S1','text':'Disconnect the supply.'}])
+ assert result['answer']=='Disconnect the supply [S1].'
+ assert result['answer_usable'] is True

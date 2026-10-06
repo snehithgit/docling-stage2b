@@ -964,6 +964,8 @@ async def generate_grounded_answer(
         result = await _generate_groq(config, question, sources, quota_guard)
     else:
         result = await _generate_local(selected, config, question, sources)
+    # Canonicalize only explicitly emitted labels, never infer a missing citation.
+    result.answer = re.sub(r"\[\s*([SV]\d+)\s*\]", lambda m: "[" + m.group(1).upper() + "]", result.answer, flags=re.I)
     payload = result.as_dict()
     payload["model_called"] = True
     payload.update(citation_audit(result.answer, sources))
