@@ -113,7 +113,7 @@ def test_current_validated_relationships_are_included_and_stale_ones_are_not(tmp
     ledger = json.loads(path.read_text())
     record = ledger["entries"][0]
     record["validation"].update(state="validated", method="human", actor="engineer", validated_at=1,
-                               source_sha256=hashlib.sha256(r["text"].encode()).hexdigest(), relationships_checked=True)
+                               source_sha256=hashlib.sha256(r["text"].encode()).hexdigest(), relationships_checked=True, structured_fields_checked=True, structured_sha256=record["structured_sha256"])
     path.write_text(json.dumps(ledger), encoding="utf-8")
     rows, _ = bind_evidence([r], [], books, tmp_path)
     sources, _ = prepare_generation_sources(rows, "Why hot oil?")

@@ -1,5 +1,6 @@
 """V5 evidence states, non-destructive migration and honest candidate coverage."""
 from __future__ import annotations
+from .structured_tables import structured_hash
 
 import hashlib
 import json
@@ -76,7 +77,10 @@ def is_validated_record(record: dict) -> bool:
                 and validation.get("provenance_checked")
                 and record.get("source_sha256") == quote_hash
                 and validation.get("source_sha256") == record.get("source_sha256")
-                and (not record.get("relationships") or validation.get("relationships_checked")))
+                and (not record.get("relationships") or validation.get("relationships_checked"))
+                and (not record.get("structured_records") or (validation.get("structured_fields_checked")
+                     and validation.get("structured_sha256") == record.get("structured_sha256")
+                     and record.get("structured_sha256") == structured_hash(record["structured_records"]))))
 
 
 def normalize_ledger(data: dict) -> dict:
