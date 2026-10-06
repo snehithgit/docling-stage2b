@@ -71,7 +71,17 @@ def is_validated_record(record: dict) -> bool:
     timestamp = validation.get("validated_at")
     timestamp_valid = isinstance(timestamp, (int, float)) and not isinstance(timestamp, bool) and math.isfinite(timestamp) and timestamp > 0
     quote_hash = hashlib.sha256(str(record.get("source_text") or "").encode()).hexdigest()
-    return bool(not record.get("superseded") and validation.get("state") == "validated"
+    extraction = record.get("visual_extraction") or {}
+    graph = extraction.get("graph") or {}
+    visual_valid = (not extraction or (validation.get("visual_graph_checked") is True
+        and validation.get("visual_graph_sha256") == extraction.get("graph_sha256") == structured_hash(graph)
+        and validation.get("visual_image_sha256") == extraction.get("image_sha256")
+        and extraction.get("source_sha256") == record.get("source_sha256")
+        and f"#/pictures/{extraction.get('picture_index')}" in record.get("doc_items", [])
+        and len([ref for ref in record.get("doc_items", []) if str(ref).startswith("#/pictures/")]) == 1
+        and bool(graph.get("nodes")) and not graph.get("unresolved")
+        and all(edge.get("direction") != "unknown" for edge in graph.get("edges", []))))
+    return bool(visual_valid and not record.get("superseded") and validation.get("state") == "validated"
                 and validation.get("method") in {"human", "independent_source_check"}
                 and isinstance(validation.get("actor"), str) and validation["actor"].strip() and timestamp_valid
                 and validation.get("provenance_checked")
@@ -167,6 +177,8 @@ def _coverage_snapshot(ledger_path: str, ledger_mtime: int, ledger_size: int,
             "source_current": current, "detected": len(active), "validated": valid,
             "unvalidated": len(active) - valid, "rejected": rejected, "pending": len(active) - valid - rejected, "states": dict(counts),
             "visual_parse_pending": sum(entry.get("validation_status") == "needs_visual_parse" and entry["validation"]["state"] not in {"validated", "rejected"} for entry in active),
+            "visual_graph_extracted": sum(bool(entry.get("visual_extraction")) for entry in active),
+            "visual_graph_needs_review": sum(bool(entry.get("visual_extraction")) and not is_validated_record(entry) for entry in active),
             "technical_notes": sum(entry.get("context_kind") == "note" for entry in active),
             "context_link_candidates": len({(tuple(sorted((link.get("source_chunk_id", ""), link.get("target_chunk_id", "")))), link.get("link_type")) for entry in active for link in entry.get("context_links") or [] if link.get("status") == "candidate"}),
             "schema": data["schema"], "migration_required": data["schema"] == LEGACY_SCHEMA,
@@ -215,7 +227,9 @@ def machine_readiness(books: list[dict | None], *, lexical_ready: bool, hybrid_r
                          "detected": sum(item.get("detected") or 0 for item in evidence),
                          "validated": sum(item.get("validated") or 0 for item in evidence),
                          "visual_parse_pending": sum(item.get("visual_parse_pending") or 0 for item in evidence),
-                         "technical_notes": sum(item.get("technical_notes") or 0 for item in evidence),
+                         "visual_graph_extracted": sum(item.get("visual_graph_extracted") or 0 for item in evidence),
+            "visual_graph_needs_review": sum(item.get("visual_graph_needs_review") or 0 for item in evidence),
+            "technical_notes": sum(item.get("technical_notes") or 0 for item in evidence),
                          "context_link_candidates": sum(item.get("context_link_candidates") or 0 for item in evidence),
                          "manuals": len(books), "unknown_manuals": unknown,
                          "measurement_scope": "detected_candidates_only", "whole_manual_coverage_measured": False}}

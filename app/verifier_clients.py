@@ -281,6 +281,10 @@ class GroqVisionVerifier:
         elif schema_mode == "crosscheck":
             response_schema = self.CROSSCHECK_SCHEMA
             schema_name = "vision_text_crosscheck"
+        elif schema_mode == "visual_graph":
+            from .visual_graph import GRAPH_SCHEMA
+            response_schema = GRAPH_SCHEMA
+            schema_name = "source_visual_graph"
         elif schema_mode == "vision":
             response_schema = self.VISION_SCHEMA
             schema_name = "vision_verification"

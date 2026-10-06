@@ -21,7 +21,7 @@ def _source_rows(path: str, mtime: int, size: int) -> dict:
     return {row["chunk_id"]: row for row in read_source_rows(Path(path).parent)}
 
 
-def bind_evidence(results: list[dict], visuals: list[dict], books: list[dict], processed_dir: Path) -> tuple[list[dict], list[dict]]:
+def bind_evidence(results: list[dict], visuals: list[dict], books: list[dict], processed_dir: Path, output_dir: Path | None = None) -> tuple[list[dict], list[dict]]:
     """Only server-selected book paths can supply validation, never request fields."""
     ledgers = {}
     for book in books:
@@ -31,6 +31,9 @@ def bind_evidence(results: list[dict], visuals: list[dict], books: list[dict], p
         try:
             stat = path.stat()
             records = _records(str(path), stat.st_mtime_ns, stat.st_size)
+            from .visual_graph import current_visual_image
+            records = tuple({**record, "visual_image_current": current_visual_image(path.parent, output_dir, record["visual_extraction"])}
+                            if record.get("visual_extraction") else record for record in records)
         except (OSError, ValueError, TypeError, KeyError):
             records = ()
         current = evidence_coverage(path.parent).get("source_current", False)
@@ -79,6 +82,8 @@ def bind_evidence(results: list[dict], visuals: list[dict], books: list[dict], p
                     copy["generation_blocked_reason"] = "technical_source_changed"
             elif row.get("technical_evidence_id"):
                 copy["generation_blocked_reason"] = "technical_record_unavailable"
+        if any(r.get("visual_extraction") and not r.get("visual_image_current") for r in matches):
+            copy["generation_blocked_reason"] = "visual_source_image_changed_or_missing"
         if expand_context:
             neighbors = [dict(n) for n in row.get("context_neighbors") or [] if isinstance(n, dict)]
             seen = {n.get("chunk_id") for n in neighbors}

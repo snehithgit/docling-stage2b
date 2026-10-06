@@ -2815,6 +2815,30 @@ class Stage2BWorker:
             self.forget_colab_worker(worker_id)
             return {"state": "deleted", "worker_id": worker_id}
 
+    async def extract_technical_visual(self, image_bytes, mime, evidence_job):
+        """One bounded explicit extraction using the selected physical vision worker."""
+        from .visual_graph import PROMPT, normalize_graph
+        provider = self._selected_provider("oneplus")
+        if provider == "colab":
+            provider = await self._select_colab_provider()
+            if not provider:
+                raise RuntimeError("No selected Colab vision worker is available")
+        owner = "visual-graph:" + str(evidence_job["generation"])
+        if not await self._reserve_provider(provider, owner):
+            raise RuntimeError("Selected vision worker is busy or unavailable; retry later")
+        try:
+            evidence_job["_dispatch_provider"] = provider
+            client = self._vision_client_for_role("oneplus", evidence_job)
+            model = await self._model_for("visual-graph:" + provider, client.endpoint, client)
+            response = await client.inspect_image_stream(image_bytes, PROMPT, mime_type=mime,
+                                                   model=model, max_tokens=4096, schema_mode="visual_graph")
+            if _response_finish_reason(response) == "length":
+                raise ValueError("Visual extraction truncated; result was not saved")
+            graph = normalize_graph(_json_from_model_response(response))
+            return graph, provider, model
+        finally:
+            await self._release_provider(provider, owner)
+
     async def reserve_colab_worker_for_admin(self, worker_id: str, owner: str) -> dict[str, Any] | None:
         """Reserve one Colab worker for an explicit admin probe without scheduler races."""
         if self._worker_registry is None:

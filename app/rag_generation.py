@@ -348,6 +348,7 @@ def prepare_generation_sources(
             record = row["validated_record"]
             source["validated_relationships"] = record.get("relationships") or []
             source["validated_structured_records"] = record.get("structured_records") or []
+            source["validated_visual_graph"] = (record.get("visual_extraction") or {}).get("graph")
             source["technical_evidence_id"] = record["entry_id"]
         sources.append(source)
 
@@ -409,6 +410,8 @@ def source_block(source: dict[str, Any]) -> str:
         block += "\nContext association is a candidate from the same source page; it does not verify a diagram branch or component relationship."
     if source.get("validated_relationships"):
         block += "\nValidated source relationships: " + json.dumps(source["validated_relationships"], ensure_ascii=False)
+    if source.get("validated_visual_graph"):
+        block += "\nValidated source visual graph: " + json.dumps(source["validated_visual_graph"], ensure_ascii=False)
     if source.get("validated_structured_records"):
         block += "\nValidated literal fields: " + json.dumps(source["validated_structured_records"], ensure_ascii=False)
     return block
