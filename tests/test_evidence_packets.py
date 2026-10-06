@@ -38,6 +38,16 @@ def test_relevant_warning_from_second_result_context_can_enter_packet():
     assert "NOTE" in [s["chunk_id"] for s in sources]
 
 
+def test_exact_cable_length_can_promote_sixth_result_without_unit_conversion():
+    rows = [row(f"C{i}", "USB-A 2.0 extension cable 2 m. Table 3.") for i in range(5)]
+    rows.append(row("CORRECT", "USB-A 2.0 Extension Cable 3 m. Article 4027002205."))
+    sources, _ = prepare_generation_sources(rows, "Which article number identifies the USB-A 2.0 extension cable of length 3 metres?", max_sources=5)
+    assert "CORRECT" in [s["chunk_id"] for s in sources]
+    from app.rag_generation import _literal_measurements
+    assert _literal_measurements("3 metres") == _literal_measurements("3.0 m")
+    assert _literal_measurements("3 mm") != _literal_measurements("3 m")
+
+
 def test_unverified_relationships_do_not_enter_prompt_but_literal_text_remains(tmp_path):
     r = row(text="| Fault | Cause | Remedy |\n| Hot oil | Dirty cooler | Clean cooler |")
     books, _ = setup(tmp_path, [r])
