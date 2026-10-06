@@ -89,6 +89,7 @@ from .review_workers import ReviewAssistantStore, ReviewAssistantService
 from .anomaly_review import anomaly_evidence_signature, detect_anomaly_types
 from .structural_anomaly import structural_entries
 from .version import APP_VERSION
+from .evidence_packets import bind_evidence
 from .evidence_contract import SCHEMA as EVIDENCE_SCHEMA, LEGACY_SCHEMA as LEGACY_EVIDENCE_SCHEMA, evidence_coverage, book_readiness, machine_readiness, migrate_ledger
 from .table_repair import (
     TABLE_ROW_COLLAPSE_CODE, ensure_collapse_scan, table_repair_context, parse_tsv_matrix,
@@ -5756,6 +5757,7 @@ async def retrieval_prompt_bundle(update: RetrievalPromptExportRequest) -> dict:
         update.query, results, update.postprocess_job_id, min(5, candidate_k),
         books=selected_books, equipment_scoped=scope.get("mode") == "equipment",
     )
+    results, visual_results = await asyncio.to_thread(bind_evidence, results, visual_results, selected_books, Path(runtime.config.processed_dir))
     allowed_job_ids = {int(row.get("postprocess_job_id") or 0) for row in selected_books} if scope.get("mode") == "equipment" else None
     sources, evidence_scope = prepare_generation_sources(
         results, update.query, visual_results=visual_results, max_sources=top_k,
@@ -5763,6 +5765,8 @@ async def retrieval_prompt_bundle(update: RetrievalPromptExportRequest) -> dict:
         equipment_name=scope.get("equipment_name"),
     )
     if not sources:
+        if evidence_scope.get("withheld_evidence"):
+            raise HTTPException(status_code=409, detail="Retrieved technical evidence needs source validation or visual parsing before it can support an answer. No model was called.")
         raise HTTPException(status_code=404, detail="No retrieved source chunks are available to export.")
     return {
         "query": update.query,
@@ -5788,6 +5792,7 @@ async def _execute_retrieval_generation(update: RetrievalGenerateRequest) -> dic
         update.query, results, update.postprocess_job_id, min(5, candidate_k),
         books=selected_books, equipment_scoped=scope.get("mode") == "equipment",
     )
+    results, visual_results = await asyncio.to_thread(bind_evidence, results, visual_results, selected_books, Path(runtime.config.processed_dir))
     allowed_job_ids = {int(row.get("postprocess_job_id") or 0) for row in selected_books} if scope.get("mode") == "equipment" else None
     sources, evidence_scope = prepare_generation_sources(
         results, update.query, visual_results=visual_results, max_sources=top_k,
@@ -5795,6 +5800,8 @@ async def _execute_retrieval_generation(update: RetrievalGenerateRequest) -> dic
         equipment_name=scope.get("equipment_name"),
     )
     if not sources:
+        if evidence_scope.get("withheld_evidence"):
+            raise HTTPException(status_code=409, detail="Retrieved technical evidence needs source validation or visual parsing before it can support an answer. No model was called.")
         raise HTTPException(status_code=404, detail="No retrieved source chunks are available for answer generation.")
     try:
         async with runtime.stage2b_worker.device_lock(update.provider):

@@ -10,6 +10,8 @@ from typing import Any
 import httpx
 
 from .config import AppConfig
+from .evidence_packets import generation_policy
+from .technical_evidence import question_categories
 from .groq_quota import CloudQuotaPausedError, GroqQuotaGuard
 from .verifier_clients import OpenAICompatibleVerifier
 
@@ -266,73 +268,68 @@ def prepare_generation_sources(
     limit = max(1, int(max_sources))
     anchor = results[0] if results else visuals[0]
     cross_book = is_cross_book_query(question)
-    visual_limit = min(2, len(visuals), max(0, limit - 1)) if results else min(limit, len(visuals))
-    text_limit = max(1, limit - visual_limit) if results else 0
     candidates: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
+    seen = set()
+    withheld = []
+    query_terms = set(re.findall(r"[a-z0-9]+", question.lower())) - {"the", "is", "a", "an", "what", "how", "to", "of", "in", "and", "do", "i", "it", "for", "with"}
+    intents = question_categories(question)
 
-    def add(row: dict[str, Any], role: str) -> None:
-        if len(candidates) >= text_limit:
-            return
+    def add(row, role, visual=False, retrieval_rank=1):
         if not in_equipment_scope(row):
             return
-        text = str(row.get("text") or row.get("snippet") or "").strip()
-        if not text:
+        if not equipment_scoped and not cross_book and not _same_source(anchor, row):
             return
-        key = (str(row.get("postprocess_job_id") or row.get("source_filename") or ""), str(row.get("chunk_id") or text[:120]))
+        key = (str(row.get("postprocess_job_id") or row.get("source_filename") or ""),
+               str(row.get("visual_evidence_id") or row.get("chunk_id") or row.get("text") or ""), visual)
         if key in seen:
             return
         seen.add(key)
-        copy = dict(row)
-        copy["evidence_role"] = role
-        candidates.append(copy)
+        eligible, reason, validated = generation_policy(row)
+        if not eligible:
+            withheld.append({"chunk_id": key[1], "postprocess_job_id": row.get("postprocess_job_id"), "reason": reason, "source_kind": "visual" if visual else "text"})
+            return
+        text = str(row.get("text") or row.get("snippet") or "").strip()
+        if not visual and not text:
+            return
+        content = text if not visual else " ".join(str(v) for v in row.get("visible_text") or []) + " " + str(row.get("summary") or "")
+        words = set(re.findall(r"[a-z0-9]+", content.lower()))
+        relevance = len(words & query_terms) / max(1, len(query_terms))
+        types = set((row.get("technical_evidence") or {}).get("evidence_types") or row.get("evidence_types") or [])
+        # Literal body matches outrank generic inherited headings and visual
+        # page affinity. No fixed visual quota displaces a direct text answer.
+        priority = relevance * 3 + 8 / (1 + retrieval_rank) + (1 if types & intents else 0)
+        if role in {"adjacent_context", "structural_context"} and re.search(r"\b(?:warning|caution|n\.?b\.?|note)\b", content, re.I):
+            priority += 0.5
+        candidates.append({**row, "evidence_role": role, "source_kind": "visual" if visual else "text",
+                           "evidence_policy": reason, "validated_record": validated,
+                           "packet_priority": priority})
 
-    if results:
-        add(results[0], "top_result")
-        if equipment_scoped:
-            for neighbor in results[0].get("context_neighbors") or []:
-                if isinstance(neighbor, dict):
-                    add(_neighbor_as_row(results[0], neighbor), "structural_context")
-            for row in results[1:]:
-                try:
-                    job_id = int(row.get("postprocess_job_id") or 0)
-                except (TypeError, ValueError):
-                    job_id = 0
-                if job_id in allowed_ids:
-                    add(row, "same_equipment_result")
-        elif not cross_book:
-            for neighbor in results[0].get("context_neighbors") or []:
-                if isinstance(neighbor, dict):
-                    add(_neighbor_as_row(results[0], neighbor), "adjacent_context")
-            for row in results[1:]:
-                if _same_source(anchor, row):
-                    add(row, "same_book_result")
+    for index, row in enumerate(results):
+        role = "top_result" if index == 0 else "same_equipment_result" if equipment_scoped else "cross_book_result" if cross_book else "same_book_result"
+        add(row, role, retrieval_rank=index + 1)
+        for neighbor in row.get("context_neighbors") or []:
+            if isinstance(neighbor, dict):
+                add(_neighbor_as_row(row, neighbor), "structural_context" if equipment_scoped else "adjacent_context", retrieval_rank=index + 3)
+    for index, row in enumerate(visuals):
+        add(row, "visual_result", True, retrieval_rank=index + 3)
+
+    # Stable ties preserve upstream ranking and context ordering.
+    candidates.sort(key=lambda row: row["packet_priority"], reverse=True)
+    sources = []
+    text_count = visual_count = 0
+    for row in candidates[:limit]:
+        if row["source_kind"] == "visual":
+            visual_count += 1
+            source = _compact_visual_source(row, f"V{visual_count}")
         else:
-            for row in results[1:]:
-                add(row, "cross_book_result")
-
-    sources: list[dict[str, Any]] = []
-    for row in candidates[:text_limit]:
-        source = compact_source(row, f"S{sum(1 for s in sources if str(s.get('label','')).startswith('S')) + 1}")
-        source["source_kind"] = "text"
-        source["evidence_role"] = row.get("evidence_role")
+            text_count += 1
+            source = compact_source(row, f"S{text_count}")
+        source.update(source_kind=row["source_kind"], evidence_role=row["evidence_role"], evidence_policy=row["evidence_policy"])
+        if row.get("validated_record"):
+            record = row["validated_record"]
+            source["validated_relationships"] = record.get("relationships") or []
+            source["technical_evidence_id"] = record["entry_id"]
         sources.append(source)
-
-    visual_sources: list[dict[str, Any]] = []
-    for row in visuals:
-        if len(visual_sources) >= visual_limit:
-            break
-        if equipment_scoped:
-            try:
-                job_id = int(row.get("postprocess_job_id") or 0)
-            except (TypeError, ValueError):
-                job_id = 0
-            if job_id not in allowed_ids:
-                continue
-        elif not cross_book and not _same_source(anchor, row):
-            continue
-        visual_sources.append(_compact_visual_source(row, f"V{len(visual_sources) + 1}"))
-    sources.extend(visual_sources)
 
     if equipment_scoped:
         scope = {
@@ -349,6 +346,9 @@ def prepare_generation_sources(
             "postprocess_job_id": None if cross_book else anchor.get("postprocess_job_id"),
         }
     scope.update({
+        "packet_version": "question-evidence/v2",
+        "withheld_evidence": withheld,
+        "selection_policy": "question_relevance_shared_budget",
         "includes_adjacent_context": any(s.get("evidence_role") in {"adjacent_context", "structural_context"} for s in sources),
         "text_evidence_count": sum(1 for s in sources if s.get("source_kind") == "text"),
         "visual_evidence_count": sum(1 for s in sources if s.get("source_kind") == "visual"),
@@ -384,7 +384,10 @@ def source_block(source: dict[str, Any]) -> str:
     refs = ", ".join(str(v) for v in (source.get("doc_items") or []) if str(v).strip())
     if refs:
         meta.append(f"Docling refs: {refs}")
-    return f"[{source.get('label')}] " + " | ".join(meta) + "\n" + str(source.get("text") or "").strip()
+    block = f"[{source.get('label')}] " + " | ".join(meta) + "\n" + str(source.get("text") or "").strip()
+    if source.get("validated_relationships"):
+        block += "\nValidated source relationships: " + json.dumps(source["validated_relationships"], ensure_ascii=False)
+    return block
 
 
 def build_grounded_user_prompt(question: str, sources: list[dict[str, Any]]) -> str:
@@ -400,6 +403,7 @@ def build_grounded_user_prompt(question: str, sources: list[dict[str, Any]]) -> 
         "- Prefer the source that directly answers the question over merely related background.\n"
         "- Do not transfer instructions or values between different equipment/systems.\n"
         "- Do not invent missing steps, values, causes, or safety limits.\n"
+        "- An alarm threshold or symptom does not establish its cause. A cooling procedure does not by itself explain why overheating occurred.\n"
         "- For [V#], visible_text is model-read source text; objects/summary are interpretation and cannot alone establish exact values, identifiers, switch positions, directions, limits, or procedures.\n"
         "- Use square-bracket citations exactly: [S1], [V1], etc.\n"
         "- If evidence is insufficient, use the required not-enough-information statement."
