@@ -2970,6 +2970,29 @@ class Stage2BWorker:
             return provider
         return None
 
+    async def reserve_colab_answer_worker(self, owner: str) -> dict[str, Any]:
+        """Claim an idle eligible pool member; never queue behind a busy GPU."""
+        if self._worker_registry is None:
+            raise ValueError("Colab worker registry is unavailable")
+        for provider in self._configured_colab_providers():
+            self._ensure_provider_state(provider)
+            if self._physical_worker_paused(provider) or provider in self._provider_reservations or self._device_locks[provider].locked():
+                continue
+            if not await self._endpoint_provider_ready(provider):
+                continue
+            if not await self._reserve_provider(provider, owner):
+                continue
+            try:
+                worker = self._worker_registry.get_colab(provider.split(":", 1)[1])
+                if worker and worker.get("url") and self._worker_registry.read_api_key(str(worker["id"])):
+                    return worker
+            except BaseException:
+                await self._release_provider(provider, owner)
+                raise
+            await self._release_provider(provider, owner)
+        raise ValueError("No idle eligible Colab worker is available. Check Workers for readiness or wait for the current jobs to finish.")
+
+
     async def _reserve_provider(self, provider: str, owner: str) -> bool:
         """Reserve one physical provider before a queue row is claimed.
 

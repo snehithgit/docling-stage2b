@@ -601,7 +601,7 @@ ${manuals} manual${manuals === 1 ? '' : 's'} will be unassigned from this machin
     const provider = $('answer-provider').value;
     const epoch = ++generationEpoch;
     const querySnapshot = currentQuery;
-    const label = {pi5:'Pi5', oneplus:'OnePlus', groq:'Groq'}[provider] || provider;
+    const label = {pi5:'Pi5', oneplus:'OnePlus', groq:'Groq', colab:'Colab worker pool'}[provider] || provider;
     resetGeneratedAnswer();
     setGenerationUi(true, `Generating on ${label}…`);
     $('generation-progress-title').textContent = `Generating on ${label}…`;

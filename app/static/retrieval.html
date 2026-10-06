@@ -96,7 +96,7 @@
         <div class="retrieval-answer-head">
           <div><p class="eyebrow">Optional final step</p><h3>Generate only from the evidence above</h3><p class="subtle">Choose one generator. No automatic fallback. For a machine scope, every [S#]/[V#] source stays inside that machine’s assigned manuals.</p></div>
           <div class="retrieval-answer-controls">
-            <label><span class="field-label">Generator</span><select class="text-input" id="answer-provider"><option value="pi5">Pi5 · local</option><option value="oneplus">OnePlus · local</option><option value="groq">Groq · cloud</option></select></label>
+            <label><span class="field-label">Generator</span><select class="text-input" id="answer-provider"><option value="pi5">Pi5 · local</option><option value="oneplus">OnePlus · local</option><option value="groq">Groq · cloud</option><option value="colab">Colab · worker pool</option></select></label>
             <button class="primary-button" id="generate-answer" type="button">Generate answer</button>
             <button class="secondary-button danger-outline" id="cancel-answer" type="button" hidden>Cancel generation</button>
             <button class="secondary-button" id="copy-external-prompt" type="button">Copy for other LLM</button>
@@ -177,6 +177,7 @@
 </div>
 <script src="/assets/nav.js?v=5.0.7"></script>
 <script src="/assets/readiness.js?v=5.0.7"></script>
-<script src="/assets/retrieval.js?v=5.0.7"></script>
+<script src="/assets/retrieval.js?v=5.0.7-colab1"></script>
 </body>
 </html>
+
