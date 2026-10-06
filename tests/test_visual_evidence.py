@@ -139,7 +139,7 @@ def test_generation_packet_combines_s_and_v_evidence_with_stable_labels():
     assert "objects/summary as interpretation" in prompt
 
 
-def test_citation_audit_accepts_visual_labels():
+def test_valid_visual_labels_do_not_certify_unstated_instruction():
     sources = [
         {"label": "S1", "source_kind": "text", "text": "Use the documented zero-setting section for adjustment."},
         {"label": "V1", "source_kind": "visual", "visible_text": ["SW1"], "summary": "SW1 adjustment control."},
@@ -147,7 +147,8 @@ def test_citation_audit_accepts_visual_labels():
     result = citation_audit("Use the documented zero-setting section [S1] and inspect SW1 [V1].", sources)
     assert result["citation_labels"] == ["S1", "V1"]
     assert result["invalid_citation_labels"] == []
-    assert result["grounding_warning"] is None
+    assert result["grounding_warning"] is not None
+    assert result["answer_usable"] is False
 
 
 def test_pi5_picture_manual_crosscheck_persists_to_vision_ledger_namespace(tmp_path: Path, monkeypatch):
@@ -219,7 +220,7 @@ def test_visual_grounding_requires_exact_technical_value_in_visible_text_not_sum
     assert result["unsupported_claims"][0]["reason"] == "critical_token_not_in_cited_source"
 
 
-def test_visual_grounding_accepts_exact_technical_value_when_visible_in_image_text():
+def test_unrelated_visible_identifier_and_value_do_not_prove_a_setting():
     sources = [{
         "label": "V1",
         "source_kind": "visual",
@@ -227,8 +228,8 @@ def test_visual_grounding_accepts_exact_technical_value_when_visible_in_image_te
         "summary": "Adjustment diagram.",
     }]
     result = citation_audit("Set SW1 to 12 V [V1].", sources)
-    assert result["grounding_passed"] is True
-    assert result["grounding_warning"] is None
+    assert result["grounding_passed"] is False
+    assert result["unsupported_claims"][0]["reason"] == "technical_association_not_located"
 
 
 def test_human_useful_overrides_uncertain_verdict_once_evidence_exists(tmp_path: Path):
