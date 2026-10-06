@@ -12,7 +12,7 @@ function harness(items=[]) {
   const requests=[];
   const ctx={document:{getElementById:get, visibilityState:'hidden'},window:{},URLSearchParams,console,setInterval(){},clearTimeout(){},setTimeout(){},navigator:{clipboard:{writeText:async()=>{}}},fetch:async(url)=>{requests.push(url);return {ok:true,json:async()=>url==='/api/anomaly-review'?{items,workers:{enabled:true,anomaly_workers:[{enabled:true,paused:false}]}}:{queued:true}}}};
   const source=fs.readFileSync(path.join(__dirname,'../../app/static/anomaly-review.js'),'utf8').replace(/\nloadAnomalies\(\);/,'\n');
-  vm.runInNewContext(source+'\nglobalThis.setItems = items => {anomalyItems=items;anomalyWorkersAvailable=true;};',ctx);
+  vm.runInNewContext(source+'\nglobalThis.setItems = items => {anomalyItems=items;anomalyFiltered=items;anomalyWorkersAvailable=true;};',ctx);
   ctx.setItems(items);
   return {ctx,get,requests};
 }
@@ -58,5 +58,13 @@ test('batch Yes requests human re-review and No makes no request',async()=>{
  assert.equal(h.requests.length,0);
  assert.match(h.get('ar-batch-status').textContent,/Automatic review.*continues/);
  await h.ctx.reverifyAll();
- assert.equal(h.requests[0],'/api/anomaly-review/reverify-all?confirm=true');
+ assert.equal(h.requests[0],'/api/postprocess/jobs/21/structural-review/human/anomaly-review');
+});
+
+test('repeat review respects filters and skips active or unreviewed findings',async()=>{
+ const h=harness([{...table,human_reviewed:true,book:'A',entry_id:'chosen'},{...table,human_reviewed:true,book:'B',entry_id:'other'},{...table,human_reviewed:true,book:'A',entry_id:'busy',state:'processing'},{...table,book:'A',entry_id:'unreviewed'}]);
+ h.get('ar-book').value='A';h.ctx.applyFilters();
+ await h.ctx.reverifyAll();
+ assert.equal(h.requests.filter(url=>url.includes('/anomaly-review') && url!=='/api/anomaly-review').length,1);
+ assert.match(h.requests[0],/chosen/);
 });

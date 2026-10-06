@@ -3,6 +3,7 @@ let anomalyFiltered = [];
 let anomalyInFlight = false;
 let anomalyTimer = null;
 let anomalyWorkersAvailable = false;
+let anomalyBatchInFlight = false;
 
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
@@ -139,6 +140,7 @@ function applyFilters() {
     return true;
   });
   $("ar-count").textContent = `${anomalyFiltered.length.toLocaleString()} of ${anomalyItems.length.toLocaleString()} anomal${anomalyItems.length === 1 ? "y" : "ies"}`;
+  updateRepeatControl();
   $("ar-results").innerHTML = anomalyFiltered.length ? anomalyFiltered.map(renderItem).join("") : '<div class="panel empty-state">No anomaly items match these filters.</div>';
 }
 
@@ -183,39 +185,36 @@ async function loadAnomalies() {
   }
 }
 
+function repeatCandidates() {
+  return anomalyFiltered.filter(item => item.human_reviewed && (item.anomaly_types || []).length && !['queued','processing'].includes(item.state));
+}
+function updateRepeatControl() {
+  const button = $("ar-batch-yes");
+  const count = repeatCandidates().length;
+  button.disabled = anomalyBatchInFlight || !anomalyWorkersAvailable || count === 0;
+  button.textContent = `Re-review ${count} matching human decisions`;
+}
 async function reverifyAll() {
   const button = $("ar-batch-yes");
   if (!button || button.disabled) return;
-  const total = anomalyItems.filter(item => item.human_reviewed && (item.anomaly_types || []).length).length;
-  if (!total) {
-    feedback("There are no human-verified anomalies to re-review.", "warning");
-    $("ar-batch-status").textContent = "No human-verified anomalies were queued.";
-    return;
-  }
-  const old = button.textContent;
+  if (anomalyBatchInFlight) return;
+  const selected = repeatCandidates().slice();
+  if (!selected.length) return;
   button.disabled = true;
-  $("ar-batch-no").disabled = true;
-  button.textContent = "Queueing human-verified re-reviews…";
-  $("ar-batch-status").textContent = `Queueing ${total.toLocaleString()} human-verified anomalies for Colab…`;
+  anomalyBatchInFlight = true;
+  let queued = 0, failed = 0;
   try {
-    const response = await fetch("/api/anomaly-review/reverify-all?confirm=true", {method:"POST", cache:"no-store"});
-    let data = {};
-    try { data = await response.json(); } catch (_) { data = {}; }
-    if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
-    const failed = Number(data.failed || 0);
-    const message = `Queued ${Number(data.queued || 0).toLocaleString()} anomalies. ${Number(data.already_running || 0).toLocaleString()} were already queued/processing. ${failed ? `${failed.toLocaleString()} could not be queued. ${data.errors?.[0]?.detail || ""} ` : ""}Human authority is unchanged.`;
-    feedback(message, failed ? "warning" : "success");
-    $("ar-batch-status").textContent = message;
+    for (const item of selected) {
+      const lane = item.review_type === 'text' ? 'corrections' : item.review_type === 'structural' ? 'structural-review' : 'vision-audit';
+      try {
+        const response = await fetch(`/api/postprocess/jobs/${item.postprocess_job_id}/${lane}/${encodeURIComponent(item.entry_id)}/anomaly-review`, {method:'POST',cache:'no-store'});
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        queued++;
+      } catch (_) { failed++; }
+    }
+    $("ar-batch-status").textContent = `Requested ${queued} matching re-reviews; ${failed} failed. Human decisions remain unchanged.`;
     await loadAnomalies();
-  } catch (error) {
-    const message = error.message || "Could not queue human-verified anomaly re-reviews.";
-    feedback(message, "warning");
-    $("ar-batch-status").textContent = message;
-  } finally {
-    button.disabled = !anomalyWorkersAvailable;
-    $("ar-batch-no").disabled = false;
-    button.textContent = old;
-  }
+  } finally { anomalyBatchInFlight = false; updateRepeatControl(); }
 }
 
 async function reverifyItem(item, button) {
@@ -251,7 +250,7 @@ $("ar-results").addEventListener("click", async event => {
 });
 
 function declineBulkRun() {
-  $("ar-batch-status").textContent = "No selected — human decisions remain unchanged. Automatic review of unreviewed anomalies continues.";
+  $("ar-batch-status").textContent = "Human decisions remain unchanged. Automatic review of unreviewed anomalies continues.";
   feedback("No changes made. Anomaly re-verification was not started.", "info");
 }
 
