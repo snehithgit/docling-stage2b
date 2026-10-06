@@ -1,3 +1,7 @@
+## V5.0.6 — Intent-aware scoped recovery (phase 7 of 10)
+
+Question planning checks for candidate causes, actions, values and identifiers. Missing roles trigger at most two lexical searches within the selected manuals, preserving the original question and primary results. Recovered sources pass existing validation/scope gates and share the answer-source budget. Search coverage remains advisory. See [Phase 7 scoped recovery](docs/v5-scoped-recovery.md).
+
 ## V5.0.5 — Verified structured search (phase 6 of 10)
 
 Validated table fields and diagram labels now participate in lexical search, embedding text and question-based source selection. Current source/image checks remove stale or withdrawn facts. Changed evidence invalidates machine embeddings and incremental rebuilds reuse unchanged vectors. Explicit model values retain source-chunk applicability and equipment scope. See [Phase 6 structured search](docs/v5-structured-search.md).

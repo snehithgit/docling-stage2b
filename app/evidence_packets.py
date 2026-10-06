@@ -85,6 +85,7 @@ def bind_evidence(results: list[dict], visuals: list[dict], books: list[dict], p
         if any(r.get("visual_extraction") and not r.get("visual_image_current") for r in matches):
             copy["generation_blocked_reason"] = "visual_source_image_changed_or_missing"
         if expand_context:
+            copy["recovery_candidates"] = [bind(candidate, expand_context=False) for candidate in (row.get("recovery_candidates") or [])[:6] if isinstance(candidate, dict)]
             neighbors = [dict(n) for n in row.get("context_neighbors") or [] if isinstance(n, dict)]
             seen = {n.get("chunk_id") for n in neighbors}
             if current:
@@ -107,6 +108,7 @@ def bind_evidence(results: list[dict], visuals: list[dict], books: list[dict], p
             copy["context_neighbors"] = [bind({**n, "postprocess_job_id": n.get("postprocess_job_id", row.get("postprocess_job_id")), "result_dir": n.get("result_dir", row.get("result_dir"))}, expand_context=False) for n in neighbors]
         else:
             copy.pop("context_neighbors", None)
+            copy.pop("recovery_candidates", None)
         return copy
 
     return [bind(row) for row in results], [bind(row, True) for row in visuals]

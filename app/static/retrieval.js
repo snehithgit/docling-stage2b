@@ -530,7 +530,7 @@ ${manuals} manual${manuals === 1 ? '' : 's'} will be unassigned from this machin
     $('grounded-answer-sources').innerHTML = withheldNote + `${scopeText ? `<p class="subtle grounded-evidence-scope">${esc(scopeText)}</p>` : ''}` + sources.map((source, index) => {
       const row = registerRow(source, rowKey('answer', index));
       const pages = (row.page_numbers || []).length ? `Page ${(row.page_numbers || []).join(', ')}` : 'Page unknown';
-      const role = source.context_link_status === 'candidate' ? ' · candidate context; diagram applicability unverified' : source.evidence_role === 'structural_context' ? ' · structural context' : source.evidence_role === 'adjacent_context' ? ' · adjacent' : '';
+      const role = source.context_link_status === 'candidate' ? ' · candidate context; diagram applicability unverified' : source.evidence_role === 'structural_context' ? ' · structural context' : source.evidence_role === 'adjacent_context' ? ' · adjacent' : source.evidence_role === 'scoped_recovery' ? ' · recovered from selected manuals' : '';
       const visual = source.source_kind === 'visual';
       const detail = visual ? `picture #${source.picture_index ?? '—'} · ${String(source.category || 'visual').replaceAll('_',' ')}` : `${source.chunk_id || 'chunk'}${role}`;
       return `<div class="grounded-source-row"><div><strong>[${esc(source.label || (visual ? `V${index + 1}` : `S${index + 1}`))}] ${esc(cleanBook(source.source_filename))}</strong><span>${esc(pages)} · ${esc(detail)}</span></div>${pageButton(row, '+ Page')}</div>`;
@@ -735,10 +735,17 @@ ${manuals} manual${manuals === 1 ? '' : 's'} will be unassigned from this machin
       const response = await fetch('/api/retrieval/search', {method:'POST', headers:{'Content-Type':'application/json'}, signal:controller.signal, body: JSON.stringify({query, top_k:5, postprocess_job_id: scope.postprocess_job_id, equipment_id: scope.equipment_id, retrieval_mode: currentRetrievalMode})});
       const data = await response.json(); if (!response.ok) throw new Error(data.detail || 'Search failed');
       if (requestId !== searchRequestId) return;
-      renderResults(data.results || [], data.visual_results || []);
+      const primary = data.results || [];
+      const recovered = primary.flatMap(row => row.recovery_candidates || []);
+      renderResults([...primary, ...recovered.map((row, index) => ({...row, rank: primary.length + index + 1}))], data.visual_results || []);
       const retrievalScope = data.retrieval_scope || {};
       if (retrievalScope.mode === 'equipment') feedback(`Searched ${data.searched_books} manual${data.searched_books === 1 ? '' : 's'} inside machine “${retrievalScope.equipment_name || 'selected machine'}” only.`, 'success');
       else if (retrievalScope.mode === 'single_book') feedback('Single-manual lexical inspection complete. Select its machine for hybrid semantic retrieval.', 'success');
+      const recovery = retrievalScope.evidence_recovery || {};
+      if ((recovery.recovery_queries || []).length) {
+        const remaining = (recovery.post_recovery_coverage || recovery).missing_candidate_roles || [];
+        feedback(`Search checked ${recovery.intent || 'technical'} evidence inside the selected scope and recovered ${Number(recovery.recovered_candidates || 0)} additional candidate passages.${remaining.length ? ` Still looking for: ${remaining.join(', ')}. This is a search-coverage estimate; inspect the sources.` : ' Candidate roles were located; source validation still applies.'}`, remaining.length ? 'warning' : 'success');
+      }
     } catch (error) {
       if (error.name !== 'AbortError' && requestId === searchRequestId) { renderResults([], []); feedback(error.message, 'error'); }
     } finally {

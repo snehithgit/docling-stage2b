@@ -315,6 +315,9 @@ def prepare_generation_sources(
         # Literal body matches outrank generic inherited headings and visual
         # page affinity. No fixed visual quota displaces a direct text answer.
         priority = relevance * 3 + 8 / (1 + retrieval_rank) + (1 if types & intents else 0)
+        from .retrieval_recovery import question_plan, candidate_roles, topical
+        if topical({**row, "text": content}, question):
+            priority += 1.5 * len(set(question_plan(question)["required_candidate_roles"]) & candidate_roles({**row, "text": content}))
         if measurements and measurements.intersection(_literal_measurements(content)):
             priority += 3
         if role in {"adjacent_context", "structural_context"} and re.search(r"\b(?:warning|caution|n\.?b\.?|note)\b", content, re.I):
@@ -326,6 +329,9 @@ def prepare_generation_sources(
     for index, row in enumerate(results):
         role = "top_result" if index == 0 else "same_equipment_result" if equipment_scoped else "cross_book_result" if cross_book else "same_book_result"
         add(row, role, retrieval_rank=index + 1)
+        for recovered in (row.get("recovery_candidates") or [])[:6]:
+            if isinstance(recovered, dict):
+                add(recovered, "scoped_recovery", retrieval_rank=index + 3)
         for neighbor in row.get("context_neighbors") or []:
             if isinstance(neighbor, dict):
                 add(_neighbor_as_row(row, neighbor), "structural_context" if equipment_scoped else "adjacent_context", retrieval_rank=index + 3)
@@ -374,6 +380,8 @@ def prepare_generation_sources(
             "book": None if cross_book else _clean_book(anchor.get("source_filename")),
             "postprocess_job_id": None if cross_book else anchor.get("postprocess_job_id"),
         }
+    from .retrieval_recovery import assess_candidates
+    scope["candidate_coverage"] = assess_candidates(sources, question)
     scope.update({
         "packet_version": "question-evidence/v2",
         "withheld_evidence": withheld,
@@ -426,12 +434,16 @@ def source_block(source: dict[str, Any]) -> str:
 
 
 def build_grounded_user_prompt(question: str, sources: list[dict[str, Any]]) -> str:
+    from .retrieval_recovery import assess_candidates
+    coverage_note = json.dumps(assess_candidates(sources, question), ensure_ascii=False)
     blocks = "\n\n".join(source_block(source) for source in sources)
     return (
         "QUESTION:\n"
         f"{question.strip()}\n\n"
         "SOURCE EXCERPTS:\n"
         f"{blocks}\n\n"
+        "SEARCH COVERAGE (heuristic markers, not proof of correctness or missing answers):\n"
+        + coverage_note + "\n\n"
         "ANSWER REQUIREMENTS:\n"
         "- Use only the source excerpts above.\n"
         "- End EVERY factual sentence and numbered step with its own supporting [S#] or [V#] citation. A citation only after the whole procedure is invalid.\n"
