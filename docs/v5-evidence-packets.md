@@ -8,6 +8,8 @@ Literal source paragraphs and tables remain quotable; an unvalidated technical e
 
 Human correction decisions are preserved. This policy does not require all ordinary paragraphs to receive a new human review. It distinguishes literal manual content from derived interpretation. Whole-manual extraction coverage and semantic claim verification are still later phases.
 
+Mixed chunks with substantial literal paragraph/table text can retain that text while a neighboring drawing awaits parsing. The visual interpretation remains withheld. A flowchart or sparse picture-only chunk cannot use this exception.
+
 The API returns withheld candidate identities and reasons in evidence_scope. When all candidates are withheld, generation and prompt export return 409 with an explanation before any model call. With a mixed packet, eligible sources remain available and the UI reports withheld candidates.
 
 ## Source selection
