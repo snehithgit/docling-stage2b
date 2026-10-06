@@ -306,6 +306,9 @@ def prepare_generation_sources(
         if not visual and not text:
             return
         content = text if not visual else " ".join(str(v) for v in row.get("visible_text") or []) + " " + str(row.get("summary") or "")
+        if validated:
+            from .structured_search import record_text
+            content += "\n" + record_text(validated)[0]
         words = set(re.findall(r"[a-z0-9]+", content.lower()))
         relevance = len(words & query_terms) / max(1, len(query_terms))
         types = set((row.get("technical_evidence") or {}).get("evidence_types") or row.get("evidence_types") or [])
@@ -349,6 +352,11 @@ def prepare_generation_sources(
             source["validated_relationships"] = record.get("relationships") or []
             source["validated_structured_records"] = record.get("structured_records") or []
             source["validated_visual_graph"] = (record.get("visual_extraction") or {}).get("graph")
+            literals = [value for item in record.get("structured_records") or [] for value in (item.get("fields") or {}).values() if isinstance(value, str)]
+            literals += [value for item in record.get("relationships") or [] for key, value in item.items() if key in {"symptom", "cause", "remedy"} and isinstance(value, str)]
+            graph = source["validated_visual_graph"] or {}
+            literals += [node["text"] for node in graph.get("nodes", [])] + [edge["label"] for edge in graph.get("edges", [])]
+            source["validated_source_literals"] = literals
             source["technical_evidence_id"] = record["entry_id"]
         sources.append(source)
 
@@ -718,7 +726,7 @@ def _source_support_text(source: dict[str, Any], *, exact: bool) -> str:
         objects = " ".join(str(v) for v in (source.get("visible_objects") or []) if str(v).strip())
         return " ".join((visible, objects, str(source.get("summary") or ""), str(source.get("text") or "")))
     headings = " ".join(str(v) for v in (source.get("headings") or []) if str(v).strip())
-    return headings + " " + str(source.get("text") or "")
+    return headings + " " + str(source.get("text") or "") + " " + " ".join(source.get("validated_source_literals") or [])
 
 
 def _claim_segments(answer: str) -> list[str]:

@@ -135,7 +135,12 @@ def _vectors_path(index_path: Path, model: str) -> Path:
 
 def _source_signature(index_path: Path) -> dict[str, int]:
     stat = Path(index_path).stat()
-    return {"size": int(stat.st_size), "mtime_ns": int(stat.st_mtime_ns)}
+    from .structured_search import overlay_signature
+    signature = {"size": int(stat.st_size), "mtime_ns": int(stat.st_mtime_ns)}
+    evidence = overlay_signature(_load_index(index_path))
+    if evidence:
+        signature["verified_evidence_sha256"] = evidence
+    return signature
 
 
 def _document_text(row: dict[str, Any], document_prefix: str) -> str:
@@ -145,6 +150,8 @@ def _document_text(row: dict[str, Any], document_prefix: str) -> str:
         body = "Section: " + " > ".join(headings[-3:]) + "\n" + text
     else:
         body = text
+    if row.get("verified_search_text"):
+        body += "\nVerified source fields:\n" + str(row["verified_search_text"])
     return str(document_prefix or "") + body
 
 
@@ -221,6 +228,7 @@ def hybrid_index_status(index_path: Path, *, model: str, document_prefix: str = 
     source_signature_match = (
         int(meta.get("source_size") or -1) == signature["size"]
         and int(meta.get("source_mtime_ns") or -1) == signature["mtime_ns"]
+        and meta.get("verified_evidence_sha256") == signature.get("verified_evidence_sha256")
     )
     if not source_signature_match:
         current_rows = _load_index(index_path)
@@ -260,7 +268,7 @@ def build_book_embedding_index(index_path: Path, *, base_url: str, model: str, d
         if any(len(vector) != dim for vector in batch): raise EmbeddingServiceError("Embedding service returned inconsistent dimensions")
         vectors.extend(batch)
     matrix = np.asarray(vectors, dtype="<f4"); temp_vec = vec_path.with_suffix(vec_path.suffix + ".tmp"); matrix.tofile(temp_vec); temp_vec.replace(vec_path)
-    metadata = {"schema": _SCHEMA, "created_at_epoch": time.time(), "model": model, "document_prefix": str(document_prefix or ""), "rows": len(rows), "dim": int(dim), "source_filename": str(rows[0].get("source_filename") or ""), "postprocess_job_id": rows[0].get("postprocess_job_id"), "source_size": signature["size"], "source_mtime_ns": signature["mtime_ns"], "corpus_fingerprint": fingerprint, "elapsed_seconds": round(time.perf_counter()-started,3)}
+    metadata = {"schema": _SCHEMA, "created_at_epoch": time.time(), "model": model, "document_prefix": str(document_prefix or ""), "rows": len(rows), "dim": int(dim), "source_filename": str(rows[0].get("source_filename") or ""), "postprocess_job_id": rows[0].get("postprocess_job_id"), "source_size": signature["size"], "source_mtime_ns": signature["mtime_ns"], "verified_evidence_sha256": signature.get("verified_evidence_sha256"), "corpus_fingerprint": fingerprint, "elapsed_seconds": round(time.perf_counter()-started,3)}
     temp_meta = meta_path.with_suffix(meta_path.suffix + ".tmp"); temp_meta.write_text(json.dumps(metadata, indent=2, ensure_ascii=False)+"\n", encoding="utf-8"); temp_meta.replace(meta_path)
     _load_vectors_cached.cache_clear()
     return {**hybrid_index_status(index_path, model=model, document_prefix=document_prefix), "status": "built", "cache_hit": False, "elapsed_seconds": metadata["elapsed_seconds"]}
@@ -453,6 +461,9 @@ def _equipment_source_signatures(index_paths: list[Path]) -> list[dict[str, Any]
             "size": int(stat.st_size),
             "mtime_ns": int(stat.st_mtime_ns),
         })
+        evidence = _source_signature(path).get("verified_evidence_sha256")
+        if evidence:
+            signatures[-1]["verified_evidence_sha256"] = evidence
     signatures.sort(key=lambda item: (str(item["result_dir"]).lower(), str(item["filename"])))
     return signatures
 

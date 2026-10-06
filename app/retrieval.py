@@ -340,7 +340,7 @@ def _query_feature_score(row: dict[str, Any], query: str) -> float:
         return 0.0
     profile = _query_profile(query)
     counter = row.get("_counter") or Counter(row.get("_tokens") or _tokens(str(row.get("text") or "")))
-    raw_text = str(row.get("text") or "")
+    raw_text = str(row.get("text") or "") + "\n" + str(row.get("verified_search_text") or "")
     attribute = profile["attribute"]
     subject_terms = list(profile["subject_terms"])
     matches, ratio, structural_subject_matches = _subject_overlap(row, subject_terms)
@@ -844,7 +844,7 @@ def follow_reference(
             **row,
             "rank": rank,
             "score": round(score, 4),
-            "snippet": _snippet(str(row.get("text") or ""), q_tokens),
+            "snippet": _snippet(str(row.get("text") or "") + "\n" + str(row.get("verified_search_text") or ""), q_tokens),
             "cross_references": extract_cross_references(str(row.get("text") or "")),
             "reference_scope": "same_book",
         })
@@ -1569,7 +1569,16 @@ def _load_index_cached(path: str, mtime_ns: int, size: int) -> tuple[dict[str, A
 
 def _load_index(path: Path) -> list[dict[str, Any]]:
     stat = path.stat()
-    return [dict(row) for row in _load_index_cached(str(path), stat.st_mtime_ns, stat.st_size)]
+    from .structured_search import verified_overlays
+    rows = verified_overlays(list(_load_index_cached(str(path), stat.st_mtime_ns, stat.st_size)), path.parent)
+    for row in rows:
+        if row.get("verified_search_text"):
+            text = str(row.get("text") or "") + "\n" + row["verified_search_text"]
+            row["_tokens"] = _tokens(text + " " + " ".join(row.get("search_terms") or []))
+            row["_counter"] = Counter(row["_tokens"])
+            row["_length"] = max(1, sum(row["_counter"].values()))
+            row["_normalized_text"] = _normalized(text)
+    return rows
 
 
 def _snippet(text: str, query_tokens: list[str], limit: int = 560) -> str:
@@ -1767,7 +1776,7 @@ def search_indices(index_paths: list[Path], query: str, *, top_k: int = 5) -> li
             score += found * 0.9
             if found == len(technical):
                 score += 1.2
-        raw_text = str(row.get("text") or "")
+        raw_text = str(row.get("text") or "") + "\n" + str(row.get("verified_search_text") or "")
         # Short literal technical lookups (drawing IDs, part codes, tags,
         # revision identifiers) must not be washed out by generic BM25 terms.
         # This is intentionally query-driven and manufacturer-agnostic.
@@ -1844,7 +1853,7 @@ def search_indices(index_paths: list[Path], query: str, *, top_k: int = 5) -> li
             **row,
             "rank": rank,
             "score": round(score, 4),
-            "snippet": _snippet(str(row.get("text") or ""), q_tokens),
+            "snippet": _snippet(str(row.get("text") or "") + "\n" + str(row.get("verified_search_text") or ""), q_tokens),
             "cross_references": extract_cross_references(str(row.get("text") or "")),
             "context_neighbors": _adjacent_context(docs, idx) if (procedure_intent or bool(_TROUBLESHOOT_INTENT_RE.search(query or ""))) else [],
         })
