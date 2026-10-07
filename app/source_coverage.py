@@ -23,8 +23,13 @@ def coverage_pipeline(document, result_dir):
     visual_subjects = _authoritative_visual_subjects([entry for entry in corrections if entry.get("entry_type") == "vision_enrichment" and entry.get("status") != "superseded"])
     visuals = {}
     for entry in visual_subjects:
-        index = entry.get("picture_index", entry.get("source_index"))
-        if isinstance(index, int) and not isinstance(index, bool) and 0 <= index < len(document.get("pictures") or []):
+        value = entry.get("source_index")
+        if value is None:
+            value = entry.get("picture_index")
+        if isinstance(value, bool) or not re.fullmatch(r"\d+", str(value)):
+            continue
+        index = int(value)
+        if 0 <= index < len(document.get("pictures") or []):
             visuals[f"#/pictures/{index}"] = entry
     groups = {str(item.get("self_ref") or f"#/groups/{i}"): item for i, item in enumerate(document.get("groups") or [])}
     def visual_parent(item):
