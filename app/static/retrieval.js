@@ -7,6 +7,7 @@
   let currentBookFilter = null;
   let currentEquipmentFilter = null;
   let currentRetrievalMode = 'hybrid';
+  let currentStructureMode = 'auto';
   let retrievalStatus = {books:[], equipment:[], manual_types:[]};
   let currentGeneratedAnswer = '';
   let pageState = null;
@@ -610,7 +611,7 @@ ${manuals} manual${manuals === 1 ? '' : 's'} will be unassigned from this machin
     try {
       const response = await fetch('/api/retrieval/generate/start', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({query: currentQuery, provider, top_k: Math.min(5, Math.max(1, currentResults.length + currentVisualResults.length)), postprocess_job_id: currentBookFilter, equipment_id: currentEquipmentFilter, retrieval_mode: currentRetrievalMode})
+        body: JSON.stringify({query: currentQuery, provider, top_k: Math.min(5, Math.max(1, currentResults.length + currentVisualResults.length)), postprocess_job_id: currentBookFilter, equipment_id: currentEquipmentFilter, retrieval_mode: currentRetrievalMode, structure_mode: currentStructureMode})
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || 'Answer generation could not be started');
@@ -656,7 +657,7 @@ ${manuals} manual${manuals === 1 ? '' : 's'} will be unassigned from this machin
     try {
       const response = await fetch('/api/retrieval/prompt-bundle', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({query: currentQuery, top_k: Math.min(5, Math.max(1, currentResults.length + currentVisualResults.length)), postprocess_job_id: currentBookFilter, equipment_id: currentEquipmentFilter, retrieval_mode: currentRetrievalMode})
+        body: JSON.stringify({query: currentQuery, top_k: Math.min(5, Math.max(1, currentResults.length + currentVisualResults.length)), postprocess_job_id: currentBookFilter, equipment_id: currentEquipmentFilter, retrieval_mode: currentRetrievalMode, structure_mode: currentStructureMode})
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || 'Could not prepare external prompt');
@@ -732,13 +733,20 @@ ${manuals} manual${manuals === 1 ? '' : 's'} will be unassigned from this machin
     searchController = controller;
     submit.disabled = true; submit.textContent = 'Searching…'; currentQuery = query; currentBookFilter = scope.postprocess_job_id; currentEquipmentFilter = scope.equipment_id; currentRetrievalMode = $('retrieval-mode').value || 'lexical';
     try {
-      const response = await fetch('/api/retrieval/search', {method:'POST', headers:{'Content-Type':'application/json'}, signal:controller.signal, body: JSON.stringify({query, top_k:5, postprocess_job_id: scope.postprocess_job_id, equipment_id: scope.equipment_id, retrieval_mode: currentRetrievalMode})});
+      currentStructureMode = $('structure-mode')?.value || 'auto';
+      const response = await fetch('/api/retrieval/search', {method:'POST', headers:{'Content-Type':'application/json'}, signal:controller.signal, body: JSON.stringify({query, top_k:5, postprocess_job_id: scope.postprocess_job_id, equipment_id: scope.equipment_id, retrieval_mode: currentRetrievalMode, structure_mode: currentStructureMode})});
       const data = await response.json(); if (!response.ok) throw new Error(data.detail || 'Search failed');
       if (requestId !== searchRequestId) return;
       const primary = data.results || [];
       const recovered = primary.flatMap(row => row.recovery_candidates || []);
       renderResults([...primary, ...recovered.map((row, index) => ({...row, rank: primary.length + index + 1}))], data.visual_results || []);
       const retrievalScope = data.retrieval_scope || {};
+      const trace = retrievalScope.structure || {};
+      if ($('structure-trace')) {
+        $('structure-trace').hidden = trace.mode !== 'structural';
+        $('structure-trace').textContent = trace.status === 'no_current_maps' ? 'No current chapter map is available. Existing search results are retained; build or refresh the manual map to try chapter guidance.'
+          : `Preferred chapters: ${(trace.preferred_sections || []).map(s => `${s.manual.replace(/__job.*$/,'')} > ${s.breadcrumb.join(' > ')} (PDF pages ${s.start_page}–${s.end_page})`).join('; ') || 'No clear chapter match'}. Global results in your selected scope were also checked.`;
+      }
       if (retrievalScope.mode === 'equipment') feedback(`Searched ${data.searched_books} manual${data.searched_books === 1 ? '' : 's'} inside machine “${retrievalScope.equipment_name || 'selected machine'}” only.`, 'success');
       else if (retrievalScope.mode === 'single_book') feedback('Single-manual lexical inspection complete. Select its machine for hybrid semantic retrieval.', 'success');
       const recovery = retrievalScope.evidence_recovery || {};
@@ -752,6 +760,12 @@ ${manuals} manual${manuals === 1 ? '' : 's'} will be unassigned from this machin
       if (requestId === searchRequestId) { submit.disabled = false; submit.textContent = 'Search'; if (searchController === controller) searchController = null; }
     }
   }
+
+  if ($('structure-mode')) $('structure-mode').onchange = () => {
+    invalidateActiveRequests(); renderResults([], []);
+    if ($('structure-trace')) $('structure-trace').hidden = true;
+    feedback('Search again to compare the selected chapter guidance mode.');
+  };
 
   async function loadBenchmark() {
     const response = await fetch('/api/retrieval/benchmark', {cache:'no-store'}); const data = await response.json();

@@ -1203,6 +1203,7 @@ def hybrid_search_equipment(
     rrf_k: int = 60,
     top_k: int = 5,
     query_vector: list[float] | None = None,
+    include_query_vector: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     candidate_depth = max(int(top_k), max(10, int(candidate_depth)))
     lexical = search_indices(index_paths, query, top_k=candidate_depth)
@@ -1229,6 +1230,7 @@ def hybrid_search_equipment(
     fused_candidates = diversify_results(fused_candidates, top_k=max(1, int(top_k)))
     return fused_candidates, {
         "mode": "hybrid_rrf",
+        **({'_structural_query_vector':qvec} if include_query_vector else {}),
         "scope": "equipment",
         "equipment_id": str(equipment_id),
         "model": model,
