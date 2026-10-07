@@ -135,6 +135,10 @@
 
   async function load({autoDetect = true} = {}) {
     const token = ++generation;
+    active = null;
+    el('candidate-preview').hidden = true;
+    el('candidate-image').removeAttribute('src');
+    setStatus('Loading technical evidence candidates…');
     resetReview();
     el('entry').replaceChildren();
     el('picture').replaceChildren();
