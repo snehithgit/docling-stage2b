@@ -47,7 +47,7 @@ def test_visual_children_share_authoritative_human_exclusion(tmp_path):
     from app.source_coverage import coverage_pipeline, coverage_status
     doc = {"pictures": [{"prov": [{"page_no": 1}]}], "texts": [{"text": "Logo", "parent": {"$ref": "#/pictures/0"}, "prov": [{"page_no": 1}]}]}
     entries = [
-        {"entry_id": "human", "entry_type": "vision_enrichment", "source_index": 0, "human_verified": True, "human_visual_decision": "decorative", "status": "applied"},
+        {"entry_id": "human", "entry_type": "vision_enrichment", "source_index": "0", "picture_index": None, "human_verified": True, "human_visual_decision": "decorative", "status": "applied"},
         {"entry_id": "later-machine", "entry_type": "vision_enrichment", "source_index": 0, "created_at_epoch": 999, "human_verified": False, "verification_verdict": "TECHNICAL_USEFUL", "status": "proposed"},
     ]
     path = tmp_path / "correction_ledger.json"
