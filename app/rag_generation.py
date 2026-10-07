@@ -35,6 +35,7 @@ Cite every technical claim with one or more supplied source labels such as [S1] 
 End EACH factual sentence or procedure bullet with its supporting citation. Do not leave citations only at the end of a multi-sentence paragraph or on a separate line.
 [S#] labels are Stage 3 text evidence. [V#] labels are normalized visual evidence from a source artifact.
 For [V#], visible_text is model-read text from the image; visible_objects and summary are model-generated interpretation. Never treat an exact value, identifier, switch position, direction, limit, or procedure as source fact from visual interpretation alone unless the exact item is present in visible_text or corroborated by [S#].
+For sources marked literal_visual_only, report only visible labels and values. Do not infer a wiring connection, resistor purpose, procedure or cause from those labels; diagram relationships remain unvalidated.
 If sources disagree, state the conflict and cite both sides. If the retrieved sources do not contain enough evidence, say exactly: "Not enough information in the retrieved sources." Then briefly state what evidence is missing.
 Never borrow a procedure, value, setting, or troubleshooting step from a different piece of equipment merely because wording overlaps.
 Use citation labels in SQUARE BRACKETS exactly, for example [S1] or [V1], never (S1).
@@ -129,6 +130,7 @@ def _compact_visual_source(row: dict[str, Any], label: str) -> dict[str, Any]:
     return {
         "label": label,
         "source_kind": "visual",
+        "literal_visual_only": bool(row.get("literal_visual_only",False)),
         "postprocess_job_id": row.get("postprocess_job_id"),
         "source_filename": row.get("source_filename"),
         "chunk_id": row.get("visual_evidence_id") or row.get("chunk_id"),
@@ -298,7 +300,15 @@ def prepare_generation_sources(
         if key in seen:
             return
         seen.add(key)
-        eligible, reason, validated = generation_policy(row)
+        from .retrieval_recovery import question_plan, matches_requested_measurement
+        literal_visual = (visual and question_plan(question)['intent']=='specification'
+            and matches_requested_measurement(' '.join(row.get('visible_text') or []),question)
+            and not re.search(r'\b(?:connect|connection|wire|wiring|install|replace|adjust|repair|cause|why|procedure|steps)\b',question,re.I))
+        eligible, reason, validated = generation_policy(row,allow_literal_visual=literal_visual)
+        if eligible and reason=='literal_visual_labels_only_relationships_unvalidated':
+            row={**row,'summary':'','visible_objects':[], 'text':'\n'.join(row.get('visible_text') or []),
+                 'literal_visual_only':True}
+
         if not eligible:
             withheld.append({"chunk_id": key[1], "postprocess_job_id": row.get("postprocess_job_id"), "reason": reason, "source_kind": "visual" if visual else "text"})
             return
@@ -405,6 +415,8 @@ def source_block(source: dict[str, Any]) -> str:
             f"Picture: {source.get('picture_index') if source.get('picture_index') is not None else 'unknown'}",
             f"Category: {source.get('category') or 'unknown'}",
         ]
+        if source.get('literal_visual_only'):
+            meta.append('Evidence limit: visible labels/values only; diagram relationships are unvalidated. Do not infer wiring, purpose or procedures.')
         visible_text = "; ".join(str(v) for v in (source.get("visible_text") or []) if str(v).strip()) or "(none)"
         visible_objects = "; ".join(str(v) for v in (source.get("visible_objects") or []) if str(v).strip()) or "(none)"
         summary = str(source.get("summary") or "").strip() or "(none)"

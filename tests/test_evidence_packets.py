@@ -142,3 +142,34 @@ def test_corrupt_or_missing_contract_cannot_authorize_structured_extraction(tmp_
     (directory / "technical_evidence_ledger.json").write_text(content)
     rows, _ = bind_evidence([r], [], books, tmp_path)
     assert not generation_policy(rows[0])[0]
+
+
+def test_current_applied_visual_labels_can_answer_value_but_not_wiring(tmp_path):
+    diagram=row('V3','terminal diagram Connection Switch Function 330 Ω',refs=['#/pictures/3'])
+    books,directory=setup(tmp_path,[{**diagram,'chunk_id':'C3'}])
+    raw={**diagram,'visual_evidence_id':'V3','docling_ref':'#/pictures/3','source_page':141,
+         'picture_index':3,'category':'terminal_diagram','visible_text':['Connection','Switch Function','330 Ω'],
+         'summary':'Unverified wiring interpretation','visible_objects':['guessed connection'],
+         'search_text':diagram['text'],'verification_verdict':'TECHNICAL_USEFUL',
+         'stage2c_status':'applied','rag_eligible':True,'unresolved':False}
+    (directory/'visual_evidence.jsonl').write_text(json.dumps(raw),encoding='utf-8')
+    rows,visuals=bind_evidence([], [raw],books,tmp_path)
+    assert visuals[0]['visual_literal_current']
+    assert not generation_policy(visuals[0])[0]
+    sources,_=prepare_generation_sources([], 'How much resistance is used?',visual_results=visuals)
+    assert sources[0]['literal_visual_only']
+    assert sources[0]['visible_text']==raw['visible_text']
+    assert not sources[0]['summary'] and not sources[0]['visible_objects']
+    assert 'diagram relationships are unvalidated' in build_portable_prompt('How much resistance?',sources)
+    for question in ['How to wire the resistor?', 'What resistance and wiring connection should I use?']:
+        assert not prepare_generation_sources([],question,visual_results=visuals)[0]
+    forged={**raw,'visible_text':['470 Ω'],'visual_literal_current':True}
+    _,bound=bind_evidence([], [forged],books,tmp_path)
+    assert not bound[0]['visual_literal_current']
+    assert not prepare_generation_sources([], 'How much resistance?',visual_results=bound)[0]
+    ledger_path=directory/'technical_evidence_ledger.json'
+    ledger=json.loads(ledger_path.read_text(encoding='utf-8'));ledger['entries'][0]['validation']['state']='rejected'
+    ledger_path.write_text(json.dumps(ledger),encoding='utf-8')
+    _,bound=bind_evidence([], [raw],books,tmp_path)
+    assert not bound[0]['visual_literal_current']
+    assert not prepare_generation_sources([], 'How much resistance?',visual_results=bound)[0]

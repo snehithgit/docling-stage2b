@@ -176,6 +176,10 @@ def _technical_visual_source_rows(result_dir: Path) -> list[dict]:
             "verification_verdict": row.get("verification_verdict"),
             "human_visual_decision": row.get("human_visual_decision"),
             "visual_source": True,
+            "visible_text": list(row.get("visible_text") or []),
+            "stage2c_status": row.get("stage2c_status"),
+            "unresolved": bool(row.get("unresolved",False)),
+            "rag_eligible": bool(row.get("rag_eligible",False)),
         })
     return output
 
