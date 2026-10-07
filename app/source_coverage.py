@@ -20,9 +20,10 @@ def coverage_pipeline(document, result_dir):
     from .stage2c import _authoritative_visual_subjects
     correction_path = result_dir / "correction_ledger.json"
     corrections = json.loads(correction_path.read_text(encoding="utf-8")).get("entries", []) if correction_path.exists() else []
-    visual_subjects = _authoritative_visual_subjects([entry for entry in corrections if entry.get("entry_type") == "vision_enrichment" and entry.get("status") != "superseded"])
-    visuals = {}
-    for entry in visual_subjects:
+    normalized_visuals = []
+    for entry in corrections:
+        if entry.get("entry_type") != "vision_enrichment" or entry.get("status") == "superseded":
+            continue
         value = entry.get("source_index")
         if value is None:
             value = entry.get("picture_index")
@@ -30,7 +31,8 @@ def coverage_pipeline(document, result_dir):
             continue
         index = int(value)
         if 0 <= index < len(document.get("pictures") or []):
-            visuals[f"#/pictures/{index}"] = entry
+            normalized_visuals.append({**entry, "source_index": index})
+    visuals = {f"#/pictures/{entry['source_index']}": entry for entry in _authoritative_visual_subjects(normalized_visuals)}
     groups = {str(item.get("self_ref") or f"#/groups/{i}"): item for i, item in enumerate(document.get("groups") or [])}
     def visual_parent(item):
         parent = (item.get("parent") or {}).get("$ref")
