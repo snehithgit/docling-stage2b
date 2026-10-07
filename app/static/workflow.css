@@ -250,7 +250,7 @@
 /* 40.11T standalone structural-review workspaces.
    These pages intentionally omit the global sidebar, so they must not inherit
    the two-column app shell or the workflow step-card grid. */
-.ui29 .app-shell.review-workspace-shell { display:block; grid-template-columns:minmax(0,1fr); }
+.ui29 .app-shell.review-workspace-shell:not(:has(> .sidebar)) { display:block; grid-template-columns:minmax(0,1fr); }
 .ui29 .review-workspace-main { max-width:1600px; }
 .review-workspace-grid { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(360px,.75fr); gap:18px; align-items:start; }
 .review-workspace-card { min-width:0; padding:20px; border:1px solid var(--line); border-radius:16px; background:var(--surface); box-shadow:var(--shadow-small); }
