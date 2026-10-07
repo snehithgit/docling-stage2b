@@ -2,7 +2,7 @@
   if (!document.querySelector('link[href*="ui-audit-fixes.css"]')) {
     const link = document.createElement('link');
     link.rel = 'stylesheet';
-    link.href = '/assets/ui-audit-fixes.css?v=5.0.8.1';
+    link.href = '/assets/ui-audit-fixes.css?v=5.0.8.2';
     document.head.appendChild(link);
   }
 })();
@@ -98,7 +98,7 @@
 })();
 
 (() => {
-  const version = "5.0.8.1";
+  const version = "5.0.8.2";
   const sidebar = document.querySelector('.sidebar');
   if (!sidebar) return;
   const badge = document.createElement('div');
@@ -209,10 +209,10 @@
   const guide = guides[path];
   const main = document.querySelector('main.main-content');
   if (guide && main && !main.querySelector('.workspace-guide')) {
-    const block = document.createElement('section');
+    const block = document.createElement('details');
     block.className = 'workspace-guide';
     block.setAttribute('aria-label', 'Page guidance');
-    block.innerHTML = `<div class="workspace-guide-copy"><strong>${guide[0]}</strong><p>${guide[1]}</p></div><div class="workspace-guide-next"><span>→</span><strong>${guide[2]}</strong></div>`;
+    block.innerHTML = `<summary>How to use this page</summary><div class="workspace-guide-copy"><strong>${guide[0]}</strong><p>${guide[1]}</p></div><div class="workspace-guide-next"><span>→</span><strong>${guide[2]}</strong></div>`;
     const header = main.querySelector('.page-header, .book-workflow-header');
     if (header) header.insertAdjacentElement('afterend', block); else main.insertBefore(block, main.firstChild);
   }
