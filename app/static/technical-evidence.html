@@ -4,9 +4,9 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Technical evidence · Docling Auto-Convert</title>
-<link rel="stylesheet" href="/assets/styles.css?v=5.0.9.4" />
-<link rel="stylesheet" href="/assets/workflow.css?v=5.0.9.4" />
-<link rel="stylesheet" href="/assets/ui-audit-fixes.css?v=5.0.9.4" />
+<link rel="stylesheet" href="/assets/styles.css?v=5.0.9.5" />
+<link rel="stylesheet" href="/assets/workflow.css?v=5.0.9.5" />
+<link rel="stylesheet" href="/assets/ui-audit-fixes.css?v=5.0.9.5" />
 </head>
 <body class="ui29 ui-audit-surface">
 <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -31,48 +31,53 @@
     <header class="page-header">
       <div>
         <p class="eyebrow">Technical evidence</p>
-        <h1>Technical evidence</h1>
-        <p class="subtle">Inspect detected text, table and picture candidates. Picture-linked items can also be extracted as graphs with the vision worker.</p>
+        <h1>Help the app understand your manual</h1>
+        <p class="subtle">Check useful instructions, tables and diagrams so the app can find better evidence when you ask a question.</p>
       </div>
-      <a class="secondary-button" href="/artifact-audit">Open artifact audit</a>
+      <a class="secondary-button" href="/retrieval">Ask a question</a>
     </header>
 
     <div id="status" class="status-message page-feedback" role="status" aria-live="polite"></div>
 
+    <section class="panel"><div class="doc-panel-body">
+      <h2>What can I do here?</h2>
+      <p>Find information such as troubleshooting steps, alarms, safety notes, settings and part numbers. For a diagram or flowchart, AI can read the visible labels and connections, then you check them against the original image.</p>
+      <p><strong>What you get:</strong> checked diagram information that can support answers with a source-page citation. This page does not rewrite the manual or guarantee that every answer is correct.</p>
+      <ol><li><strong>Choose your manual</strong> below. Its detected information loads automatically.</li><li><strong>Choose an item</strong> and read its original text or image.</li><li><strong>For a diagram:</strong> click “Read this diagram with AI”, then compare the labels and connections.</li><li><strong>Confirm only what you checked.</strong> Afterwards, test a question in Ask. Refresh the machine search index if Ask reports it is out of date.</li></ol>
+      <details><summary>Do I need to use this for every book?</summary><p>No. Start here when an answer misses information in a diagram, flowchart or boxed note. Ordinary text already goes through the book pipeline. Use Review for OCR, table or page-layout corrections.</p><a href="/review-center">Open Review</a></details>
+    </div></section>
+
     <section class="vision-audit-summary" aria-label="Technical evidence totals">
-      <div class="vision-audit-stat"><span>Detected</span><strong id="te-detected">0</strong></div>
-      <div class="vision-audit-stat"><span>Picture-linked</span><strong id="te-pictures">0</strong></div>
-      <div class="vision-audit-stat"><span>Graphs extracted</span><strong id="te-extracted">0</strong></div>
-      <div class="vision-audit-stat"><span>Validated</span><strong id="te-validated">0</strong></div>
+      <div class="vision-audit-stat"><span>Items found</span><strong id="te-detected">0</strong></div>
+      <div class="vision-audit-stat"><span>Items with pictures</span><strong id="te-pictures">0</strong></div>
+      <div class="vision-audit-stat"><span>Diagrams read by AI</span><strong id="te-extracted">0</strong></div>
+      <div class="vision-audit-stat"><span>Items checked and accepted</span><strong id="te-validated">0</strong></div>
     </section>
 
     <section class="panel queue-panel" aria-labelledby="evidence-source-title">
       <div class="panel-heading">
-        <div><p class="eyebrow">Source</p><h2 id="evidence-source-title">Choose evidence</h2><p class="format-note">Choose a manual and source item. Text and table candidates are included; pictures are optional.</p></div>
+        <div><p class="eyebrow">Step 1</p><h2 id="evidence-source-title">Choose a manual and an item</h2><p class="format-note">Items can be text, tables or pictures. Selecting a manual loads them automatically.</p></div>
       </div>
       <div class="doc-panel-body">
         <div class="technical-evidence-controls">
           <div class="field"><label for="book">Manual</label><select id="book"></select></div>
           <div class="technical-evidence-actions">
-            <button class="secondary-button" id="load" type="button">Load candidates</button>
-            <button class="secondary-button" id="detect" type="button">Refresh detection</button>
+            <button class="secondary-button" id="load" type="button">Reload items</button>
+            <button class="secondary-button" id="detect" type="button">Look for updated information</button>
           </div>
         </div>
         <div class="technical-evidence-selection">
-          <div class="field"><label for="entry">Source item</label><select id="entry"></select></div>
-          <div class="field"><label for="picture">Picture</label><select id="picture"></select></div>
+          <div class="field"><label for="entry">Information to check</label><select id="entry"></select></div>
+          <div class="field"><label for="picture">Image belonging to this item</label><select id="picture"></select></div>
         </div>
         <div class="technical-evidence-actions">
-          <label class="check-row" for="fresh"><input type="checkbox" id="fresh" /> Re-extract with a fresh model request</label>
-          <button class="primary-button" id="extract" type="button">Extract with selected vision worker</button>
+          <button class="primary-button" id="extract" type="button">Read this diagram with AI</button>
+          <details><summary>Advanced: read the image again</summary><label class="check-row" for="fresh"><input type="checkbox" id="fresh" /> Ignore the saved result and make another AI request</label><p class="format-note">Leave this unchecked to reuse a saved result and save worker time.</p></details>
         </div>
+        <p id="next-step" class="status-message" role="status" aria-live="polite">Choose a manual to begin.</p>
       </div>
     </section>
 
-    <section class="panel" id="coverage-panel">
-      <div class="panel-heading"><div><h2>Source coverage</h2><p class="format-note">Checks for source items missing from search. Review gaps before repairing; this does not accept corrections.</p></div><button id="check-coverage" type="button">Check coverage</button></div>
-      <div class="doc-panel-body"><p id="coverage-summary">Coverage has not been checked.</p><button id="recover-prose" type="button">Recover omitted text</button><p class="format-note">Restores complete text passages from the current corrected document. Drawings, short labels and uncertain table relationships remain for review. Uses no GPU.</p><div id="coverage-gaps" class="document-actions"></div></div>
-    </section>
     <section class="panel" id="candidate-preview" hidden>
       <div class="panel-heading"><div><h2 id="candidate-title">Selected candidate</h2><p id="candidate-state" class="format-note"></p></div></div>
       <div class="doc-panel-body"><div id="candidate-pages" class="document-actions"></div>
@@ -82,7 +87,7 @@
 
     <section class="panel queue-panel" id="review" hidden aria-labelledby="evidence-review-title">
       <div class="panel-heading">
-        <div><p class="eyebrow">Human verification</p><h2 id="evidence-review-title">Review extracted graph</h2><p class="format-note">Compare every label, box, arrow direction and branch label with the original image before validation.</p></div>
+        <div><p class="eyebrow">Step 2</p><h2 id="evidence-review-title">Check what AI read from the diagram</h2><p class="format-note">The red boxes show the labels AI read. Compare all labels and connections with the original. An arrow means direction; a plain line means a connection, not a cause.</p></div>
       </div>
       <div class="doc-panel-body technical-evidence-review-grid">
         <div class="technical-evidence-source">
@@ -90,21 +95,27 @@
           <svg id="boxes" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true"></svg>
         </div>
         <div>
-          <div class="field">
-            <label for="graph">Graph JSON (editable)</label>
+          <h3>Labels and connections found</h3>
+          <div id="graph-readable"></div>
+          <details><summary>Advanced: edit diagram data</summary><p class="format-note">Use this only if you understand the data format. For a wrong or unclear result, leave it unconfirmed and use the original-page review instead.</p><div class="field">
+            <label for="graph">Diagram data (JSON)</label>
             <textarea id="graph" class="technical-evidence-json" rows="18" spellcheck="false"></textarea>
           </div>
-          <div class="technical-evidence-actions"><button class="secondary-button" id="edit" type="button">Save edited graph for review</button></div>
+          <div class="technical-evidence-actions"><button class="secondary-button" id="edit" type="button">Save diagram edits</button></div></details>
           <p id="requirements" class="format-note"></p>
-          <div class="field"><label for="actor">Reviewer name</label><input id="actor" maxlength="100" /></div>
+          <div class="field"><label for="actor">Your name (required to record who checked this)</label><input id="actor" maxlength="100" autocomplete="name" placeholder="Enter your name" /></div>
           <label class="check-row" for="checked"><input type="checkbox" id="checked" /> I checked all labels, boxes, arrow directions and branch labels against the original image.</label>
-          <div class="technical-evidence-actions"><button class="primary-button" id="validate" type="button">Validate reviewed graph</button></div>
+          <div class="technical-evidence-actions"><button class="primary-button" id="validate" type="button">Confirm this matches the original</button><a class="secondary-button" href="/retrieval">Test a question in Ask</a></div>
         </div>
       </div>
     </section>
+    <section class="panel" id="coverage-panel">
+      <div class="panel-heading"><div><h2>Optional: is anything missing from search?</h2><p class="format-note">Compare the original manual with searchable information. A listed gap needs inspection; it is not automatically an error.</p></div><button id="check-coverage" type="button">Find missing information</button></div>
+      <div class="doc-panel-body"><p id="coverage-summary">Choose a manual, then check for missing information if needed.</p><button id="recover-prose" type="button">Add complete missing text passages</button><p class="format-note">Adds eligible complete passages from the corrected document to search without using AI. It cannot reconstruct diagrams or uncertain tables. Search embeddings may need refreshing afterwards.</p><div id="coverage-gaps" class="document-actions"></div></div>
+    </section>
   </main>
 </div>
-<script src="/assets/technical-evidence.js?v=5.0.9.4"></script>
-<script src="/assets/nav.js?v=5.0.9.4"></script>
+<script src="/assets/technical-evidence.js?v=5.0.9.5"></script>
+<script src="/assets/nav.js?v=5.0.9.5"></script>
 </body>
 </html>

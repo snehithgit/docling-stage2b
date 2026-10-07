@@ -2,7 +2,7 @@
   if (!document.querySelector('link[href*="ui-audit-fixes.css"]')) {
     const link = document.createElement('link');
     link.rel = 'stylesheet';
-    link.href = '/assets/ui-audit-fixes.css?v=5.0.9.4';
+    link.href = '/assets/ui-audit-fixes.css?v=5.0.9.5';
     document.head.appendChild(link);
   }
 })();
@@ -98,7 +98,7 @@
 })();
 
 (() => {
-  const version = "5.0.9.4";
+  const version = "5.0.9.5";
   const sidebar = document.querySelector('.sidebar');
   if (!sidebar) return;
   const badge = document.createElement('div');
@@ -195,7 +195,7 @@
     '/review-workers': ['AI review workers', 'Assign Colab workers and enable review dispatch here. AI reviews prepare suggestions; they do not apply human corrections. Existing human decisions remain authoritative.', 'Assign review workers'],
     '/anomaly-review': ['Anomaly review', 'Detected anomalies enter the review queue automatically. Request another Colab audit when you want to re-review a human decision; the decision is preserved.', 'Inspect anomaly results'],
     '/artifact-audit': ['Technical visual audit', 'Inspect technical pictures produced by verification. Rerunning a visual verification makes downstream Stage 2C/Stage 3/machine embeddings stale.', 'Resolve visual evidence'],
-    '/technical-evidence': ['Technical evidence review', 'Extract graph candidates from technical diagrams, then validate every label and connection against the source image before accepting the evidence.', 'Choose a manual and picture'],
+    '/technical-evidence': ['Help the app read diagrams', 'Choose a manual and an item. For pictures, ask AI to read the labels and connections, then compare them with the original before confirming. Text and table items can be inspected directly.', 'Start by choosing a manual'],
     '/text-audit': ['Text verification audit', 'Inspect verifier decisions and source-image transcription. Human corrections take precedence and trigger downstream rebuilding.', 'Resolve questionable text'],
     '/vision-audit': ['Vision evidence audit', 'Review what the vision verifier extracted before it becomes RAG visual evidence.', 'Confirm evidence quality'],
     '/docling-review': ['Docling page review', 'Inspect and repair Docling page geometry using source-PDF crops. Approved repairs stay downstream overlays; the converted Docling ZIP remains immutable.', 'Select a region and compare the source crop'],
