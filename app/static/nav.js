@@ -2,7 +2,7 @@
   if (!document.querySelector('link[href*="ui-audit-fixes.css"]')) {
     const link = document.createElement('link');
     link.rel = 'stylesheet';
-    link.href = '/assets/ui-audit-fixes.css?v=5.0.9.4';
+    link.href = '/assets/ui-audit-fixes.css?v=5.0.9.5';
     document.head.appendChild(link);
   }
 })();
@@ -98,7 +98,7 @@
 })();
 
 (() => {
-  const version = "5.0.9.4";
+  const version = "5.0.9.5";
   const sidebar = document.querySelector('.sidebar');
   if (!sidebar) return;
   const badge = document.createElement('div');

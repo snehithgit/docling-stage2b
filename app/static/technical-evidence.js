@@ -1,16 +1,35 @@
 (() => {
   const el = id => document.getElementById(id);
   let entries = [], active = null, extraction = null, busy = false, generation = 0;
+  const friendlyState = state => ({detected:'Found, not yet checked', needs_review:'Needs your check', validated:'Checked and accepted', rejected:'Not accepted', stale:'Source changed: check again'}[state] || 'Needs your check');
+
+  function readableGraph(graph) {
+    const container = el('graph-readable');
+    if (!container) return;
+    container.replaceChildren();
+    const labels = new Map((graph.nodes || []).map(n => [n.id, n.text]));
+    const add = text => { const p = document.createElement('p'); p.textContent = text; container.append(p); };
+    add('Labels:');
+    for (const node of graph.nodes || []) add(`${node.id}: ${node.text}`);
+    if (!graph.nodes?.length) add('No readable labels were found. Do not confirm an empty result.');
+    add('Connections:');
+    for (const edge of graph.edges || []) {
+      const direction = edge.direction === 'forward' ? ' → ' : edge.direction === 'undirected' ? ' — ' : ' [direction unclear] ';
+      add(`${labels.get(edge.source) || edge.source}${direction}${labels.get(edge.target) || edge.target}${edge.label ? ` (${edge.label})` : ''}`);
+    }
+    if (!graph.edges?.length) add('No connections were recorded. Check whether the original contains any.');
+    for (const issue of graph.unresolved || []) add(`Still unclear: ${issue}`);
+  }
 
   function showCoverage(report) {
     if (!el('coverage-summary')) return;
     el('coverage-gaps').replaceChildren();
     if (!report || ['not_measured', 'invalid'].includes(report.status)) {
-      el('coverage-summary').textContent = 'Coverage has not been measured. Check coverage to find source gaps.';
+      el('coverage-summary').textContent = 'No current check is available. Click Find missing information to compare this manual with search.';
       return;
     }
     const queue = report.review_groups || report.recovery_queue || [];
-    el('coverage-summary').textContent = `${report.status === 'stale' ? 'Previous check is stale. ' : ''}${queue.length} review targets · ${(report.dispositions || {}).represented_literal || 0} already represented as text · ${(report.dispositions || {}).excluded_page_furniture || 0} page headers/footers excluded · ${(report.dispositions || {}).excluded_human_visual_decision || 0} items excluded by human visual decisions · ${report.visual_groups_missing_review_route || 0} visual targets lack a review route. Reference coverage does not verify answer accuracy.`;
+    el('coverage-summary').textContent = `${report.status === 'stale' ? 'The manual changed; run this check again. ' : ''}${queue.length} places need inspection. ${(report.dispositions || {}).represented_literal || 0} text items are already included. Repeated page headers and footers are ignored. ${queue.length > 30 ? 'The first 30 places are shown below. ' : ''}Open a page to see whether important information is missing. This check does not prove answer accuracy.`;
     for (const gap of queue.slice(0, 30)) {
       const page = (gap.pages || [])[0];
       if (!page) continue;
@@ -19,7 +38,7 @@
         ? gap.visual_entry_id ? `/vision-audit?book=${encodeURIComponent(el('book').value)}&entry=${encodeURIComponent(gap.visual_entry_id)}` : `/docling-review?job=${encodeURIComponent(el('book').value)}&page=${page}`
         : gap.structural_route_id ? `/${gap.structural_code === 'TABLE_ROW_COLLAPSE' ? 'table-repair' : 'structural-review'}?job=${encodeURIComponent(el('book').value)}&route=${encodeURIComponent(gap.structural_route_id)}`
         : `/docling-review?job=${encodeURIComponent(el('book').value)}&page=${page}`;
-      link.textContent = `${gap.priority === 'high' ? 'Priority · ' : ''}Page ${page} · ${gap.recovery_route === 'visual_review' ? 'visual review' : gap.kind} · ${(gap.related_source_refs || []).length || 1} related items · ${gap.text_preview || gap.ref}`;
+      link.textContent = `${gap.priority === 'high' ? 'Check first · ' : ''}Page ${page} · ${gap.recovery_route === 'visual_review' ? 'Check picture' : gap.kind === 'tables' ? 'Check table' : 'Check original page'} · ${gap.text_preview || 'Information may be missing from search'}`;
       el('coverage-gaps').appendChild(link);
     }
   }
@@ -72,6 +91,13 @@
     const pictureReady = !!active && el('picture').value !== '';
     el('extract').disabled = busy || !pictureReady;
     el('picture').disabled = busy || !pictureReady;
+    const graph = extraction?.graph;
+    const unresolved = !graph?.nodes?.length || graph.unresolved?.length || graph.edges?.some(e => e.direction === 'unknown');
+    el('validate').disabled = busy || !extraction || !!unresolved || extraction.state === 'validated' || !el('checked').checked || !el('actor').value.trim();
+    if (el('next-step')) el('next-step').textContent = !active ? 'Choose an item to see the original information.'
+      : !pictureReady ? 'This is a text or table item. Read it below and open its source page to check it. Diagram reading is available only for pictures. Use Review if the text or table needs correction.'
+      : extraction ? 'Compare the result below with the original image. Confirm only if every label and connection is correct.'
+      : 'Inspect the image below, then click Read this diagram with AI. This uses your configured vision worker; a saved result is reused when available.';
   }
 
   function preview() {
@@ -82,7 +108,7 @@
     if (!active) return;
     el('candidate-title').textContent = active.search_heading || active.entry_id;
     el('candidate-text').textContent = active.source_text || 'No literal transcription is stored. Inspect the source image.';
-    el('candidate-state').textContent = `${(active.evidence_types || []).join(' · ')} · ${active.validation?.state || active.validation_status || 'detected'}. Candidate status is not an applied correction.`;
+    el('candidate-state').textContent = `${(active.evidence_types || []).join(' · ').replaceAll('_',' ')} · ${friendlyState(active.validation?.state || active.validation_status || 'detected')}. Finding this item does not mean it has been corrected.`;
     for (const page of active.page_numbers || []) {
       if (!Number.isInteger(Number(page)) || Number(page) < 1) continue;
       const link = document.createElement('a'); link.className = 'mini-action';
@@ -106,7 +132,7 @@
       return;
     }
     const refs = [...new Set((active.doc_items || []).filter(ref => /^#\/pictures\/\d+$/.test(String(ref))))];
-    for (const ref of refs) option(el('picture'), ref.split('/').pop(), ref);
+    for (const ref of refs) option(el('picture'), ref.split('/').pop(), `Image ${Number(ref.split('/').pop()) + 1} in this manual`);
     if (!refs.length) {
       option(el('picture'), '', 'Text/table candidate · no picture required', true);
       preview(); syncControls();
@@ -122,9 +148,11 @@
     el('checked').checked = false;
     el('source').src = `/api/postprocess/jobs/${el('book').value}/picture/${value.picture_index}`;
     el('graph').value = JSON.stringify(value.graph, null, 2);
-    el('requirements').textContent = value.graph.unresolved.length
-      ? 'Unresolved details prevent validation. Re-extract after improving source readability.'
-      : 'All fields require a human pixel check.';
+    readableGraph(value.graph);
+    el('requirements').textContent = value.state === 'validated' ? 'This diagram has already been checked and accepted.'
+      : value.graph.unresolved.length || value.graph.edges.some(e => e.direction === 'unknown')
+      ? 'Some details are unclear. Confirmation is blocked. Inspect the original page, or try reading the diagram again if the image is clear.'
+      : 'Compare every label and connection with the image. Enter your name and tick the check below to enable confirmation.';
     el('boxes').replaceChildren();
     for (const node of value.graph.nodes) {
       const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -135,6 +163,7 @@
       })) rect.setAttribute(name, v);
       el('boxes').append(rect);
     }
+    syncControls();
   }
 
   function needsDetection(value) {
@@ -149,18 +178,19 @@
   async function detect() {
     const job = el('book').value;
     if (!job) throw Error('Choose a manual first');
-    setStatus('Refreshing technical evidence from current Stage 3 and Stage 2C visual sources…');
+    setStatus('Looking for useful information in the corrected manual…');
     const result = await api(`/api/postprocess/jobs/${job}/technical-evidence/detect`, {method: 'POST'});
     const total = Object.values(result.summary || {}).reduce((sum, value) => sum + Number(value || 0), 0);
-    setStatus(`Detection refreshed: ${total} current technical evidence candidate${total === 1 ? '' : 's'}. No model call was used.`);
+    setStatus(`Found ${total} useful information item${total === 1 ? '' : 's'}. This scan did not use an AI worker.`);
   }
 
   async function load({autoDetect = true} = {}) {
     const token = ++generation;
     active = null;
+    showCoverage(null);
     el('candidate-preview').hidden = true;
     el('candidate-image').removeAttribute('src');
-    setStatus('Loading technical evidence candidates…');
+    setStatus('Loading information from your manual…');
     resetReview();
     el('entry').replaceChildren();
     el('picture').replaceChildren();
@@ -168,7 +198,7 @@
     if (!job) {
       renderCounts({});
       clearSelectors('No manual available');
-      setStatus('No completed manual is available yet. Complete Stage 3 first.');
+      setStatus('No manual is ready yet. Open Processing and finish building searchable text first.');
       return;
     }
 
@@ -179,7 +209,7 @@
       if (!value.stage3_available) {
         renderCounts(value);
         clearSelectors('Stage 3 required');
-        setStatus('Technical evidence cannot be scanned yet. Build Stage 3 for this manual first.');
+        setStatus('This manual is not ready for this step. Open Processing and build its searchable text first.');
         return;
       }
       await detect();
@@ -209,15 +239,15 @@
       const pages = (e.page_numbers || []).join(', ') || '—';
       const state = e.validation?.state || e.validation_status || 'detected';
       const title = String(e.search_heading || e.source_chunk_id || e.entry_id || 'Technical evidence').trim();
-      option(el('entry'), e.entry_id, `${title} · page ${pages} · ${state}`);
+      option(el('entry'), e.entry_id, `${title} · page ${pages} · ${friendlyState(state)}`);
     }
     choose();
     showCoverage(value.source_coverage);
     const counts = value.candidate_counts || {};
     setStatus(
-      `${entries.length} candidates loaded · ${Number(counts.picture_linked || 0)} picture-linked candidates · ` +
-      `${Number(counts.graph_extracted || 0)} extracted · ${Number(counts.validated || 0)} validated. ` +
-      'Choose a source item to see its text or picture. Graph extraction applies only to picture-linked candidates.'
+      `${entries.length} items found. ${Number(counts.picture_linked || 0)} include pictures; ` +
+      `${Number(counts.graph_extracted || 0)} diagrams have been read by AI and ${Number(counts.validated || 0)} items checked and accepted. ` +
+      'Choose an item to see the original information and your next step.'
     );
   }
 
@@ -254,6 +284,8 @@
   el('detect').onclick = () => action(async () => { await detect(); await load({autoDetect: false}); });
   el('book').onchange = () => action(() => load({autoDetect: true}));
   el('entry').onchange = choose;
+  el('checked').onchange = syncControls;
+  el('actor').oninput = syncControls;
   el('picture').onchange = () => {
     resetReview(); preview(); syncControls();
     if (active?.visual_extraction?.picture_index === Number(el('picture').value)) show(active.visual_extraction);
@@ -268,7 +300,7 @@
       {method: 'POST'},
     );
     show(result.extraction);
-    setStatus('Extraction saved for review. No correction was applied.');
+    setStatus('AI reading saved. Now compare the labels and connections below with the original image. Your manual has not been rewritten.');
   });
 
   el('edit').onclick = () => action(async () => {
@@ -303,8 +335,8 @@
         }),
       },
     );
-    setStatus(result.entry.answer_eligible ? 'Graph validated. Book corrections remain unchanged.' : 'Further review is required.');
     await load({autoDetect: false});
+    setStatus(result.entry.answer_eligible ? 'Diagram checked and accepted as answer evidence. Next: try a relevant question in Ask and check its page citation. The original manual is unchanged.' : 'This item still needs more checks before it can support an answer.');
   });
 
   action(async () => {
@@ -312,7 +344,7 @@
     el('book').replaceChildren();
     for (const book of data.books || []) {
       const suffix = book.index_ready ? '' : ' · Stage 3 refresh needed';
-      option(el('book'), book.postprocess_job_id, `${book.source_filename || book.result_dir}${suffix}`);
+      option(el('book'), book.postprocess_job_id, `${book.source_filename || book.result_dir}${suffix.replace('Stage 3 refresh needed', 'Searchable text needs updating')}`);
     }
     if (!el('book').value) {
       option(el('book'), '', 'No completed manuals', true);
