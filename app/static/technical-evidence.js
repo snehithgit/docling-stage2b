@@ -38,6 +38,7 @@
 
   function clearSelectors(message = 'No picture-linked candidates') {
     active = null;
+    el('candidate-preview').hidden = true;
     resetReview();
     el('entry').replaceChildren();
     el('picture').replaceChildren();
@@ -45,20 +46,51 @@
     option(el('picture'), '', 'No picture selected', true);
   }
 
+  function syncControls() {
+    const pictureReady = !!active && el('picture').value !== '';
+    el('extract').disabled = busy || !pictureReady;
+    el('picture').disabled = busy || !pictureReady;
+  }
+
+  function preview() {
+    el('candidate-preview').hidden = !active;
+    el('candidate-image').hidden = true;
+    el('candidate-image').removeAttribute('src');
+    el('candidate-pages').replaceChildren();
+    if (!active) return;
+    el('candidate-title').textContent = active.search_heading || active.entry_id;
+    el('candidate-text').textContent = active.source_text || 'No literal transcription is stored. Inspect the source image.';
+    el('candidate-state').textContent = `${(active.evidence_types || []).join(' · ')} · ${active.validation?.state || active.validation_status || 'detected'}. Candidate status is not an applied correction.`;
+    for (const page of active.page_numbers || []) {
+      if (!Number.isInteger(Number(page)) || Number(page) < 1) continue;
+      const link = document.createElement('a'); link.className = 'mini-action';
+      link.textContent = `Source page ${page}`;
+      link.href = `/docling-review?job=${encodeURIComponent(el('book').value)}&page=${Number(page)}`;
+      el('candidate-pages').append(link);
+    }
+    if (el('picture').value !== '') {
+      el('candidate-image').src = `/api/postprocess/jobs/${encodeURIComponent(el('book').value)}/picture/${Number(el('picture').value)}`;
+      el('candidate-image').hidden = false;
+    }
+  }
+
   function choose() {
     resetReview();
     active = entries.find(e => e.entry_id === el('entry').value) || null;
     el('picture').replaceChildren();
     if (!active) {
+      preview(); syncControls();
       option(el('picture'), '', 'No picture selected', true);
       return;
     }
     const refs = [...new Set((active.doc_items || []).filter(ref => /^#\/pictures\/\d+$/.test(String(ref))))];
     for (const ref of refs) option(el('picture'), ref.split('/').pop(), ref);
     if (!refs.length) {
-      option(el('picture'), '', 'No Docling picture reference', true);
+      option(el('picture'), '', 'Text/table candidate · no picture required', true);
+      preview(); syncControls();
       return;
     }
+    preview(); syncControls();
     if (active.visual_extraction?.picture_index === Number(el('picture').value)) show(active.visual_extraction);
   }
 
@@ -132,7 +164,7 @@
 
     renderCounts(value);
     const allActive = (value.entries || []).filter(e => !e.superseded);
-    entries = allActive.filter(e => (e.doc_items || []).some(ref => /^#\/pictures\/\d+$/.test(String(ref))));
+    entries = allActive;
 
     if (!entries.length) {
       clearSelectors();
@@ -156,9 +188,9 @@
     choose();
     const counts = value.candidate_counts || {};
     setStatus(
-      `${entries.length} picture-linked candidate${entries.length === 1 ? '' : 's'} ready for graph review · ` +
+      `${entries.length} candidates loaded · ${Number(counts.picture_linked || 0)} picture-linked candidates · ` +
       `${Number(counts.graph_extracted || 0)} extracted · ${Number(counts.validated || 0)} validated. ` +
-      'Detection is source-derived; graph extraction uses one bounded vision-model request.'
+      'Choose a source item to see its text or picture. Graph extraction applies only to picture-linked candidates.'
     );
   }
 
@@ -177,6 +209,7 @@
       for (const id of ['book', 'entry', 'picture', 'load', 'detect', 'extract', 'edit', 'validate']) {
         if (el(id)) el(id).disabled = false;
       }
+      syncControls();
     }
   }
 
@@ -185,7 +218,7 @@
   el('book').onchange = () => action(() => load({autoDetect: true}));
   el('entry').onchange = choose;
   el('picture').onchange = () => {
-    resetReview();
+    resetReview(); preview(); syncControls();
     if (active?.visual_extraction?.picture_index === Number(el('picture').value)) show(active.visual_extraction);
   };
 

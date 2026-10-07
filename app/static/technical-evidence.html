@@ -4,9 +4,9 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Technical evidence · Docling Auto-Convert</title>
-<link rel="stylesheet" href="/assets/styles.css?v=5.0.8.2" />
-<link rel="stylesheet" href="/assets/workflow.css?v=5.0.8.2" />
-<link rel="stylesheet" href="/assets/ui-audit-fixes.css?v=5.0.8.2" />
+<link rel="stylesheet" href="/assets/styles.css?v=5.0.8.3" />
+<link rel="stylesheet" href="/assets/workflow.css?v=5.0.8.3" />
+<link rel="stylesheet" href="/assets/ui-audit-fixes.css?v=5.0.8.3" />
 </head>
 <body class="ui29 ui-audit-surface">
 <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -30,9 +30,9 @@
   <main class="main-content technical-evidence-main" id="main-content">
     <header class="page-header">
       <div>
-        <p class="eyebrow">Technical visual evidence</p>
-        <h1>Diagram extraction</h1>
-        <p class="subtle">Read nodes, labels and connections from the original image with the selected vision worker. Extraction stays a review candidate until you check it against the source pixels.</p>
+        <p class="eyebrow">Technical evidence</p>
+        <h1>Technical evidence</h1>
+        <p class="subtle">Inspect detected text, table and picture candidates. Picture-linked items can also be extracted as graphs with the vision worker.</p>
       </div>
       <a class="secondary-button" href="/artifact-audit">Open artifact audit</a>
     </header>
@@ -48,7 +48,7 @@
 
     <section class="panel queue-panel" aria-labelledby="evidence-source-title">
       <div class="panel-heading">
-        <div><p class="eyebrow">Source</p><h2 id="evidence-source-title">Choose evidence</h2><p class="format-note">Load one manual, then select the source item and picture you want to inspect.</p></div>
+        <div><p class="eyebrow">Source</p><h2 id="evidence-source-title">Choose evidence</h2><p class="format-note">Choose a manual and source item. Text and table candidates are included; pictures are optional.</p></div>
       </div>
       <div class="doc-panel-body">
         <div class="technical-evidence-controls">
@@ -67,6 +67,13 @@
           <button class="primary-button" id="extract" type="button">Extract with selected vision worker</button>
         </div>
       </div>
+    </section>
+
+    <section class="panel" id="candidate-preview" hidden>
+      <div class="panel-heading"><div><h2 id="candidate-title">Selected candidate</h2><p id="candidate-state" class="format-note"></p></div></div>
+      <div class="doc-panel-body"><div id="candidate-pages" class="document-actions"></div>
+      <img id="candidate-image" alt="Original source picture for the selected candidate" hidden style="max-width:100%;height:auto" />
+      <pre id="candidate-text" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto"></pre></div>
     </section>
 
     <section class="panel queue-panel" id="review" hidden aria-labelledby="evidence-review-title">
@@ -93,7 +100,7 @@
     </section>
   </main>
 </div>
-<script src="/assets/technical-evidence.js?v=5.0.8.2"></script>
-<script src="/assets/nav.js?v=5.0.8.2"></script>
+<script src="/assets/technical-evidence.js?v=5.0.8.3"></script>
+<script src="/assets/nav.js?v=5.0.8.3"></script>
 </body>
 </html>
