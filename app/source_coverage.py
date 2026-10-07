@@ -17,7 +17,33 @@ def coverage_pipeline(document, result_dir):
     rows = read_source_rows(result_dir)
     ledger = result_dir / "technical_evidence_ledger.json"
     candidates = json.loads(ledger.read_text(encoding="utf-8")).get("entries", []) if ledger.exists() else []
+    from .stage2c import _authoritative_visual_subjects
+    correction_path = result_dir / "correction_ledger.json"
+    corrections = json.loads(correction_path.read_text(encoding="utf-8")).get("entries", []) if correction_path.exists() else []
+    visual_subjects = _authoritative_visual_subjects([entry for entry in corrections if entry.get("entry_type") == "vision_enrichment" and entry.get("status") != "superseded"])
+    visuals = {}
+    for entry in visual_subjects:
+        index = entry.get("picture_index", entry.get("source_index"))
+        if isinstance(index, int) and not isinstance(index, bool) and 0 <= index < len(document.get("pictures") or []):
+            visuals[f"#/pictures/{index}"] = entry
+    groups = {str(item.get("self_ref") or f"#/groups/{i}"): item for i, item in enumerate(document.get("groups") or [])}
+    def visual_parent(item):
+        parent = (item.get("parent") or {}).get("$ref")
+        seen = set()
+        while parent and parent not in seen:
+            if re.fullmatch(r"#/pictures/\d+", parent):
+                return parent
+            seen.add(parent)
+            parent = (groups.get(parent, {}).get("parent") or {}).get("$ref")
+        return None
     report = measure_source_coverage(document, rows, candidates)
+    table_routes = {}
+    if any(gap["kind"] == "tables" for gap in report["items_without_search_reference"]):
+        from .structural_anomaly import structural_entries
+        for entry in structural_entries(result_dir):
+            index = ((entry.get("_structural_evidence") or {}).get("route") or {}).get("source", {}).get("table_index")
+            if index is not None:
+                table_routes.setdefault(f"#/tables/{index}", entry)
     page_text = {}
     for row in rows:
         for page in row.get("page_numbers") or []:
@@ -26,26 +52,45 @@ def coverage_pipeline(document, result_dir):
         item = document[gap["kind"]][int(gap["ref"].rsplit("/", 1)[1])]
         text = _literal(item.get("text"))
         safety = bool(re.search(r"\bwarning\b|\bcaution\b|\bn\s*\.\s*b\s*\.|\bdo not\b|\bmust not\b", text))
+        picture_ref = gap["ref"] if gap["kind"] == "pictures" else visual_parent(item)
+        visual = visuals.get(picture_ref) or {}
         if text and len(text) >= 20 and gap["pages"] and all(any(text in body for body in page_text.get(page, [])) for page in gap["pages"]):
             state = "represented_literal"
         elif gap["label"] in {"page_header", "page_footer"} and not safety:
             state = "excluded_page_furniture"
         else:
             state = "needs_source_review"
-        gap.update(disposition=state, priority="high" if safety or gap["kind"] in {"tables", "pictures"} else "normal",
-                   recovery_route="visual_review" if gap["kind"] == "pictures" else "table_review" if gap["kind"] == "tables" else "source_text_review")
+        if state == "needs_source_review" and visual.get("human_verified") is True and visual.get("human_visual_decision") in {"decorative", "not_useful"}:
+            state = "excluded_human_visual_decision"
+        gap.update(disposition=state, priority="high" if safety or picture_ref or gap["kind"] == "tables" else "normal",
+                   recovery_route="visual_review" if picture_ref else "table_review" if gap["kind"] == "tables" else "source_text_review")
+        if picture_ref:
+            gap.update(review_group=picture_ref, visual_entry_id=visual.get("entry_id"),
+                       visual_route_status="existing_review" if visual else "missing_review_route",
+                       human_visual_decision=visual.get("human_visual_decision"))
+        elif gap["kind"] == "tables" and gap["ref"] in table_routes:
+            route = table_routes[gap["ref"]]
+            gap.update(structural_route_id=route.get("route_id"), structural_code=route.get("structural_code"))
     report.update(schema="source-coverage/v1", generated_at_epoch=time.time(),
                   source_document_sha256=hashlib.sha256(json.dumps(document, sort_keys=True).encode()).hexdigest(),
                   dispositions=dict(Counter(gap["disposition"] for gap in report["items_without_search_reference"])),
                   inputs=inputs, automatic_corrections=0)
     report["recovery_queue"] = sorted((gap for gap in report["items_without_search_reference"] if gap["disposition"] == "needs_source_review"),
                                       key=lambda gap: (gap["priority"] != "high", gap["pages"] or [0], gap["ref"]))
+    review_groups = {}
+    for gap in report["recovery_queue"]:
+        key = gap.get("review_group") or gap["ref"]
+        if key not in review_groups:
+            review_groups[key] = {**gap, "review_group": key, "related_source_refs": []}
+        review_groups[key]["related_source_refs"].append(gap["ref"])
+    report["review_groups"] = list(review_groups.values())
+    report["visual_groups_missing_review_route"] = sum(group.get("visual_route_status") == "missing_review_route" for group in report["review_groups"])
     atomic_json(result_dir / "source_coverage.json", report)
     return report
 
 
 def _input_stats(result_dir):
-    names = ("retrieval_index.jsonl", "visual_evidence.jsonl", "technical_evidence_ledger.json", "source_manifest.json")
+    names = ("retrieval_index.jsonl", "visual_evidence.jsonl", "technical_evidence_ledger.json", "source_manifest.json", "correction_ledger.json", "routes.json", "diagnostics.json")
     return {name: [p.stat().st_mtime_ns, p.stat().st_size] if (p := result_dir / name).exists() else None for name in names}
 
 

@@ -40,3 +40,33 @@ def test_pipeline_classifies_literal_furniture_and_prioritizes_safety(tmp_path):
     assert coverage_status(tmp_path)["current"] is True
     index.write_text(index.read_text() + "\n")
     assert coverage_status(tmp_path)["status"] == "stale"
+
+
+def test_visual_children_share_authoritative_human_exclusion(tmp_path):
+    import json
+    from app.source_coverage import coverage_pipeline, coverage_status
+    doc = {"pictures": [{"prov": [{"page_no": 1}]}], "texts": [{"text": "Logo", "parent": {"$ref": "#/pictures/0"}, "prov": [{"page_no": 1}]}]}
+    entries = [
+        {"entry_id": "human", "entry_type": "vision_enrichment", "source_index": 0, "human_verified": True, "human_visual_decision": "decorative", "status": "applied"},
+        {"entry_id": "later-machine", "entry_type": "vision_enrichment", "source_index": 0, "created_at_epoch": 999, "human_verified": False, "verification_verdict": "TECHNICAL_USEFUL", "status": "proposed"},
+    ]
+    path = tmp_path / "correction_ledger.json"
+    path.write_text(json.dumps({"entries": entries}))
+    report = coverage_pipeline(doc, tmp_path)
+    assert report["dispositions"] == {"excluded_human_visual_decision": 2}
+    assert report["recovery_queue"] == []
+    assert report["items_without_search_reference"][0]["visual_entry_id"] == "human"
+    path.write_text(json.dumps({"entries": []}))
+    assert coverage_status(tmp_path)["status"] == "stale"
+
+
+def test_unreviewed_diagram_children_group_once_without_automatic_exclusion(tmp_path):
+    import json
+    from app.source_coverage import coverage_pipeline
+    doc = {"pictures": [{"prov": [{"page_no": 1}]}], "texts": [{"text": "24V", "parent": {"$ref": "#/pictures/0"}, "prov": [{"page_no": 1}]}]}
+    (tmp_path / "correction_ledger.json").write_text(json.dumps({"entries": [{"entry_id": "vision-1", "entry_type": "vision_enrichment", "source_index": 0, "human_verified": False, "human_visual_decision": "decorative", "status": "proposed"}]}))
+    report = coverage_pipeline(doc, tmp_path)
+    assert len(report["recovery_queue"]) == 2
+    assert len(report["review_groups"]) == 1
+    assert report["review_groups"][0]["visual_entry_id"] == "vision-1"
+    assert report["review_groups"][0]["related_source_refs"] == ["#/pictures/0", "#/texts/0"]
