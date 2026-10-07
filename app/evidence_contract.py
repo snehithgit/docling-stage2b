@@ -276,7 +276,11 @@ def evidence_coverage(result_dir: Path) -> dict:
             source.st_mtime_ns if source else 0, source.st_size if source else 0,
             visual_source.st_mtime_ns if visual_source else 0, visual_source.st_size if visual_source else 0,
         )
-        return {**result, "states": dict(result["states"])}
+        from .source_coverage import coverage_status
+        source = coverage_status(result_dir)
+        reference_coverage = {key: source.get(key) for key in ("status", "source_items", "search_referenced_items", "dispositions", "semantic_coverage_verified")}
+        reference_coverage["pending_source_review"] = len(source.get("recovery_queue") or [])
+        return {**result, "states": dict(result["states"]), "source_reference_coverage": reference_coverage}
     except (OSError, ValueError, TypeError, KeyError):
         return {**base, "status": "invalid", "source_current": False, "reason": "evidence_ledger_unreadable"}
 

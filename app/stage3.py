@@ -19,6 +19,7 @@ from .events import EventBroker
 from .postprocess_store import PostprocessStore
 from .pipeline_state import stage2c_semantic_signature, stage2a_human_review_summary, stage2c_freshness, stage2c_output_signature, verification_rows_for_stage2c, verification_signature
 from .technical_evidence import write_evidence_ledger
+from .source_coverage import coverage_pipeline
 from .retrieval import RETRIEVAL_RULE_VERSION, annotate_retrieval_rows, _write_jsonl_atomic as _write_retrieval_jsonl
 from .stage2c import STAGE2C_RULE_VERSION, human_review_summary, rebuild_chunk_overlays, verifier_audit_summary
 from .book_lifecycle_lock import LifecycleLockGetter
@@ -506,6 +507,8 @@ class Stage3ChunkBuilder:
             quality_tmp = result_dir / "retrieval_quality.json.tmp"
             quality_tmp.write_text(json.dumps(retrieval_quality, indent=2, ensure_ascii=False), encoding="utf-8")
             quality_tmp.replace(result_dir / "retrieval_quality.json")
+            coverage_report = await asyncio.to_thread(coverage_pipeline, document, result_dir)
+            state["source_coverage_pending"] = len(coverage_report["recovery_queue"])
             state["retrieval_searchable_chunks"] = int(retrieval_quality.get("searchable_chunks") or 0)
             state["retrieval_excluded_chunks"] = int(retrieval_quality.get("excluded_chunks") or 0)
             state["retrieval_mean_quality_score"] = float(retrieval_quality.get("mean_quality_score") or 0.0)
