@@ -2354,8 +2354,10 @@ async def review_page():
 
 
 def enrich_jobs(rows: list[dict]) -> list[dict]:
+    from .conversion_diagnostics import conversion_diagnostic
     output_dir = Path(runtime.config.output_dir)
     for row in rows:
+        row["conversion_diagnostic"] = conversion_diagnostic(row)
         filename = row.get("output_filename")
         row["output_available"] = bool(filename and (output_dir / filename).is_file())
         raw_formats = row.get("output_formats")

@@ -13,6 +13,12 @@ function displayTime(value) {
     : "Unknown time";
 }
 
+function conversionGuidance(job) {
+  const d = job.conversion_diagnostic;
+  if (!d) return '';
+  return `<div class="status-message"><strong>${escapeHtml(d.title)}</strong><p>${escapeHtml(d.explanation)}</p><p>${escapeHtml(d.action)}</p><a href="/add-book">Upload converted file</a></div>`;
+}
+
 async function refresh() {
   const [errorsResponse, statusResponse] = await Promise.all([
     fetch("/api/errors", { cache: "no-store" }),
@@ -56,6 +62,7 @@ async function refresh() {
           <h3>${escapeHtml(job.filename)}</h3>
           <p class="error-meta">${displayTime(job.completed_at)} · ${escapeHtml(job.error_type || "ConversionError")} · Retry ${job.retry_count || 0}</p>
           <p class="error-message">${escapeHtml(job.error_message || "No error message was returned.")}</p>
+          ${conversionGuidance(job)}
           <p class="retry-feedback" data-retry-feedback="${job.id}" role="status" aria-live="polite" hidden></p>
         </div>
         <button class="retry-button" data-job-id="${job.id}" type="button" ${busyRetries.has(String(job.id)) ? "disabled" : ""}>${busyRetries.has(String(job.id)) ? "Re-queuing…" : "Retry conversion"}</button>
