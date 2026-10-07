@@ -2,7 +2,7 @@
   if (!document.querySelector('link[href*="ui-audit-fixes.css"]')) {
     const link = document.createElement('link');
     link.rel = 'stylesheet';
-    link.href = '/assets/ui-audit-fixes.css?v=1';
+    link.href = '/assets/ui-audit-fixes.css?v=5.0.8.1';
     document.head.appendChild(link);
   }
 })();
@@ -30,6 +30,7 @@
     ['.table-wrap:has(#verification-books)', 'Verification books'],
     ['.table-wrap:has(#pi5-results)', 'Text verification results'],
     ['.table-wrap:has(#oneplus-results)', 'Vision verification results'],
+    ['.table-wrap:has(#jobs-body)', 'Conversion history'],
   ];
   for (const [selector, label] of regions) {
     const node = document.querySelector(selector);
