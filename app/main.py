@@ -91,6 +91,7 @@ from .structural_anomaly import structural_entries
 from .version import APP_VERSION
 from .evidence_packets import bind_evidence
 from .evidence_contract import SCHEMA as EVIDENCE_SCHEMA, LEGACY_SCHEMA as LEGACY_EVIDENCE_SCHEMA, evidence_coverage, book_readiness, machine_readiness, migrate_ledger
+from .source_coverage import coverage_status, coverage_pipeline
 from .table_repair import (
     TABLE_ROW_COLLAPSE_CODE, ensure_collapse_scan, table_repair_context, parse_tsv_matrix,
     load_document_from_zip, save_table_repair, deactivate_table_repair,
@@ -7315,7 +7316,30 @@ async def book_technical_evidence(job_id: int) -> dict:
         "visual_sources_available": visual_sources_available,
         "candidate_counts": counts,
         "coverage": coverage,
+        "source_coverage": await asyncio.to_thread(coverage_status, result_dir),
     }
+
+
+@app.post("/api/postprocess/jobs/{job_id}/source-coverage")
+async def refresh_source_coverage(job_id: int) -> dict:
+    job = await runtime.postprocess_store.get_job(job_id)
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Book not found.")
+    result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+    if not (result_dir / "retrieval_index.jsonl").is_file():
+        raise HTTPException(status_code=409, detail="Build the book search index first.")
+    def measure():
+        import zipfile
+        from .archive import select_docling_document
+        manifest = _load_json_file(result_dir / "source_manifest.json")
+        source = Path(runtime.config.output_dir) / Path(str(manifest["converted_zip"])).name
+        with zipfile.ZipFile(source) as archive:
+            document, _ = select_docling_document(archive)
+        return coverage_pipeline(document, result_dir)
+    try:
+        return await asyncio.to_thread(measure)
+    except (OSError, ValueError, KeyError) as exc:
+        raise HTTPException(status_code=409, detail="Original source could not be measured.") from exc
 
 
 @app.get("/api/postprocess/jobs/{job_id}/source-page/{page}")

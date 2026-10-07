@@ -2,6 +2,25 @@
   const el = id => document.getElementById(id);
   let entries = [], active = null, extraction = null, busy = false, generation = 0;
 
+  function showCoverage(report) {
+    if (!el('coverage-summary')) return;
+    el('coverage-gaps').replaceChildren();
+    if (!report || ['not_measured', 'invalid'].includes(report.status)) {
+      el('coverage-summary').textContent = 'Coverage has not been measured. Check coverage to find source gaps.';
+      return;
+    }
+    const queue = report.recovery_queue || [];
+    el('coverage-summary').textContent = `${report.status === 'stale' ? 'Previous check is stale. ' : ''}${queue.length} items need source review · ${(report.dispositions || {}).represented_literal || 0} already represented as text · ${(report.dispositions || {}).excluded_page_furniture || 0} page headers/footers excluded. Reference coverage does not verify answer accuracy.`;
+    for (const gap of queue.slice(0, 30)) {
+      const page = (gap.pages || [])[0];
+      if (!page) continue;
+      const link = document.createElement('a');
+      link.href = `/docling-review?job=${encodeURIComponent(el('book').value)}&page=${page}`;
+      link.textContent = `${gap.priority === 'high' ? 'Priority · ' : ''}Page ${page} · ${gap.kind} · ${gap.text_preview || gap.ref}`;
+      el('coverage-gaps').appendChild(link);
+    }
+  }
+
   async function api(url, options) {
     const response = await fetch(url, {cache: 'no-store', ...(options || {})});
     let body = {};
@@ -190,6 +209,7 @@
       option(el('entry'), e.entry_id, `${title} · page ${pages} · ${state}`);
     }
     choose();
+    showCoverage(value.source_coverage);
     const counts = value.candidate_counts || {};
     setStatus(
       `${entries.length} candidates loaded · ${Number(counts.picture_linked || 0)} picture-linked candidates · ` +
@@ -218,6 +238,11 @@
   }
 
   el('load').onclick = () => action(() => load({autoDetect: true}));
+  if (el('check-coverage')) el('check-coverage').onclick = () => action(async () => {
+    const report = await api(`/api/postprocess/jobs/${el('book').value}/source-coverage`, {method: 'POST'});
+    showCoverage(report);
+    setStatus('Coverage checked. Source review links are listed below. No model calls or corrections were applied.');
+  });
   el('detect').onclick = () => action(async () => { await detect(); await load({autoDetect: false}); });
   el('book').onchange = () => action(() => load({autoDetect: true}));
   el('entry').onchange = choose;

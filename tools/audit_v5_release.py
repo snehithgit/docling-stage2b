@@ -23,6 +23,11 @@ def summarize(version, retrieval, workers):
             reasons.append("source_validation_pending")
         if not evidence.get("whole_manual_coverage_measured"):
             reasons.append("whole_manual_coverage_unmeasured")
+        reference = evidence.get("source_reference_coverage") or {}
+        if reference.get("status") != "current":
+            reasons.append("source_reference_coverage_not_current")
+        if reference.get("pending_source_review"):
+            reasons.append("source_reference_gaps_pending")
         if reasons:
             blockers.append({"job_id": book.get("postprocess_job_id"), "reasons": reasons,
                              "pending_candidates": evidence.get("pending"),
