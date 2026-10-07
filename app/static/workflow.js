@@ -62,7 +62,7 @@
       );
     });
     const attention = books.filter(b => stage(b).tone === 'attention').length;
-    $('library-count').textContent = `${books.length} books${attention ? ` · ${attention} need attention` : ''}`;
+    $('library-count').textContent = `${books.length} books${attention ? ` · ${attention} stage blocker${attention === 1 ? '' : 's'}` : ''}`;
     updateSummary();
     if (!visible.length) {
       $('book-list').innerHTML = `<div class="workflow-empty"><h3>${books.length ? 'No matching books' : 'No books yet'}</h3><p>${books.length ? 'Change the search or filter.' : 'Add a document to begin.'}</p></div>`;
@@ -85,7 +85,7 @@
   }
 
   async function refresh() {
-    if (loading) return;
+    if (loading || (document.visibilityState && document.visibilityState !== 'visible')) return;
     loading = true;
     try {
       const response = await fetch('/api/documents', {cache:'no-store'});
@@ -112,7 +112,19 @@
   $('book-search').addEventListener('input', render);
   $('book-filter').addEventListener('change', render);
   refresh();
-  setInterval(() => { if (!window.DoclingUI?.shouldDeferRefresh?.()) refresh(); }, 8000);
+  // /api/documents performs full per-book freshness and readiness checks. Keep
+  // the library current without continuously re-running that expensive work.
+  const refreshTimer = setInterval(() => {
+    if (!window.DoclingUI?.shouldDeferRefresh?.()) refresh();
+  }, 30000);
+  if (typeof document.addEventListener === 'function') {
+    document.addEventListener('visibilitychange', () => {
+      if ((!document.visibilityState || document.visibilityState === 'visible') && !window.DoclingUI?.shouldDeferRefresh?.()) refresh();
+    });
+  }
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('pagehide', () => clearInterval(refreshTimer), {once:true});
+  }
   document.querySelectorAll('[data-summary-filter]').forEach(card => card.addEventListener('click', () => {
     $('book-filter').value = card.dataset.summaryFilter || 'all';
     render();

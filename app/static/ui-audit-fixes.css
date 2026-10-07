@@ -1,0 +1,314 @@
+/* Targeted repairs from the 2026-10-06 UI audit. Keep these rules narrow so
+   legacy/advanced pages can migrate to the shared workspace shell incrementally. */
+
+/* Closed off-canvas settings must not remain keyboard-focusable. */
+.settings-drawer[aria-hidden="true"] {
+  visibility: hidden;
+  pointer-events: none;
+}
+.settings-drawer[aria-hidden="false"] {
+  visibility: visible;
+}
+
+/* The audited UI leaned too heavily on 9–11px low-contrast metadata. Keep the
+   compact hierarchy but raise operational text to a readable floor. */
+body.ui29 .eyebrow,
+body.ui29 .sidebar-label,
+body.ui29 .metric-kicker,
+body.ui29 th {
+  color: #5b6070;
+  font-size: 12px;
+}
+body.ui29 .file-subtitle,
+body.ui29 .format-note,
+body.ui29 .model-meta,
+body.ui29 .help-list,
+body.ui29 .field-note,
+body.ui29 .context-meta,
+body.ui29 .app-version small {
+  color: #555c6b;
+  font-size: 12px;
+}
+body.ui29 .status,
+body.ui29 .quality-muted {
+  font-size: 12px;
+}
+body.ui29 .status.completed {
+  color: #08724f;
+}
+
+/* Repaired/review surfaces get the same readable helper-text treatment even
+   when they use page-local component classes. */
+.ui-audit-surface .subtle,
+.ui-audit-surface .format-note,
+.ui-audit-surface .model-meta,
+.ui-audit-surface .help-list,
+.ui-audit-surface .field label,
+body:has(#quality-jobs) .subtle,
+body:has(#quality-jobs) .format-note,
+.verification-workspace .subtle,
+.verification-workspace .format-note {
+  color: #505867;
+}
+.ui-audit-surface .format-note,
+.ui-audit-surface .model-meta,
+.ui-audit-surface .help-list,
+.ui-audit-surface .field label,
+.ui-audit-surface .check-row,
+body:has(#quality-jobs) .format-note,
+.verification-workspace .format-note {
+  font-size: 12px;
+}
+
+/* Technical Evidence now lives in the normal workspace shell. */
+.technical-evidence-main {
+  width: 100%;
+  min-width: 0;
+}
+.technical-evidence-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+.technical-evidence-controls .field,
+.technical-evidence-selection .field {
+  margin: 0;
+}
+.technical-evidence-selection {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+.technical-evidence-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+}
+.technical-evidence-source {
+  position: relative;
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f4f5f7;
+}
+.technical-evidence-source img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.technical-evidence-source svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.technical-evidence-json {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 320px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.technical-evidence-review-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  gap: 18px;
+  align-items: start;
+}
+.technical-evidence-review-grid > * {
+  min-width: 0;
+}
+
+/* Wide operational tables keep their action column visible instead of silently
+   clipping it. :has() scopes these rules to the exact audited tables. */
+.table-wrap:has(#quality-jobs),
+.table-wrap:has(#verification-books),
+.table-wrap:has(#pi5-results),
+.table-wrap:has(#oneplus-results) {
+  position: relative;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-gutter: stable;
+}
+.table-wrap:has(#quality-jobs) table,
+.table-wrap:has(#verification-books) table,
+.table-wrap:has(#pi5-results) table,
+.table-wrap:has(#oneplus-results) table {
+  min-width: 780px;
+}
+.table-wrap:has(#quality-jobs) th:last-child,
+.table-wrap:has(#quality-jobs) td:last-child,
+.table-wrap:has(#verification-books) th:last-child,
+.table-wrap:has(#verification-books) td:last-child,
+.table-wrap:has(#pi5-results) th:last-child,
+.table-wrap:has(#pi5-results) td:last-child,
+.table-wrap:has(#oneplus-results) th:last-child,
+.table-wrap:has(#oneplus-results) td:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  background: #fff;
+  box-shadow: -10px 0 14px -14px rgba(31, 35, 48, .55);
+}
+.table-wrap:has(#quality-jobs) th:last-child,
+.table-wrap:has(#verification-books) th:last-child,
+.table-wrap:has(#pi5-results) th:last-child,
+.table-wrap:has(#oneplus-results) th:last-child {
+  z-index: 3;
+  background: #f8f8fb;
+}
+
+/* Text/Vision audit cards previously let headings, verdicts and technical
+   payloads run into the card edge at narrow widths. These are the actual card
+   classes emitted by text-audit.js/vision-audit.js. */
+.vision-audit-card {
+  overflow: hidden;
+}
+.vision-audit-card > .vision-audit-card-head {
+  gap: 12px;
+  padding: clamp(16px, 2vw, 22px) clamp(16px, 2.5vw, 24px) 12px;
+}
+.vision-audit-card > .vision-audit-main-grid {
+  min-width: 0;
+  padding: 0 clamp(16px, 2.5vw, 24px) clamp(16px, 2.5vw, 24px);
+}
+.vision-audit-card .vision-audit-image-column,
+.vision-audit-card .vision-audit-explanation,
+.vision-audit-card .vision-audit-decision,
+.vision-audit-card section {
+  min-width: 0;
+}
+.vision-audit-card .vision-audit-source-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+.vision-audit-card .audit-transcription,
+.vision-audit-card .vision-audit-summary-text,
+.vision-audit-card pre,
+.vision-audit-card code {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* Other review result cards use several names across legacy pages. */
+.audit-result-card,
+.review-result-card,
+.anomaly-result-card {
+  padding-inline: clamp(12px, 2.5vw, 22px);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .technical-evidence-controls,
+  .technical-evidence-selection,
+  .technical-evidence-review-grid {
+    grid-template-columns: 1fr;
+  }
+  .technical-evidence-controls > button {
+    width: 100%;
+  }
+  .vision-audit-card > .vision-audit-card-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 640px) {
+  .technical-evidence-actions > button,
+  .technical-evidence-actions > a {
+    width: 100%;
+  }
+  .technical-evidence-json {
+    min-height: 240px;
+  }
+}
+
+
+/* Snapshot follow-up: the conversion history table is wider than the tablet
+   workspace. Keep Result/actions visible and let the remaining columns scroll. */
+.table-wrap:has(#jobs-body) {
+  position: relative;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-gutter: stable;
+}
+.table-wrap:has(#jobs-body) table {
+  min-width: 820px;
+}
+.table-wrap:has(#jobs-body) th:last-child,
+.table-wrap:has(#jobs-body) td:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  background: #fff;
+  box-shadow: -10px 0 14px -14px rgba(31, 35, 48, .55);
+}
+.table-wrap:has(#jobs-body) th:last-child {
+  z-index: 3;
+  background: #f8f8fb;
+}
+
+/* Checkbox/radio controls inside audit filter grids must not inherit the
+   full-width text-input sizing used by search/select fields. */
+.vision-audit-filters label:has(> input[type="checkbox"]),
+.vision-audit-filters label:has(> input[type="radio"]) {
+  display: flex;
+  align-items: center;
+  align-self: end;
+  gap: 8px;
+  min-height: 42px;
+}
+.vision-audit-filters input[type="checkbox"],
+.vision-audit-filters input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
+  flex: 0 0 18px;
+  padding: 0;
+}
+
+/* Primary mobile navigation controls should match the touch sizing used by the
+   rest of the mobile UI. */
+@media (max-width: 900px) {
+  .hamburger,
+  .sidebar-close {
+    width: 44px;
+    height: 44px;
+  }
+  .sidebar-close {
+    top: 14px;
+    right: 10px;
+  }
+  .nav > a,
+  .nav-advanced > a,
+  .nav-advanced > summary {
+    min-height: 44px;
+  }
+}
+
+/* At phone width the base stylesheet turns tables into stacked cards; undo the
+   tablet sticky-column behavior there so each card remains natural. */
+@media (max-width: 720px) {
+  .table-wrap:has(#jobs-body) {
+    overflow: visible;
+    scrollbar-gutter: auto;
+  }
+  .table-wrap:has(#jobs-body) table {
+    min-width: 0;
+  }
+  .table-wrap:has(#jobs-body) th:last-child,
+  .table-wrap:has(#jobs-body) td:last-child {
+    position: static;
+    box-shadow: none;
+    background: inherit;
+  }
+}

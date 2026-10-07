@@ -1,6 +1,13 @@
 (() => {
   const q = new URLSearchParams(location.search);
   const jobId = Number(q.get('job'));
+  if (!Number.isInteger(jobId) || jobId <= 0) {
+    // Page Review is book-scoped. A bare /docling-review route previously left
+    // a broken image and a permanent Loading state; return users to the review
+    // workspace before binding controls or issuing job=0 requests.
+    window.location.replace('/review-center');
+    return;
+  }
   const initialPage = Math.max(1, Number(q.get('page') || 1));
   const initialRef = String(q.get('ref') || '').trim();
   const returnUrl = String(q.get('return') || '').trim();

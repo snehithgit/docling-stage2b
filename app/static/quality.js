@@ -114,5 +114,14 @@ async function load() {
   setQualityHtml(body, html);
 }
 
+function refreshVisibleQuality() {
+  if (document.visibilityState !== 'visible' || window.DoclingUI?.shouldDeferRefresh?.()) return;
+  load().catch(error => showQualityFeedback(`Quality status refresh failed: ${error.message}`));
+}
+
 load().catch(error => showQualityFeedback(error.message));
-setInterval(() => { if (!window.DoclingUI?.shouldDeferRefresh?.()) load().catch(error => showQualityFeedback(`Quality status refresh failed: ${error.message}`)); }, 10000);
+const qualityRefreshTimer = setInterval(refreshVisibleQuality, 10000);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') refreshVisibleQuality();
+});
+window.addEventListener('pagehide', () => clearInterval(qualityRefreshTimer), {once:true});
