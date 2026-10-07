@@ -70,3 +70,16 @@ def test_unreviewed_diagram_children_group_once_without_automatic_exclusion(tmp_
     assert len(report["review_groups"]) == 1
     assert report["review_groups"][0]["visual_entry_id"] == "vision-1"
     assert report["review_groups"][0]["related_source_refs"] == ["#/pictures/0", "#/texts/0"]
+
+
+def test_advisory_worker_history_does_not_invalidate_reference_coverage(tmp_path):
+    import json
+    from app.source_coverage import _input_stats,coverage_status
+    ledger={'entries':[{'entry_id':'e','doc_items':['#/pictures/1'],'source_sha256':'a'*64,'validation':{'state':'needs_review'}}]}
+    path=tmp_path/'technical_evidence_ledger.json';path.write_text(json.dumps(ledger),encoding='utf-8')
+    (tmp_path/'source_coverage.json').write_text(json.dumps({'inputs':_input_stats(tmp_path)}),encoding='utf-8')
+    ledger['entries'][0]['visual_worker_reviews']=[{'status':'agreement','provider':'colab:colab-2'}]
+    path.write_text(json.dumps(ledger),encoding='utf-8')
+    assert coverage_status(tmp_path)['status']=='current'
+    ledger['entries'][0]['doc_items']=['#/pictures/2'];path.write_text(json.dumps(ledger),encoding='utf-8')
+    assert coverage_status(tmp_path)['status']=='stale'

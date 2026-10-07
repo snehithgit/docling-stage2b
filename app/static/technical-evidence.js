@@ -21,16 +21,24 @@
     for (const issue of graph.unresolved || []) add(`Still unclear: ${issue}`);
   }
 
+  let coverageReport=null, coverageLimit=30;
   function showCoverage(report) {
+    coverageReport=report;
     if (!el('coverage-summary')) return;
     el('coverage-gaps').replaceChildren();
     if (!report || ['not_measured', 'invalid'].includes(report.status)) {
       el('coverage-summary').textContent = 'No current check is available. Click Find missing information to compare this manual with search.';
       return;
     }
-    const queue = report.review_groups || report.recovery_queue || [];
-    el('coverage-summary').textContent = `${report.status === 'stale' ? 'The manual changed; run this check again. ' : ''}${queue.length} places need inspection. ${(report.dispositions || {}).represented_literal || 0} text items are already included. Repeated page headers and footers are ignored. ${queue.length > 30 ? 'The first 30 places are shown below. ' : ''}Open a page to see whether important information is missing. This check does not prove answer accuracy.`;
-    for (const gap of queue.slice(0, 30)) {
+    const all = report.review_groups || report.recovery_queue || [];
+    const filter=el('coverage-filter')?.value||'all';
+    const queue=all.filter(g=>filter==='all'||g.recovery_route===filter);
+    const counts={pictures:all.filter(g=>g.recovery_route==='visual_review').length,tables:all.filter(g=>g.recovery_route==='table_review').length,text:all.filter(g=>g.recovery_route==='source_text_review').length};
+    el('recover-prose').disabled=report.status==='stale';
+    if(el('coverage-more'))el('coverage-more').hidden=queue.length<=coverageLimit;
+    el('coverage-summary').textContent = `${report.status==='stale'?'Out-of-date checklist: run Find missing information again before adding text. ':''}${all.length} source items need inspection: ${counts.pictures} pictures, ${counts.tables} tables and ${counts.text} text items. ${(report.dispositions||{}).represented_literal||0} text items are already included. Showing ${Math.min(coverageLimit,queue.length)} of ${queue.length} matching items. These counts do not mean that many answers are missing. Some images are logos, icons or controls. Inspect important diagrams first.`;
+
+    for (const gap of queue.slice(0, coverageLimit)) {
       const page = (gap.pages || [])[0];
       if (!page) continue;
       const link = document.createElement('a');
@@ -124,6 +132,7 @@
 
   function choose() {
     resetReview();
+    if(typeof CustomEvent!=='undefined') document.dispatchEvent(new CustomEvent('technical-selected',{detail:null}));
     active = entries.find(e => e.entry_id === el('entry').value) || null;
     el('picture').replaceChildren();
     if (!active) {
@@ -140,6 +149,7 @@
     }
     preview(); syncControls();
     if (active.visual_extraction?.picture_index === Number(el('picture').value)) show(active.visual_extraction);
+    if(typeof CustomEvent!=='undefined') document.dispatchEvent(new CustomEvent('technical-selected',{detail:{book:Number(el('book').value),entry:active.entry_id,picture:Number(el('picture').value),extraction:active.visual_extraction,history:active.visual_extraction_history,reviews:active.visual_worker_reviews}}));
   }
 
   function show(value) {
@@ -283,25 +293,32 @@
   });
   el('detect').onclick = () => action(async () => { await detect(); await load({autoDetect: false}); });
   el('book').onchange = () => action(() => load({autoDetect: true}));
+  if(el('coverage-filter'))el('coverage-filter').onchange=()=>{coverageLimit=30;showCoverage(coverageReport)};
+  if(el('coverage-more'))el('coverage-more').onclick=()=>{coverageLimit+=30;showCoverage(coverageReport)};
   el('entry').onchange = choose;
   el('checked').onchange = syncControls;
   el('actor').oninput = syncControls;
   el('picture').onchange = () => {
     resetReview(); preview(); syncControls();
+    document.dispatchEvent(new CustomEvent('technical-selected',{detail:{book:Number(el('book').value),entry:active?.entry_id,picture:Number(el('picture').value)}}));
     if (active?.visual_extraction?.picture_index === Number(el('picture').value)) show(active.visual_extraction);
   };
 
-  el('extract').onclick = () => action(async () => {
-    if (!active) throw Error('Select a source item');
-    if (el('picture').value === '') throw Error('Select a source picture');
-    setStatus('Reading the original Docling image with the selected vision worker…');
-    const result = await api(
-      `/api/postprocess/jobs/${el('book').value}/technical-evidence/${encodeURIComponent(active.entry_id)}/visual-extract?picture_index=${el('picture').value}&force=${el('fresh').checked}`,
-      {method: 'POST'},
-    );
-    show(result.extraction);
-    setStatus('AI reading saved. Now compare the labels and connections below with the original image. Your manual has not been rewritten.');
-  });
+  el('extract').onclick = () => {
+    if (!active || el('picture').value==='') {setStatus('Choose an item and source picture first.');return;}
+    document.dispatchEvent(new CustomEvent('technical-queue-read'));
+    setStatus('Diagram reading requested. Follow AI diagram jobs below; you can keep browsing while it runs.');
+  };
+  document.addEventListener('technical-result', event => action(async () => {
+    const detail=event.detail;
+    if (Number(el('book').value)!==detail.book) return;
+    await load({autoDetect:false});
+    if (!entries.some(e=>e.entry_id===detail.entry)) throw Error('This result belongs to an older source item. Refresh detection before review.');
+    el('entry').value=detail.entry;choose();el('picture').value=String(detail.picture);preview();
+    if (detail.result.extraction) show(detail.result.extraction);
+    else if (detail.result.previous) show(detail.result.previous);
+    setStatus(detail.result.review ? 'Independent review saved. Compare outputs; your human decision remains unchanged.' : 'Diagram reading saved. Check the original before confirmation.');
+  }));
 
   el('edit').onclick = () => action(async () => {
     if (!extraction) throw Error('Extract a graph first');

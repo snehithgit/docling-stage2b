@@ -2245,6 +2245,7 @@ async def lifespan(_: FastAPI):
     await runtime.postprocess_worker.start()
     await runtime.stage2b_worker.start()
     await runtime.review_assistant.start()
+    await technical_visual_jobs.start()
     await runtime.start_pipeline_sequence()
     await runtime.telegram_bot.start()
     yield
@@ -2254,6 +2255,7 @@ async def lifespan(_: FastAPI):
     await runtime.stop_safety_refresh()
     await runtime.stage3_builder.stop()
     await runtime.review_assistant.stop()
+    await technical_visual_jobs.stop()
     await runtime.stage2b_worker.stop()
     await runtime.postprocess_worker.stop()
     await runtime.worker.stop()
@@ -7255,6 +7257,160 @@ async def detect_book_technical_evidence(job_id: int) -> dict:
     return {"postprocess_job_id": job_id, "summary": summary, "model_calls": 0, "raw_docling_immutable": True,
             "detection_rule": TECH_RULE, "context_relationships_are_candidates": True,
             "coverage": await asyncio.to_thread(evidence_coverage, result_dir)}
+
+
+async def _execute_technical_visual_job(payload, progress):
+    from .visual_graph import current_entry, save_graph, normalize_graph, graph_hash
+    from .technical_visual_jobs import compare_graphs
+    from .evidence_contract import atomic_json
+    job_id=payload['book'];entry_id=payload['entry'];picture_index=payload['picture']
+    job,directory=await _manual_structure_directory(job_id)
+    lock=runtime.book_lifecycle_locks.get(job_id)
+    cached_result=None
+    async with lock:
+        _,record=await asyncio.to_thread(current_entry,directory,entry_id)
+        if record['source_sha256']!=payload['source_sha256']:
+            raise ValueError('Source changed since queuing; reload this item')
+        if record['validation']['state'] in {'validated','rejected'}:
+            raise ValueError('Human-reviewed evidence is preserved; job skipped')
+        prior=record.get('visual_extraction') or {}
+        if payload.get('prior_graph_sha256') != prior.get('graph_sha256'):
+            raise ValueError('Diagram changed since queuing; reload this item')
+        manifest=await asyncio.to_thread(_load_json_file,directory/'source_manifest.json')
+        archive=Path(runtime.config.output_dir)/Path(str(manifest.get('converted_zip') or job.get('output_filename') or '')).name
+        image,mime,_=await asyncio.to_thread(_picture_image_from_converted_zip,archive,picture_index)
+        image_hash=hashlib.sha256(image).hexdigest()
+        if payload['kind']=='review' and (not prior or prior['image_sha256']!=image_hash):
+            raise ValueError('Read the current original image before worker review')
+        if payload['kind']=='extract' and not payload.get('force') and prior.get('image_sha256')==image_hash and prior.get('source_sha256')==record['source_sha256']:
+            result={'extraction':prior,'previous':prior,'cached':True,'model_calls':0}
+            cached_result=result
+        source_hash=record['source_sha256']
+        original_text=record['source_text']
+    if cached_result is not None:
+        if payload.get('review_after'): await _enqueue_technical_visual(job_id,entry_id,picture_index,'review',payload.get('review_provider'))
+        return cached_result
+    identity=uuid.uuid4().hex
+    inference={'id':-int(identity[:12],16),'result_dir':job['result_dir'],'postprocess_job_id':job_id,'generation':identity,'source_json':'{}'}
+    graph,provider,model=await runtime.stage2b_worker.extract_technical_visual(image,mime,inference,
+        preferred_provider=payload.get('provider'),exclude_provider=prior.get('provider') if payload['kind']=='review' else payload.get('review_provider') if payload.get('review_after') else None,progress=progress)
+    await progress('Saving source-bound result',provider)
+    async with lock:
+        current_image,_,_=await asyncio.to_thread(_picture_image_from_converted_zip,archive,picture_index)
+        if hashlib.sha256(current_image).hexdigest()!=image_hash:
+            raise ValueError('Original image changed during reading; result discarded')
+        ledger,current=await asyncio.to_thread(current_entry,directory,entry_id)
+        if current['validation']['state'] in {'validated','rejected'} or current['source_sha256']!=source_hash or (current.get('visual_extraction') or {}).get('graph_sha256')!=prior.get('graph_sha256'):
+            raise ValueError('Source or review decision changed during reading; result discarded')
+        if payload['kind']=='review':
+            graph=normalize_graph(graph)
+            comparison=compare_graphs(prior['graph'],graph)
+            review={'graph':graph,'graph_sha256':graph_hash(graph),'image_sha256':image_hash,'source_sha256':source_hash,
+                'reviewed_graph_sha256':prior['graph_sha256'],'provider':provider,'model':model,'created_at_epoch':time.time(),**comparison}
+            current.setdefault('visual_worker_reviews',[]).append(review)
+            await asyncio.to_thread(atomic_json,directory/'technical_evidence_ledger.json',ledger)
+            return {'previous':prior,'review':review,'comparison':comparison,'model_calls':1,'human_confirmation_recorded':False}
+        extraction=await asyncio.to_thread(save_graph,directory,entry_id,graph,picture_index,image_hash,source_hash,provider,model)
+    if payload.get('review_after'):
+        await _enqueue_technical_visual(job_id,entry_id,picture_index,'review',payload.get('review_provider'))
+    return {'previous':prior or {'text':original_text,'provider':'Existing source extraction'},'extraction':extraction,'model_calls':1,'comparison':compare_graphs(prior['graph'],graph) if prior else None}
+
+
+from .technical_visual_jobs import TechnicalVisualJobs
+technical_visual_jobs=TechnicalVisualJobs(runtime.config.database_path,_execute_technical_visual_job)
+
+
+class TechnicalQueueControl(BaseModel):
+    enabled: bool
+
+
+@app.get('/api/technical-visual-jobs/control')
+async def technical_visual_control_status():
+    result=await asyncio.to_thread(technical_visual_jobs.list,None,0)
+    return {'enabled':result['dispatch_enabled'],'counts':result['counts']}
+
+
+@app.put('/api/technical-visual-jobs/control')
+async def technical_visual_control_update(update:TechnicalQueueControl):
+    await asyncio.to_thread(technical_visual_jobs.set_enabled,update.enabled)
+    return await technical_visual_control_status()
+
+
+async def _enqueue_technical_visual(job_id,entry_id,picture_index,kind='extract',provider=None,force=False,review_after=False,review_provider=None):
+    from .visual_graph import current_entry
+    _,directory=await _manual_structure_directory(job_id)
+    async with runtime.book_lifecycle_locks.get(job_id):
+        _,record=await asyncio.to_thread(current_entry,directory,entry_id)
+        if f'#/pictures/{picture_index}' not in record.get('doc_items',[]):raise ValueError('Picture does not belong to this entry')
+        if record['validation']['state'] in {'validated','rejected'}:raise ValueError('Human-reviewed entries are preserved')
+        prior=record.get('visual_extraction') or {}
+        if kind=='review' and not prior:raise ValueError('Read the diagram before worker review')
+        payload={'book':job_id,'entry':entry_id,'picture':picture_index,'kind':kind,'provider':provider,'force':force,
+            'review_after':review_after,'review_provider':review_provider,'source_sha256':record['source_sha256'],
+            'prior_graph_sha256':prior.get('graph_sha256'),'title':record.get('search_heading') or entry_id,'pages':record.get('page_numbers') or []}
+    key=hashlib.sha256(json.dumps({**payload,'nonce':uuid.uuid4().hex if force else None},sort_keys=True).encode()).hexdigest()
+    identity=await asyncio.to_thread(technical_visual_jobs.enqueue,payload,key)
+    return identity
+
+
+class TechnicalVisualQueueRequest(BaseModel):
+    entry_id: str | None = Field(default=None,max_length=250)
+    picture_index: int | None = Field(default=None,ge=0)
+    kind: str = Field(default='extract',pattern='^(extract|review)$')
+    provider: str | None = Field(default=None,pattern=r'^(pi5|oneplus|colab:colab-\d+)$')
+    review_provider: str | None = Field(default=None,pattern=r'^(pi5|oneplus|colab:colab-\d+)$')
+    force: bool = False
+    review_after: bool = False
+    bulk: bool = False
+    limit: int = Field(default=25,ge=1,le=100)
+
+
+@app.get('/api/postprocess/jobs/{job_id}/technical-visual-jobs')
+async def technical_visual_job_status(job_id:int,view:str="all"):
+    await _manual_structure_directory(job_id)
+    if view not in {'all','attention','waiting','saved'}:raise HTTPException(status_code=422,detail='Invalid job view')
+    return await asyncio.to_thread(technical_visual_jobs.list,job_id,30,view)
+
+
+@app.post('/api/postprocess/jobs/{job_id}/technical-visual-jobs/cancel')
+async def technical_visual_job_cancel(job_id:int):
+    await _manual_structure_directory(job_id)
+    await asyncio.to_thread(technical_visual_jobs.cancel,job_id)
+    return {'queued_jobs_cancelled':True,'running_jobs_preserved':True}
+
+
+@app.post('/api/postprocess/jobs/{job_id}/technical-visual-jobs')
+async def technical_visual_job_enqueue(job_id:int,request:TechnicalVisualQueueRequest):
+    try:
+        if request.review_after and request.provider and request.provider==request.review_provider:raise ValueError('Choose different reading and review workers')
+        if not request.bulk:
+            if request.entry_id is None or request.picture_index is None:raise ValueError('Choose an item and picture')
+            identity=await _enqueue_technical_visual(job_id,request.entry_id,request.picture_index,request.kind,request.provider,request.force,request.review_after,request.review_provider)
+            return {'queued':1,'job_ids':[identity]}
+        if request.force:raise ValueError('Bulk work reuses existing readings; force is selective only')
+        _,directory=await _manual_structure_directory(job_id)
+        ledger=await asyncio.to_thread(_load_json_file,directory/'technical_evidence_ledger.json')
+        entries=sorted(ledger.get('entries',[]),key=lambda e:not str(e.get('source_chunk_id','')).startswith('V-'))
+        active_jobs=await asyncio.to_thread(technical_visual_jobs.list,job_id,100000)
+        active_pictures={j['payload']['picture'] for j in active_jobs['jobs'] if j['status'] in {'queued','waiting','running'}}
+        seen=set();identities=[]
+        for entry in entries:
+            if entry.get('superseded') or entry.get('validation',{}).get('state') in {'validated','rejected'}:continue
+            if not str(entry.get('source_chunk_id','')).startswith('V-'):continue
+            refs=[ref for ref in entry.get('doc_items',[]) if re.fullmatch(r'#/pictures/\d+',str(ref))]
+            if len(refs)!=1:continue
+            picture=int(refs[0].rsplit('/',1)[1])
+            if picture in seen or picture in active_pictures:continue
+            prior=entry.get('visual_extraction') or {}
+            reviewed=any(r.get('reviewed_graph_sha256')==prior.get('graph_sha256') and r.get('source_sha256')==entry.get('source_sha256') for r in entry.get('visual_worker_reviews') or [])
+            if reviewed or (request.kind=='extract' and prior and not request.review_after):continue
+            if request.kind=='review' and not entry.get('visual_extraction'):continue
+            seen.add(picture)
+            identities.append(await _enqueue_technical_visual(job_id,entry['entry_id'],picture,request.kind,request.provider,False,request.review_after,request.review_provider))
+            if len(identities)>=request.limit:break
+        return {'queued':len(identities),'job_ids':identities,'human_confirmations_unchanged':True}
+    except (ValueError,OSError,KeyError) as exc:
+        raise HTTPException(status_code=409,detail=str(exc)) from exc
 
 
 @app.post("/api/postprocess/jobs/{job_id}/technical-evidence/{entry_id}/visual-extract")
