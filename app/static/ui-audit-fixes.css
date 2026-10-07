@@ -62,6 +62,7 @@ body:has(#quality-jobs) .format-note,
 
 /* Technical Evidence now lives in the normal workspace shell. */
 .technical-evidence-main {
+  min-width: 0;
   width: 100%;
   min-width: 0;
 }
@@ -75,6 +76,11 @@ body:has(#quality-jobs) .format-note,
 .technical-evidence-selection .field {
   margin: 0;
 }
+
+.technical-evidence-main .doc-panel-body { padding: 20px; }
+.technical-evidence-main select { display: block; width: 100%; max-width: 100%; min-width: 0; padding: 10px; border: 1px solid #dedee8; border-radius: 8px; background: #fff; color: inherit; }
+.technical-evidence-main .field label { display: block; margin-bottom: 6px; }
+#graph-readable { padding: 12px; background: #f5f6fa; border-radius: 8px; overflow-wrap: anywhere; }
 .technical-evidence-selection {
   display: grid;
   grid-template-columns: repeat(2, minmax(220px, 1fr));
