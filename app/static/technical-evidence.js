@@ -243,6 +243,11 @@
     showCoverage(report);
     setStatus('Coverage checked. Source review links are listed below. No model calls or corrections were applied.');
   });
+  if (el('recover-prose')) el('recover-prose').onclick = () => action(async () => {
+    const result = await api(`/api/stage3/books/${el('book').value}/recover-prose?apply=true`, {method: 'POST'});
+    await load({autoDetect: false});
+    setStatus(`${result.eligible_passages} omitted passages recovered. Existing corrections preserved; diagrams and uncertain fragments remain for review.`);
+  });
   el('detect').onclick = () => action(async () => { await detect(); await load({autoDetect: false}); });
   el('book').onchange = () => action(() => load({autoDetect: true}));
   el('entry').onchange = choose;

@@ -9,4 +9,4 @@ TITLES = (
 
 def phases():
     return [{"phase": i + 1, "version": f"5.0.{i}", "title": title,
-             "status": "implemented" if i <= 8 else "planned"} for i, title in enumerate(TITLES)]
+             "status": "implemented" if i <= 8 else "in_progress"} for i, title in enumerate(TITLES)]
