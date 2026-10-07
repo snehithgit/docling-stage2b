@@ -1313,3 +1313,32 @@ button.mini-action { cursor: pointer; }
 
 .hub-worker-status { white-space:pre-line; padding:0 16px 16px; line-height:1.8; }
 .hub-grid { margin-top:16px; }
+
+/* V5 layout audit: keep help available without repeating large banners. */
+details.workspace-guide { display:block; padding:0; }
+details.workspace-guide > summary { cursor:pointer; padding:14px 18px; font-weight:700; }
+details.workspace-guide > div { padding:0 18px 14px; }
+.hub-grid .panel { display:flex; flex-direction:column; min-width:0; }
+.hub-grid .panel > a { align-self:flex-start; margin-top:auto; }
+.panel:has(#runner-url) { padding:20px; }
+.panel:has(#runner-url) .panel-heading { padding:0 0 16px; }
+.panel:has(#runner-url) input:not([type=checkbox]) { margin-bottom:12px; }
+@media(max-width:620px) {
+ .hub-grid { grid-template-columns:1fr; }
+ .page-header, .panel-heading { flex-wrap:wrap; gap:12px; }
+ .review-jobs-table table, .review-jobs-table tbody { display:block; width:100%; min-width:0; }
+ .review-jobs-table thead { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+ .review-jobs-table tbody tr { display:block; padding:12px; border-bottom:1px solid var(--line); }
+ .review-jobs-table td { display:grid; grid-template-columns:90px minmax(0,1fr); gap:10px; padding:6px 0; border:0; white-space:normal; overflow-wrap:anywhere; }
+ .review-jobs-table td::before { content:attr(data-label); font-weight:700; color:var(--muted); }
+ .review-jobs-table td[colspan] { display:block; }
+ .review-jobs-table td[colspan]::before { content:none; }
+}
+
+.diagram-main { max-width:1200px; margin:auto; padding:24px; }
+.diagram-main > label { display:inline-flex; flex-direction:column; gap:6px; margin:12px 12px 12px 0; max-width:100%; }
+.diagram-main select { max-width:100%; min-width:180px; }
+.diagram-main #review { margin-top:24px; padding:20px; background:white; border:1px solid var(--line); border-radius:14px; }
+.diagram-main #review > label { display:block; margin:16px 0; }
+.diagram-main textarea { width:100%; font-family:monospace; }
+@media(max-width:620px) { .diagram-main { padding:18px; } .diagram-main > label { display:flex; margin-right:0; } .diagram-main #review { padding:14px; } }
