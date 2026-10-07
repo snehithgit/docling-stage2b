@@ -98,7 +98,18 @@ def coverage_pipeline(document, result_dir):
 
 def _input_stats(result_dir):
     names = ("retrieval_index.jsonl", "visual_evidence.jsonl", "technical_evidence_ledger.json", "source_manifest.json", "correction_ledger.json", "routes.json", "diagnostics.json")
-    return {name: [p.stat().st_mtime_ns, p.stat().st_size] if (p := result_dir / name).exists() else None for name in names}
+    values={name: [p.stat().st_mtime_ns, p.stat().st_size] if (p := result_dir / name).exists() else None for name in names}
+    path=result_dir/'technical_evidence_ledger.json'
+    if path.exists():
+        # Advisory re-read history does not change source-reference coverage.
+        # Source bindings, supersession and actual validation still invalidate it.
+        from .evidence_contract import is_validated_record
+        records=json.loads(path.read_text(encoding='utf-8')).get('entries',[])
+        projection=[{'id':r.get('entry_id'),'refs':r.get('doc_items'), 'source':r.get('source_sha256'),
+                     'superseded':r.get('superseded'), 'state':r.get('validation',{}).get('state'),
+                     'validated':is_validated_record(r)} for r in records]
+        values['technical_evidence_ledger.json']=hashlib.sha256(json.dumps(projection,sort_keys=True).encode()).hexdigest()
+    return values
 
 
 def coverage_status(result_dir):

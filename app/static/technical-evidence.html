@@ -4,10 +4,16 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Technical evidence · Docling Auto-Convert</title>
-<link rel="stylesheet" href="/assets/styles.css?v=5.1.0.3" />
-<link rel="stylesheet" href="/assets/workflow.css?v=5.1.0.3" />
-<link rel="stylesheet" href="/assets/ui-audit-fixes.css?v=5.1.0.3" />
-</head>
+<link rel="stylesheet" href="/assets/styles.css?v=5.1.1" />
+<link rel="stylesheet" href="/assets/workflow.css?v=5.1.1" />
+<link rel="stylesheet" href="/assets/ui-audit-fixes.css?v=5.1.1" />
+<style>
+#diagram-jobs { display:grid; gap:10px; max-height:28rem; overflow:auto; }
+.diagram-job-card,.coverage-checklist a { display:block; padding:12px; border:1px solid #e3e4ed; border-radius:10px; background:#fafbfe; overflow-wrap:anywhere; }
+.coverage-checklist { display:grid; gap:10px; margin:12px 0; }
+#diagram-jobs-panel label { display:block; margin:8px 0; }
+#diagram-old p,#diagram-new p { overflow-wrap:anywhere; }
+</style></head>
 <body class="ui29 ui-audit-surface">
 <a class="skip-link" href="#main-content">Skip to main content</a>
 <header class="mobile-topbar">
@@ -78,6 +84,17 @@
       </div>
     </section>
 
+    <section class="panel" id="diagram-jobs-panel">
+      <div class="panel-heading"><div><h2>AI diagram jobs</h2><p>Queue readings and independent image reviews. Work continues if you leave this page. Human confirmations stay unchanged.</p></div></div>
+      <div class="doc-panel-body">
+        <div class="technical-evidence-selection"><label>Reading worker<select id="diagram-reader"><option value="">Automatic · configured vision pool</option></select></label><label>Independent review worker<select id="diagram-reviewer"><option value="">Automatic · different worker</option></select></label></div>
+        <label class="check-row"><input id="diagram-review-after" type="checkbox" checked /> Independently re-read the image after each reading and compare the outputs</label>
+        <div class="technical-evidence-actions"><button id="diagram-review-selected" class="secondary-button">Queue worker review of selected diagram</button><label>Batch size<select id="diagram-batch-limit"><option>25</option><option>50</option><option>100</option></select></label><button id="diagram-bulk-read" class="secondary-button">Queue unconfirmed technical diagrams</button><button id="diagram-bulk-review" class="secondary-button">Queue reviews of existing readings</button><button id="diagram-cancel" class="secondary-button">Cancel waiting jobs</button></div>
+        <p>Batch work selects existing technical pictures, skips human-confirmed or rejected items, and reuses saved readings. AI agreement reduces comparison work; it does not prove the connections are correct.</p>
+        <p id="diagram-job-status" role="status" aria-live="polite">No diagram work requested yet.</p><label>Show jobs<select id="diagram-job-filter"><option value="all">All jobs</option><option value="attention">Differences or failures first</option><option value="waiting">Waiting and running</option><option value="saved">Saved outputs</option></select></label><div id="diagram-jobs"></div>
+      </div>
+    </section>
+    <section class="panel" id="diagram-comparison" hidden><div class="panel-heading"><h2>Previous output and new output</h2></div><div class="doc-panel-body"><p id="diagram-comparison-status"></p><div class="technical-evidence-review-grid"><div><h3>Previous reading</h3><div id="diagram-old"></div></div><div><h3>New reading / independent review</h3><div id="diagram-new"></div></div></div><p id="diagram-differences"></p></div></section>
     <section class="panel" id="candidate-preview" hidden>
       <div class="panel-heading"><div><h2 id="candidate-title">Selected candidate</h2><p id="candidate-state" class="format-note"></p></div></div>
       <div class="doc-panel-body"><div id="candidate-pages" class="document-actions"></div>
@@ -110,12 +127,13 @@
       </div>
     </section>
     <section class="panel" id="coverage-panel">
-      <div class="panel-heading"><div><h2>Optional: is anything missing from search?</h2><p class="format-note">Compare the original manual with searchable information. A listed gap needs inspection; it is not automatically an error.</p></div><button id="check-coverage" type="button">Find missing information</button></div>
-      <div class="doc-panel-body"><p id="coverage-summary">Choose a manual, then check for missing information if needed.</p><button id="recover-prose" type="button">Add complete missing text passages</button><p class="format-note">Adds eligible complete passages from the corrected document to search without using AI. It cannot reconstruct diagrams or uncertain tables. Search embeddings may need refreshing afterwards.</p><div id="coverage-gaps" class="document-actions"></div></div>
+      <div class="panel-heading"><div><h2>Search coverage: which source items need checking?</h2><p class="format-note">This compares source items with search references. Pictures, logos and tables may appear in the checklist. A listed item is not a proven missing answer.</p></div><button id="check-coverage" type="button">Find missing information</button></div>
+      <div class="doc-panel-body"><p id="coverage-summary">Choose a manual, then check for missing information if needed.</p><button id="recover-prose" type="button">Add complete missing text passages</button><p class="format-note">Adds eligible complete passages from the corrected document to search without using AI. It cannot reconstruct diagrams or uncertain tables. Search embeddings may need refreshing afterwards.</p><label>Show checklist items<select id="coverage-filter"><option value="all">All types</option><option value="visual_review">Pictures and diagrams</option><option value="table_review">Tables</option><option value="source_text_review">Text</option></select></label><div id="coverage-gaps" class="coverage-checklist"></div><button id="coverage-more" class="secondary-button" hidden>Show next 30 items</button></div>
     </section>
   </main>
 </div>
-<script src="/assets/technical-evidence.js?v=5.1.0.3"></script>
-<script src="/assets/nav.js?v=5.1.0.3"></script>
+<script src="/assets/technical-jobs.js?v=5.1.1"></script>
+<script src="/assets/technical-evidence.js?v=5.1.1"></script>
+<script src="/assets/nav.js?v=5.1.1"></script>
 </body>
 </html>

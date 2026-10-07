@@ -2815,19 +2815,24 @@ class Stage2BWorker:
             self.forget_colab_worker(worker_id)
             return {"state": "deleted", "worker_id": worker_id}
 
-    async def extract_technical_visual(self, image_bytes, mime, evidence_job):
+    async def extract_technical_visual(self, image_bytes, mime, evidence_job, *, preferred_provider=None, exclude_provider=None, progress=None):
         """One bounded explicit extraction using the selected physical vision worker."""
         from .visual_graph import PROMPT, normalize_graph
-        provider = self._selected_provider("oneplus")
+        provider = preferred_provider or self._selected_provider("oneplus")
+        if provider.startswith('colab:') and provider not in self._configured_colab_providers():
+            raise ValueError('Selected Colab worker is not enabled/configured')
         if provider == "colab":
-            provider = await self._select_colab_provider()
+            provider = await self._select_colab_provider(exclude_provider=exclude_provider)
             if not provider:
-                raise RuntimeError("No selected Colab vision worker is available")
+                raise RuntimeError("No independent selected Colab vision worker is available")
+        if provider == exclude_provider:
+            raise RuntimeError('Independent review worker unavailable; select another worker')
         owner = "visual-graph:" + str(evidence_job["generation"])
         if not await self._reserve_provider(provider, owner):
             raise RuntimeError("Selected vision worker is busy or unavailable; retry later")
         try:
             evidence_job["_dispatch_provider"] = provider
+            if progress: await progress('Reading original image',provider)
             client = self._vision_client_for_role("oneplus", evidence_job)
             model = await self._model_for("visual-graph:" + provider, client.endpoint, client)
             response = await client.inspect_image_stream(image_bytes, PROMPT, mime_type=mime,
@@ -2958,8 +2963,9 @@ class Stage2BWorker:
             providers.append(self._colab_provider_key(str(worker["id"])))
         return providers
 
-    async def _select_colab_provider(self, *, artifact_only: bool = False) -> str | None:
+    async def _select_colab_provider(self, *, artifact_only: bool = False, exclude_provider=None) -> str | None:
         for provider in self._configured_colab_providers(artifact_only=artifact_only):
+            if provider == exclude_provider: continue
             self._ensure_provider_state(provider)
             if self._physical_worker_paused(provider):
                 continue
