@@ -116,7 +116,8 @@ def test_snapshot_followup_repairs_filter_controls_and_mobile_nav() -> None:
     assert "width: 18px" in css
     assert ".hamburger," in css
     assert "width: 44px" in css
-    assert "ui-audit-fixes.css?v=5.0.8.1" in script
+    from app.version import APP_VERSION
+    assert f"ui-audit-fixes.css?v={APP_VERSION}" in script
 
 
 def test_technical_evidence_backfills_and_explains_empty_states() -> None:
