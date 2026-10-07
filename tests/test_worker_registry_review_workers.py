@@ -477,8 +477,12 @@ def test_detected_anomaly_is_automatically_queued_after_normal_review(tmp_path: 
         )
         assert await service._sync_candidates() is True
         jobs = await store.list_jobs()
-        assert {j["review_type"] for j in jobs} == {"text", "anomaly_text"}
+        assert {j["review_type"] for j in jobs} == {"text"}
+        assert await store.claim_next(w['id'], {'anomaly_text'}) is None
+        normal = await store.claim_next(w['id'], {'text'})
+        await store.mark_completed(normal['id'], {'stored': True}, 1, claim=normal)
         await service._sync_candidates()
+        assert {j["review_type"] for j in await store.list_jobs()} == {"text", "anomaly_text"}
         assert len(await store.list_jobs()) == 2
         claimed = await store.claim_next(w['id'], {'anomaly_text'})
         await store.mark_completed(claimed['id'], {'stored': True}, 1, claim=claimed)

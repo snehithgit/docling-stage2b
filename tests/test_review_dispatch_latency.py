@@ -9,6 +9,32 @@ from app.worker_registry import WorkerRegistry
 
 
 @pytest.mark.asyncio
+async def test_automatic_anomaly_waits_for_same_entry_normal_review(tmp_path):
+    store = ReviewAssistantStore(str(tmp_path / 'jobs.db'))
+    await store.initialize()
+    entry = {'entry_id': 'same', 'original_text': 'raw'}
+    await store.sync_candidates([(1, 'book', entry, 'text'), (1, 'book', entry, 'anomaly_text')])
+    normal = await store.claim_next('colab-1', {'text'})
+    assert await store.claim_next('colab-2', {'anomaly_text'}) is None
+    assert (1, 'same', 'text') in await store.unfinished_normal_reviews()
+    await store.mark_completed(normal['id'], {'stored': True}, 1, claim=normal)
+    assert await store.claim_next('colab-2', {'anomaly_text'}) is None
+    entry['ai_review_assistant'] = {'recommendation': 'NEEDS_HUMAN'}
+    await store.sync_candidates([(1, 'book', entry, 'anomaly_text')])
+    assert await store.claim_next('colab-2', {'anomaly_text'})
+
+
+@pytest.mark.asyncio
+async def test_other_entry_anomaly_can_run_while_normal_review_is_busy(tmp_path):
+    store = ReviewAssistantStore(str(tmp_path / 'jobs.db'))
+    await store.initialize()
+    await store.sync_candidates([(1, 'book', {'entry_id': 'a'}, 'text'),
+                                 (1, 'book', {'entry_id': 'b'}, 'anomaly_text')])
+    assert await store.claim_next('colab-1', {'text'})
+    assert await store.claim_next('colab-2', {'anomaly_text'})
+
+
+@pytest.mark.asyncio
 async def test_candidate_batch_uses_one_connection_without_resetting_completed(tmp_path):
     store = ReviewAssistantStore(str(tmp_path / 'jobs.db'))
     await store.initialize()

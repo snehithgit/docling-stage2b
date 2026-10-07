@@ -79,7 +79,9 @@ async function loadStatus(){
   finally{statusInFlight=false}
 }
 async function refresh(){
-  try { await Promise.all([loadSettings(false),loadStatus()]); }
+  // Assignment configuration is loaded initially and after explicit saves.
+  // Status polling must not reread/rebuild the same controls every five seconds.
+  try { await loadStatus(); }
   catch(e){feedback(e.message,'error')}
 }
 
@@ -112,5 +114,6 @@ $('save-review-settings').addEventListener('click',async()=>{
   }catch(e){feedback(e.message,'error')}
   finally{button.disabled=false;button.textContent=old}
 });
+loadSettings(false);
 refresh();
 setInterval(()=>{if(document.visibilityState==='visible' && !window.DoclingUI?.shouldDeferRefresh?.())refresh()},5000);
