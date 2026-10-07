@@ -100,10 +100,8 @@ async def test_independent_review_saves_both_outputs_without_human_validation(tm
     assert current['visual_worker_reviews'][-1]['provider']=='colab:colab-2'
     assert worker.call_args.kwargs['exclude_provider']=='colab:colab-1'
     async def human_decides_during_inference(*args,**kwargs):
-        path=tmp_path/'technical_evidence_ledger.json'
-        data=json.loads(path.read_text(encoding='utf-8'))
-        data['entries'][0]['validation'].update(state='validated',actor='Human engineer')
-        path.write_text(json.dumps(data),encoding='utf-8')
+        from app.visual_graph import validate_graph
+        validate_graph(tmp_path,entry['entry_id'],old['graph_sha256'],image_hash,'Human engineer')
         return graph,'colab:colab-2','model2'
     worker.side_effect=human_decides_during_inference
     with pytest.raises(ValueError,match='review decision changed'):
