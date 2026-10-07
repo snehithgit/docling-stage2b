@@ -231,3 +231,84 @@ body:has(#quality-jobs) .format-note,
     min-height: 240px;
   }
 }
+
+
+/* Snapshot follow-up: the conversion history table is wider than the tablet
+   workspace. Keep Result/actions visible and let the remaining columns scroll. */
+.table-wrap:has(#jobs-body) {
+  position: relative;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scrollbar-gutter: stable;
+}
+.table-wrap:has(#jobs-body) table {
+  min-width: 820px;
+}
+.table-wrap:has(#jobs-body) th:last-child,
+.table-wrap:has(#jobs-body) td:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  background: #fff;
+  box-shadow: -10px 0 14px -14px rgba(31, 35, 48, .55);
+}
+.table-wrap:has(#jobs-body) th:last-child {
+  z-index: 3;
+  background: #f8f8fb;
+}
+
+/* Checkbox/radio controls inside audit filter grids must not inherit the
+   full-width text-input sizing used by search/select fields. */
+.vision-audit-filters label:has(> input[type="checkbox"]),
+.vision-audit-filters label:has(> input[type="radio"]) {
+  display: flex;
+  align-items: center;
+  align-self: end;
+  gap: 8px;
+  min-height: 42px;
+}
+.vision-audit-filters input[type="checkbox"],
+.vision-audit-filters input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
+  flex: 0 0 18px;
+  padding: 0;
+}
+
+/* Primary mobile navigation controls should match the touch sizing used by the
+   rest of the mobile UI. */
+@media (max-width: 900px) {
+  .hamburger,
+  .sidebar-close {
+    width: 44px;
+    height: 44px;
+  }
+  .sidebar-close {
+    top: 14px;
+    right: 10px;
+  }
+  .nav > a,
+  .nav-advanced > a,
+  .nav-advanced > summary {
+    min-height: 44px;
+  }
+}
+
+/* At phone width the base stylesheet turns tables into stacked cards; undo the
+   tablet sticky-column behavior there so each card remains natural. */
+@media (max-width: 720px) {
+  .table-wrap:has(#jobs-body) {
+    overflow: visible;
+    scrollbar-gutter: auto;
+  }
+  .table-wrap:has(#jobs-body) table {
+    min-width: 0;
+  }
+  .table-wrap:has(#jobs-body) th:last-child,
+  .table-wrap:has(#jobs-body) td:last-child {
+    position: static;
+    box-shadow: none;
+    background: inherit;
+  }
+}
