@@ -331,12 +331,25 @@ def search_visual_indices(
     Page affinity is only a weak re-rank signal after lexical matching; a visual
     is never admitted merely because it is adjacent to a text chunk.
     """
-    from .retrieval import search_indices
+    from .retrieval import search_indices, _load_index
+    from .retrieval_recovery import matches_requested_measurement
 
     if not index_paths:
         return []
     candidates = search_indices(index_paths, query, top_k=max(20, int(top_k) * 5))
     preferred = {int(page) for page in (preferred_pages or set())}
+    # A circuit label may contain a value but omit the device name printed
+    # elsewhere on the same page. Admit literal quantity matches only on pages
+    # already located by scoped text retrieval; page affinity alone is insufficient.
+    seen={(r.get('result_dir'),r.get('chunk_id')) for r in candidates}
+    for path in index_paths:
+        for row in _load_index(path):
+            key=(row.get('result_dir'),row.get('chunk_id'))
+            pages={_safe_int(p) for p in row.get('page_numbers') or []}
+            literal=' '.join(row.get('visible_text') or [])
+            if key not in seen and preferred.intersection(pages) and matches_requested_measurement(literal,query):
+                candidates.append({**row,'score':0.0,'retrieval_origin':'same_page_literal_measurement'})
+                seen.add(key)
     reranked: list[tuple[float, dict[str, Any]]] = []
     for row in candidates:
         score = float(row.get("score") or 0.0)
@@ -352,8 +365,9 @@ def search_visual_indices(
             row["page_affinity"] = "adjacent_page"
         else:
             row["page_affinity"] = "query_match"
+        row['requested_measurement_match']=matches_requested_measurement(' '.join(row.get('visible_text') or []),query)
         reranked.append((score, row))
-    reranked.sort(key=lambda pair: (-pair[0], str(pair[1].get("source_filename") or ""), int(pair[1].get("picture_index") or 0)))
+    reranked.sort(key=lambda pair: (not pair[1].get('requested_measurement_match',False), -pair[0], str(pair[1].get("source_filename") or ""), int(pair[1].get("picture_index") or 0)))
     output: list[dict[str, Any]] = []
     for rank, (score, row) in enumerate(reranked[: max(1, int(top_k))], start=1):
         item = dict(row)

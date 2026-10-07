@@ -4,9 +4,9 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Manual contents · Docling Auto-Convert</title>
-<link rel="stylesheet" href="/assets/styles.css?v=5.1.0.1" />
-<link rel="stylesheet" href="/assets/workflow.css?v=5.1.0.1" />
-<link rel="stylesheet" href="/assets/ui-audit-fixes.css?v=5.1.0.1" />
+<link rel="stylesheet" href="/assets/styles.css?v=5.1.0.2" />
+<link rel="stylesheet" href="/assets/workflow.css?v=5.1.0.2" />
+<link rel="stylesheet" href="/assets/ui-audit-fixes.css?v=5.1.0.2" />
 <style>
 #map-tree { max-height: 26rem; overflow: auto; padding: .5rem; }
 #map-tree details { padding: .35rem 0 .35rem .75rem; border-left: 2px solid #e8e5f4; }
@@ -41,7 +41,7 @@
   <section class="panel" id="map-detail" hidden><div class="doc-panel-body"><h2 id="map-section-title"></h2><p id="map-provenance"></p><div id="map-pages" class="document-actions"></div><h3>Change this section</h3><label>Section title<input id="map-title" class="text-input" /></label><label>Type of information<select id="map-category"></select></label><div class="technical-evidence-selection"><label>First PDF page<input id="map-start" class="text-input" type="number" min="1" /></label><label>Last PDF page<input id="map-end" class="text-input" type="number" min="1" /></label></div><label>Your name<input id="map-actor" class="text-input" maxlength="100" /></label><div class="technical-evidence-actions"><button id="map-save" class="primary-button">Save section change</button><button id="map-reset" class="secondary-button">Use detected section again</button></div><p>These changes organize search. They do not change the words or diagram relationships in the manual.</p><h3>Source passages in this section</h3><div id="map-chunks"></div><button id="map-more" type="button" hidden>Show more passages</button></div></section>
   <details class="panel"><summary>Checks, semantic chapter search and original contents clues</summary><div class="doc-panel-body"><p id="map-diagnostics"></p><button id="map-embeddings" class="secondary-button">Prepare semantic chapter search</button><p>This uses the existing embedding service, not a Colab vision worker. Unchanged chapter vectors are reused. Hybrid chapter-guided search can then use semantic section matches as well as heading terms.</p><div id="map-evidence"></div></div></details>
 </main></div>
-<script src="/assets/manual-map.js?v=5.1.0.1"></script><script src="/assets/nav.js?v=5.1.0.1"></script>
+<script src="/assets/manual-map.js?v=5.1.0.2"></script><script src="/assets/nav.js?v=5.1.0.2"></script>
 </body></html>
 
 

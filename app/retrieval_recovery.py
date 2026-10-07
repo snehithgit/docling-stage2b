@@ -17,6 +17,18 @@ EXPANSIONS = {
 STOP = set('why how what which where when does do did can could should would the a an of to for in on at is are be it this that my machine manual book please find tell me need information about reason cause causes remedy remedies troubleshooting fault alarm problem code error part number article spare parts operation procedure steps instructions specification specifications value rated safety warning caution section drawing reference description purpose function not working fix repair reset check'.split())
 ALIASES = {'overheating':'overheat','overheated':'overheat','overheats':'overheat','hot':'overheat','temp':'temperature','cooling':'cool','failed':'failure','fails':'failure'}
 
+def measurement_pattern(query):
+ """Requested quantity family, never a guessed value or device relationship."""
+ q=str(query).lower()
+ if re.search(r'\b(?:resistance|resistor|ohms?)\b|[ΩΩ]',q):return r'\d+(?:[.,]\d+)?\s*(?:[kKmM]?\s*[ΩΩ]|(?:kilo|mega)?ohms?\b)'
+ if re.search(r'\b(?:voltage|volts?)\b',q):return r'\d+(?:[.,]\d+)?\s*(?:[kKmM]?V\b|volts?\b)'
+ if re.search(r'\b(?:current|amps?|amperes?)\b',q):return r'\d+(?:[.,]\d+)?\s*(?:[muµ]?A\b|amperes?\b|amps?\b)'
+ return None
+
+def matches_requested_measurement(text, query):
+ pattern=measurement_pattern(query)
+ return bool(pattern and re.search(pattern,str(text),re.I))
+
 def question_plan(query):
  q=query.lower()
  if re.search(r'part\s*(?:no\.?|number)|article\s*(?:no\.?|number)|spare\s+part',q):intent='parts';roles=['identifier','description']
@@ -26,7 +38,7 @@ def question_plan(query):
  elif re.search(r'\balarm\b|fault code|error code',q):intent='alarm';roles=['meaning']
  elif re.search(r'\bhow (?:to|do)\b|\bprocedure\b|steps|\b(?:replace|install|adjust|calibrate|inspect)\b',q):intent='procedure';roles=['action']
  elif re.search(r'overheat|too hot|too (?:high|low)',q) and not re.search(r'\b(?:what|which)\b.*(?:temperature|pressure|value|limit|means?|meaning)',q):intent='troubleshooting';roles=['cause','action']
- elif re.search(r'\b(?:pressure|voltage|torque|rating|rated|limit|temperature|capacity|specification)\b',q):intent='specification';roles=['value']
+ elif re.search(r'\b(?:pressure|voltage|current|resistance|resistor|ohm|ohms|torque|rating|rated|limit|temperature|capacity|specification)\b',q):intent='specification';roles=['value']
  elif re.search(r'\b(?:safety|warning|caution|interlock)\b',q):intent='safety';roles=['constraint']
  elif re.search(r'\b(?:refer|reference|section|chapter|drawing)\b',q):intent='reference';roles=['reference']
  else:intent='definition';roles=['description']
@@ -53,7 +65,7 @@ def candidate_roles(row):
  if re.search(r'alarm|meaning|indicat|fault code|error code',text):roles.add('meaning')
  if (re.search(r'(?:part(?:\s*/\s*order)?|article|order)\s*(?:no\.?|number)|part_number',text) or _PARTS_NUMBER_COLUMN_RE.search(text)) and re.search(r'\d',text):roles.add('identifier')
  if len(_tokens(text))>=4:roles.add('description')
- if re.search(r'[-+]?\d+(?:[.,]\d+)?\s*(?:bar|pa|mpa|v|volt|a|amp|mm|cm|rpm|°c|deg|nm|n\.m|hz|kw|kg|m\b)',text):roles.add('value')
+ if re.search(r'[-+]?\d+(?:[.,]\d+)?\s*(?:bar|pa|mpa|v|volt|a|amp|mm|cm|rpm|°c|deg|nm|n\.m|hz|kw|kg|ohms?|[km]?[ΩΩ]|m\b)',text):roles.add('value')
  if re.search(r'warning|caution|must not|do not|interlock',text):roles.add('constraint')
  if re.search(r'(?:see|refer|section|chapter|drawing)\s+[A-Za-z]*\d',text):roles.add('reference')
  return roles

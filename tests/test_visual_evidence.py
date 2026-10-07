@@ -274,3 +274,38 @@ def test_human_useful_without_evidence_stays_out_of_rag_until_recovered(tmp_path
     row = json.loads((result_dir / "visual_evidence.jsonl").read_text(encoding="utf-8").splitlines()[0])
     assert row["rag_eligible"] is False
     assert row["rag_eligibility_reason"] == "human_accepted_evidence_recovery_required"
+
+
+def test_resistance_diagram_recovered_from_scoped_anchor_page_and_included_in_packet(tmp_path):
+    from app.retrieval_recovery import question_plan
+    assert question_plan('How much resistance is used in the manual call point?')['intent']=='specification'
+    book=tmp_path/'fire';book.mkdir()
+    diagram={'postprocess_job_id':21,'result_dir':'fire','source_filename':'Fire.pdf',
+      'chunk_id':'V-21-87','visual_evidence_id':'V-21-87','chunk_index':87,'picture_index':87,
+      'page_numbers':[30],'doc_items':['#/pictures/87'],'text':'Connection Switch Function 330 Ω',
+      'visible_text':['Connection','Switch Function','330 Ω'],'stage2c_status':'applied','unresolved':False,
+      'quality_score':90,'content_type':'visual_evidence'}
+    other={**diagram,'chunk_id':'V-21-88','visual_evidence_id':'V-21-88','picture_index':88,
+      'page_numbers':[2],'text':'Connection 470 Ω','visible_text':['470 Ω']}
+    path=book/'visual_evidence_index.jsonl'
+    path.write_text('\n'.join(json.dumps(r) for r in [diagram,other]),encoding='utf-8')
+    question='How much resistance is used in the manual call point?'
+    results=search_visual_indices([path],question,preferred_pages={30},top_k=3)
+    assert results[0]['picture_index']==87
+    assert results[0]['retrieval_origin']=='same_page_literal_measurement'
+    assert not any(r['picture_index']==88 for r in results)
+    text=[{'postprocess_job_id':21,'source_filename':'Fire.pdf','chunk_id':f'c{i}',
+       'page_numbers':[30],'doc_items':[f'#/texts/{i}'],'text':'MCP-C is a manual call point for indoor use.',
+       'quality_score':100} for i in range(6)]
+    sources,scope=prepare_generation_sources(text,question,visual_results=results,max_sources=5)
+    assert any(r['label'].startswith('V') and '330 Ω' in r['visible_text'] for r in sources)
+    assert any(r['label'].startswith('S') for r in sources)
+    assert '[V1]' in build_portable_prompt(question,sources)
+
+
+def test_same_page_measurement_recovery_does_not_admit_summary_only_values(tmp_path):
+    book=tmp_path/'fire';book.mkdir();path=book/'visual_evidence_index.jsonl'
+    path.write_text(json.dumps({'chunk_id':'v1','source_filename':'Fire.pdf','page_numbers':[30],
+       'text':'Connection switch function','visible_text':['Connection'],
+       'summary':'resistor 330 Ω','picture_index':1}),encoding='utf-8')
+    assert search_visual_indices([path],'manual call point resistance',preferred_pages={30})==[]

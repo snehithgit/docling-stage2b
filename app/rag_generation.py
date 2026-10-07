@@ -322,6 +322,10 @@ def prepare_generation_sources(
             priority += 3
         if role in {"adjacent_context", "structural_context"} and re.search(r"\b(?:warning|caution|n\.?b\.?|note)\b", content, re.I):
             priority += 0.5
+        from .retrieval_recovery import matches_requested_measurement
+        literal_value_text = ' '.join(row.get('visible_text') or []) if visual else content
+        if matches_requested_measurement(literal_value_text, question) and (visual or topical({**row, "text":content}, question)):
+            priority += 8
         candidates.append({**row, "evidence_role": role, "source_kind": "visual" if visual else "text",
                            "evidence_policy": reason, "validated_record": validated,
                            "packet_priority": priority})
