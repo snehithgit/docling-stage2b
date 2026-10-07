@@ -17,7 +17,9 @@ def _records(path: str, mtime: int, size: int) -> tuple[dict, ...]:
 
 
 @lru_cache(maxsize=64)
-def _source_rows(path: str, mtime: int, size: int) -> dict:
+def _source_rows(path: str, mtime: int, size: int, visual_mtime: int, visual_size: int) -> dict:
+    # The cache key includes both text and Stage 2C visual source files so a
+    # newly accepted/rejected technical picture cannot reuse stale provenance.
     return {row["chunk_id"]: row for row in read_source_rows(Path(path).parent)}
 
 
@@ -38,9 +40,15 @@ def bind_evidence(results: list[dict], visuals: list[dict], books: list[dict], p
             records = ()
         current = evidence_coverage(path.parent).get("source_current", False)
         index = path.parent / "retrieval_index.jsonl"
+        visual = path.parent / "visual_evidence.jsonl"
         try:
             stat = index.stat()
-            sources = _source_rows(str(index), stat.st_mtime_ns, stat.st_size)
+            visual_stat = visual.stat() if visual.exists() else None
+            sources = _source_rows(
+                str(index), stat.st_mtime_ns, stat.st_size,
+                visual_stat.st_mtime_ns if visual_stat else 0,
+                visual_stat.st_size if visual_stat else 0,
+            )
         except (OSError, ValueError, TypeError, KeyError):
             sources = {}
         ledgers[int(book["postprocess_job_id"])] = (book, records, current, sources)

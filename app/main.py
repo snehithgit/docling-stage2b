@@ -7091,6 +7091,15 @@ async def detect_book_technical_evidence(job_id: int) -> dict:
         index = result_dir / "retrieval_index.jsonl"
         if not index.is_file():
             raise HTTPException(status_code=409, detail="Build the Stage 3 index first.")
+        try:
+            await asyncio.to_thread(
+                ensure_visual_evidence_fresh,
+                result_dir,
+                postprocess_job_id=int(job_id),
+                source_filename=str(job.get("source_filename") or job.get("output_filename") or result_dir.name),
+            )
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=409, detail="Technical visual sources could not be refreshed safely.") from exc
         def detect():
             from .evidence_contract import read_source_rows
             rows = read_source_rows(result_dir)
@@ -7258,16 +7267,55 @@ async def book_technical_evidence(job_id: int) -> dict:
     job = await runtime.postprocess_store.get_job(job_id)
     if not job or not job.get("result_dir"):
         raise HTTPException(status_code=404, detail="Book not found.")
-    path = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name / "technical_evidence_ledger.json"
+    result_dir = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+    path = result_dir / "technical_evidence_ledger.json"
+    stage3_available = (result_dir / "retrieval_index.jsonl").is_file()
+    visual_sources_available = (result_dir / "visual_evidence.jsonl").is_file()
     if not path.is_file():
-        return {"postprocess_job_id": job_id, "ready": False, "entries": [], "summary": {}}
+        return {
+            "postprocess_job_id": job_id,
+            "ready": False,
+            "available": False,
+            "state": "not_scanned" if stage3_available else "stage3_missing",
+            "can_detect": stage3_available,
+            "stage3_available": stage3_available,
+            "visual_sources_available": visual_sources_available,
+            "entries": [],
+            "summary": {},
+            "candidate_counts": {"detected": 0, "picture_linked": 0, "graph_extracted": 0, "validated": 0},
+            "coverage": await asyncio.to_thread(evidence_coverage, result_dir),
+        }
     try:
         data = await asyncio.to_thread(_load_json_file, path)
         if data.get("schema") not in {EVIDENCE_SCHEMA, LEGACY_EVIDENCE_SCHEMA}:
             raise ValueError("Invalid evidence ledger")
     except (ValueError, OSError) as exc:
         raise HTTPException(status_code=409, detail="Technical evidence ledger is invalid.") from exc
-    return {"postprocess_job_id": job_id, "ready": True, **data, "available": True, "coverage": await asyncio.to_thread(evidence_coverage, path.parent)}
+    coverage = await asyncio.to_thread(evidence_coverage, result_dir)
+    active = [entry for entry in (data.get("entries") or []) if isinstance(entry, dict) and not entry.get("superseded")]
+    picture_entries = [
+        entry for entry in active
+        if any(str(ref).startswith("#/pictures/") for ref in (entry.get("doc_items") or []))
+    ]
+    counts = {
+        "detected": len(active),
+        "picture_linked": len(picture_entries),
+        "graph_extracted": sum(bool(entry.get("visual_extraction")) for entry in picture_entries),
+        "validated": sum((entry.get("validation") or {}).get("state") == "validated" for entry in picture_entries),
+    }
+    return {
+        "postprocess_job_id": job_id,
+        "ready": True,
+        **data,
+        "available": True,
+        "state": str(coverage.get("status") or "ready"),
+        "current": bool(coverage.get("source_current")),
+        "can_detect": stage3_available,
+        "stage3_available": stage3_available,
+        "visual_sources_available": visual_sources_available,
+        "candidate_counts": counts,
+        "coverage": coverage,
+    }
 
 
 @app.get("/api/postprocess/jobs/{job_id}/source-page/{page}")

@@ -117,3 +117,16 @@ def test_snapshot_followup_repairs_filter_controls_and_mobile_nav() -> None:
     assert ".hamburger," in css
     assert "width: 44px" in css
     assert "ui-audit-fixes.css?v=5.0.8.1" in script
+
+
+def test_technical_evidence_backfills_and_explains_empty_states() -> None:
+    page = _text("technical-evidence.html")
+    script = _text("technical-evidence.js")
+    assert 'id="te-detected"' in page
+    assert 'id="te-pictures"' in page
+    assert 'id="detect"' in page
+    assert "needsDetection(value)" in script
+    assert "/technical-evidence/detect" in script
+    assert "Build Stage 3" in script
+    assert "no current technical picture is linked" in script
+    assert "picture-linked candidate" in script

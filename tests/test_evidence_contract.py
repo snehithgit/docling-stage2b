@@ -4,7 +4,7 @@ import json
 import pytest
 
 from app.evidence_contract import (SCHEMA, LEGACY_SCHEMA, normalized_record, normalize_ledger,
-    evidence_coverage, migrate_ledger, source_signature, book_readiness, machine_readiness)
+    evidence_coverage, migrate_ledger, source_signature, book_readiness, machine_readiness, read_source_rows)
 from app.technical_evidence import write_evidence_ledger
 
 
@@ -174,3 +174,71 @@ def test_relationship_validation_requires_independent_check():
     record["relationships"] = [{"fault": "hot oil", "remedy": "cool"}]
     record["validation"]["relationships_checked"] = False
     assert not normalized_record(record)["answer_eligible"]
+
+
+def test_stage2c_technical_visuals_join_evidence_source_set(tmp_path):
+    (tmp_path / "retrieval_index.jsonl").write_text(json.dumps(source()) + "\n", encoding="utf-8")
+    technical = {
+        "visual_evidence_id": "V-16-000007",
+        "postprocess_job_id": 16,
+        "source_filename": "Manual.pdf",
+        "source_page": 8,
+        "picture_index": 7,
+        "docling_ref": "#/pictures/7",
+        "category": "engineering_drawing",
+        "search_text": "SW1 zero setting",
+        "verification_verdict": "TECHNICAL_USEFUL",
+        "human_visual_decision": None,
+    }
+    decorative = {
+        **technical,
+        "visual_evidence_id": "V-16-000008",
+        "picture_index": 8,
+        "docling_ref": "#/pictures/8",
+        "search_text": "Company logo",
+        "verification_verdict": "DECORATIVE_OR_LOW_VALUE",
+    }
+    (tmp_path / "visual_evidence.jsonl").write_text(
+        json.dumps(technical) + "\n" + json.dumps(decorative) + "\n",
+        encoding="utf-8",
+    )
+
+    rows = read_source_rows(tmp_path)
+    by_id = {row["chunk_id"]: row for row in rows}
+    assert "CHK-1" in by_id
+    assert "V-16-000007" in by_id
+    assert "V-16-000008" not in by_id
+    assert by_id["V-16-000007"]["doc_items"] == ["#/pictures/7"]
+
+    write_evidence_ledger(tmp_path, rows)
+    ledger = json.loads((tmp_path / "technical_evidence_ledger.json").read_text(encoding="utf-8"))
+    picture_entries = [
+        row for row in ledger["entries"]
+        if not row.get("superseded") and "#/pictures/7" in (row.get("doc_items") or [])
+    ]
+    assert len(picture_entries) == 1
+    assert picture_entries[0]["validation_status"] == "needs_visual_parse"
+    assert evidence_coverage(tmp_path)["source_current"] is True
+
+
+def test_visual_source_change_marks_technical_coverage_stale(tmp_path):
+    (tmp_path / "retrieval_index.jsonl").write_text(json.dumps(source()) + "\n", encoding="utf-8")
+    visual = {
+        "visual_evidence_id": "V-16-000007",
+        "postprocess_job_id": 16,
+        "source_filename": "Manual.pdf",
+        "source_page": 8,
+        "picture_index": 7,
+        "docling_ref": "#/pictures/7",
+        "category": "engineering_drawing",
+        "search_text": "SW1 zero setting",
+        "verification_verdict": "TECHNICAL_USEFUL",
+    }
+    path = tmp_path / "visual_evidence.jsonl"
+    path.write_text(json.dumps(visual) + "\n", encoding="utf-8")
+    write_evidence_ledger(tmp_path, read_source_rows(tmp_path))
+    assert evidence_coverage(tmp_path)["source_current"] is True
+
+    visual["search_text"] = "SW1 zero setting changed after a new Stage 2C visual decision"
+    path.write_text(json.dumps(visual) + "\n", encoding="utf-8")
+    assert evidence_coverage(tmp_path)["status"] == "stale"

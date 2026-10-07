@@ -5,6 +5,7 @@ from .structured_tables import structured_hash
 import hashlib
 import json
 import math
+import re
 import time
 import uuid
 from collections import Counter
@@ -114,12 +115,84 @@ def atomic_json(path: Path, data: dict) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _read_jsonl(path: Path) -> list[dict]:
+    if not path.is_file():
+        return []
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    if any(not isinstance(row, dict) for row in rows):
+        raise ValueError(f"Malformed source index: {path.name}")
+    return rows
+
+
+def _technical_visual_source_rows(result_dir: Path) -> list[dict]:
+    """Expose current Stage 2C technical visuals as source-bound graph candidates.
+
+    visual_evidence.jsonl is derived from the authoritative Stage 2C correction
+    ledger and carries exact Docling picture/page provenance. Decorative images
+    stay excluded; unresolved technical visuals remain candidates because graph
+    extraction + human pixel review is precisely how they are resolved.
+    """
+    output: list[dict] = []
+    for row in _read_jsonl(result_dir / "visual_evidence.jsonl"):
+        ref = str(row.get("docling_ref") or "")
+        if not re.fullmatch(r"#/pictures/\d+", ref):
+            continue
+        human = str(row.get("human_visual_decision") or "").strip().lower()
+        verdict = str(row.get("verification_verdict") or "").strip().upper()
+        if human in {"decorative", "not_useful"}:
+            continue
+        if human not in {"technical", "useful"} and verdict != "TECHNICAL_USEFUL":
+            continue
+        page = row.get("source_page", row.get("page"))
+        try:
+            page = int(page)
+        except (TypeError, ValueError):
+            page = None
+        text = str(row.get("search_text") or "").strip()
+        if not text:
+            parts = [
+                str(row.get("category") or "").replace("_", " "),
+                *(str(value) for value in (row.get("visible_text") or [])),
+                *(str(value) for value in (row.get("visible_objects") or [])),
+                str(row.get("summary") or ""),
+            ]
+            text = "\n".join(part.strip() for part in parts if part and part.strip()).strip()
+        if not text:
+            text = "Technical image"
+        chunk_id = str(row.get("visual_evidence_id") or "").strip()
+        if not chunk_id:
+            continue
+        output.append({
+            "postprocess_job_id": row.get("postprocess_job_id"),
+            "source_filename": row.get("source_filename") or row.get("book"),
+            "chunk_id": chunk_id,
+            "text": text,
+            "page_numbers": [page] if page and page > 0 else [],
+            "doc_items": [ref],
+            "headings": [],
+            "content_type": "visual_evidence",
+            "visual_evidence_id": chunk_id,
+            "picture_index": row.get("picture_index"),
+            "verification_verdict": row.get("verification_verdict"),
+            "human_visual_decision": row.get("human_visual_decision"),
+            "visual_source": True,
+        })
+    return output
+
+
 def read_source_rows(result_dir: Path) -> list[dict]:
-    rows = [json.loads(line) for line in (result_dir / "retrieval_index.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
-    if any(not isinstance(row, dict) or not isinstance(row.get("chunk_id"), str) for row in rows):
-        raise ValueError("Malformed retrieval source index")
+    """Return the complete technical-evidence source set.
+
+    Text/table chunks come from retrieval_index.jsonl. Technical pictures come
+    from visual_evidence.jsonl so Artifact Audit decisions and graph review share
+    the same Docling picture provenance instead of becoming disconnected silos.
+    """
+    rows = _read_jsonl(result_dir / "retrieval_index.jsonl")
+    rows.extend(_technical_visual_source_rows(result_dir))
+    if any(not isinstance(row.get("chunk_id"), str) or not row["chunk_id"] for row in rows):
+        raise ValueError("Malformed technical evidence source identity")
     if len({row["chunk_id"] for row in rows}) != len(rows):
-        raise ValueError("Duplicate retrieval source identity")
+        raise ValueError("Duplicate technical evidence source identity")
     return rows
 
 
@@ -163,7 +236,8 @@ def migrate_ledger(result_dir: Path) -> dict:
 
 @lru_cache(maxsize=128)
 def _coverage_snapshot(ledger_path: str, ledger_mtime: int, ledger_size: int,
-                       index_mtime: int, index_size: int) -> dict:
+                       index_mtime: int, index_size: int,
+                       visual_mtime: int, visual_size: int) -> dict:
     path = Path(ledger_path)
     data = json.loads(path.read_text(encoding="utf-8"))
     normalized = normalize_ledger(data)
@@ -194,9 +268,14 @@ def evidence_coverage(result_dir: Path) -> dict:
     try:
         stat = path.stat()
         index = result_dir / "retrieval_index.jsonl"
+        visual = result_dir / "visual_evidence.jsonl"
         source = index.stat() if index.exists() else None
-        result = _coverage_snapshot(str(path), stat.st_mtime_ns, stat.st_size,
-                                    source.st_mtime_ns if source else 0, source.st_size if source else 0)
+        visual_source = visual.stat() if visual.exists() else None
+        result = _coverage_snapshot(
+            str(path), stat.st_mtime_ns, stat.st_size,
+            source.st_mtime_ns if source else 0, source.st_size if source else 0,
+            visual_source.st_mtime_ns if visual_source else 0, visual_source.st_size if visual_source else 0,
+        )
         return {**result, "states": dict(result["states"])}
     except (OSError, ValueError, TypeError, KeyError):
         return {**base, "status": "invalid", "source_current": False, "reason": "evidence_ledger_unreadable"}
