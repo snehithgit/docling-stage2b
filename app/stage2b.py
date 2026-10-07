@@ -2824,8 +2824,11 @@ class Stage2BWorker:
         if provider == "colab":
             provider = await self._select_colab_provider(exclude_provider=exclude_provider)
             if not provider:
-                raise RuntimeError("No independent selected Colab vision worker is available")
-        if provider == exclude_provider:
+                raise RuntimeError("No independent Colab vision worker is available" if exclude_provider else "No selected Colab vision worker is available")
+        if provider == exclude_provider and not preferred_provider:
+            provider = await self._select_colab_provider(exclude_provider=exclude_provider)
+            if not provider:raise RuntimeError('Independent review worker unavailable; select another worker')
+        elif provider == exclude_provider:
             raise RuntimeError('Independent review worker unavailable; select another worker')
         owner = "visual-graph:" + str(evidence_job["generation"])
         if not await self._reserve_provider(provider, owner):
