@@ -263,15 +263,32 @@ class ReviewAssistantStore:
     async def claim_next(self, worker_id: str, allowed_types: set[str]) -> dict[str, Any] | None:
         return await self._run(self._claim_sync, worker_id, allowed_types)
 
+    async def unfinished_normal_reviews(self) -> set[tuple[int, str, str]]:
+        return await self._run(self._unfinished_normal_reviews_sync)
+
+    def _unfinished_normal_reviews_sync(self):
+        with self._conn() as conn:
+            return {(int(r[0]), str(r[1]), str(r[2])) for r in conn.execute(
+                """SELECT postprocess_job_id,entry_id,review_type FROM review_assistant_jobs
+                   WHERE is_current=1 AND review_type IN ('text','vision')
+                     AND status IN ('pending','processing')""")}
+
     def _claim_sync(self, worker_id: str, allowed_types: set[str]) -> dict[str, Any] | None:
         if not allowed_types:
             return None
         placeholders = ",".join("?" for _ in allowed_types)
         args = [*sorted(allowed_types), _utcnow()]
         with self._conn() as conn:
-            row = conn.execute(f"""SELECT * FROM review_assistant_jobs
+            row = conn.execute(f"""SELECT * FROM review_assistant_jobs AS candidate
                 WHERE is_current=1 AND status='pending' AND review_type IN ({placeholders})
                   AND (next_attempt_at IS NULL OR next_attempt_at<=?)
+                  AND (entry_signature LIKE 'manual:%' OR NOT EXISTS (
+                    SELECT 1 FROM review_assistant_jobs AS normal
+                    WHERE normal.is_current=1 AND normal.status IN ('pending','processing')
+                      AND normal.postprocess_job_id=candidate.postprocess_job_id
+                      AND normal.entry_id=candidate.entry_id
+                      AND candidate.review_type='anomaly_' || normal.review_type
+                      AND normal.review_type IN ('text','vision')))
                 ORDER BY CASE WHEN entry_signature LIKE 'manual:%'
                     AND review_type IN ('anomaly_text','anomaly_vision','anomaly_structural') THEN 0 ELSE 1 END,
                     CASE review_type
@@ -302,8 +319,22 @@ class ReviewAssistantStore:
             if claim is not None:
                 guard += " AND claimed_by=? AND attempt_count=? AND entry_signature=?"
                 args.extend([claim["claimed_by"], claim["attempt_count"], claim["entry_signature"]])
-            return bool(conn.execute("""UPDATE review_assistant_jobs SET status=?, completed_at=?, processing_seconds=?,
+            completed = bool(conn.execute("""UPDATE review_assistant_jobs SET status=?, completed_at=?, processing_seconds=?,
                          result_json=?, error_type=NULL, error_message=NULL WHERE id=?""" + guard, args).rowcount)
+            if completed and not discarded:
+                # A stored normal recommendation changes anomaly evidence.
+                # Retire pre-publication automatic audits in the same transaction
+                # before another worker can claim one; discovery recreates only
+                # the anomalies still present in the updated ledger.
+                conn.execute("""UPDATE review_assistant_jobs SET is_current=0
+                    WHERE is_current=1 AND entry_signature NOT LIKE 'manual:%'
+                      AND status='pending' AND EXISTS (
+                        SELECT 1 FROM review_assistant_jobs AS normal
+                        WHERE normal.id=? AND normal.review_type IN ('text','vision')
+                          AND normal.postprocess_job_id=review_assistant_jobs.postprocess_job_id
+                          AND normal.entry_id=review_assistant_jobs.entry_id
+                          AND review_assistant_jobs.review_type='anomaly_' || normal.review_type)""", (job_id,))
+            return completed
 
     async def mark_retryable(self, job_id: int, exc: Exception, delay: int = 30) -> None:
         await self._run(self._retry_sync, job_id, type(exc).__name__, str(exc), delay)
@@ -474,7 +505,31 @@ class ReviewAssistantService:
                         pending_candidates.append((jid, result_dir_name, entry, review_type))
                 # Human-reviewed findings require an explicit re-review request.
                 # Existing manual requests survive automatic candidate retirement.
-            await self._store.sync_candidates(pending_candidates)
+            # Publish normal work first. Automatic anomaly audits must observe
+            # its saved result, rather than race it and repeat a stale audit.
+            normal_candidates = [c for c in pending_candidates if c[3] in {'text', 'vision'}
+                                 and settings.get(c[3] + '_worker_ids')]
+            valid = {key for key in valid if key[2] not in {'text', 'vision'}
+                     or settings.get(key[2] + '_worker_ids')}
+            # Remove disabled normal queues before checking dependencies, so
+            # anomaly-only assignments cannot be blocked by orphaned work.
+            await self._store.retire_missing(valid)
+            await self._store.sync_candidates(normal_candidates)
+            unfinished = await self._store.unfinished_normal_reviews()
+            anomaly_candidates = []
+            for candidate in pending_candidates:
+                jid, _, entry, review_type = candidate
+                if not review_type.startswith('anomaly_'):
+                    continue
+                kind = review_type.removeprefix('anomaly_')
+                assigned = settings.get(kind + '_worker_ids')
+                if assigned and (jid, str(entry['entry_id']), kind) in unfinished:
+                    # Retirement also removes older automatic audits; explicit
+                    # human re-review requests remain protected by the store.
+                    valid.discard((jid, str(entry['entry_id']), review_type))
+                    continue
+                anomaly_candidates.append(candidate)
+            await self._store.sync_candidates(anomaly_candidates)
             await self._store.retire_missing(valid)
         return self._machine_blockers == 0
 
