@@ -71,11 +71,17 @@ def bind_evidence(results: list[dict], visuals: list[dict], books: list[dict], p
         copy.pop("technical_evidence", None)
         copy.pop("technical_source_current", None)
         copy.pop("generation_blocked_reason", None)
+        copy.pop("visual_literal_current", None)
         records, current, sources = records_for(row)
         matches = []
         if visual:
             refs = set(row.get("doc_items") or [])
             matches = [r for r in records if refs.intersection(ref for ref in r.get("doc_items", []) if str(ref).startswith("#/pictures/"))]
+            source=sources.get(row.get('visual_evidence_id') or row.get('chunk_id'))
+            copy['visual_literal_current']=bool(source and source.get('rag_eligible') and source.get('stage2c_status')=='applied'
+                and not source.get('unresolved') and source.get('visible_text')==row.get('visible_text')
+                and source.get('page_numbers')==row.get('page_numbers') and source.get('doc_items')==row.get('doc_items')
+                and not any(r.get('validation',{}).get('state') in {'rejected','error','superseded'} for r in matches))
             if any(r.get("validation", {}).get("state") in {"rejected", "error"} or (r.get("validation_status") == "needs_visual_parse" and (not current or not is_validated_record(r))) for r in matches):
                 copy["generation_blocked_reason"] = "visual_relationships_unvalidated"
         else:
@@ -122,8 +128,10 @@ def bind_evidence(results: list[dict], visuals: list[dict], books: list[dict], p
     return [bind(row) for row in results], [bind(row, True) for row in visuals]
 
 
-def generation_policy(row: dict) -> tuple[bool, str, dict | None]:
+def generation_policy(row: dict, *, allow_literal_visual: bool = False) -> tuple[bool, str, dict | None]:
     """Literal text stays usable; derived relationships require validation proof."""
+    if allow_literal_visual and row.get('visual_literal_current') and row.get('generation_blocked_reason')=='visual_relationships_unvalidated':
+        return True, 'literal_visual_labels_only_relationships_unvalidated', None
     if row.get("generation_blocked_reason"):
         return False, row["generation_blocked_reason"], None
     record = row.get("technical_evidence")
