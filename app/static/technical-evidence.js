@@ -9,14 +9,17 @@
       el('coverage-summary').textContent = 'Coverage has not been measured. Check coverage to find source gaps.';
       return;
     }
-    const queue = report.recovery_queue || [];
-    el('coverage-summary').textContent = `${report.status === 'stale' ? 'Previous check is stale. ' : ''}${queue.length} items need source review · ${(report.dispositions || {}).represented_literal || 0} already represented as text · ${(report.dispositions || {}).excluded_page_furniture || 0} page headers/footers excluded. Reference coverage does not verify answer accuracy.`;
+    const queue = report.review_groups || report.recovery_queue || [];
+    el('coverage-summary').textContent = `${report.status === 'stale' ? 'Previous check is stale. ' : ''}${queue.length} review targets · ${(report.dispositions || {}).represented_literal || 0} already represented as text · ${(report.dispositions || {}).excluded_page_furniture || 0} page headers/footers excluded · ${(report.dispositions || {}).excluded_human_visual_decision || 0} items excluded by human visual decisions · ${report.visual_groups_missing_review_route || 0} visual targets lack a review route. Reference coverage does not verify answer accuracy.`;
     for (const gap of queue.slice(0, 30)) {
       const page = (gap.pages || [])[0];
       if (!page) continue;
       const link = document.createElement('a');
-      link.href = `/docling-review?job=${encodeURIComponent(el('book').value)}&page=${page}`;
-      link.textContent = `${gap.priority === 'high' ? 'Priority · ' : ''}Page ${page} · ${gap.kind} · ${gap.text_preview || gap.ref}`;
+      link.href = gap.recovery_route === 'visual_review'
+        ? gap.visual_entry_id ? `/vision-audit?book=${encodeURIComponent(el('book').value)}&entry=${encodeURIComponent(gap.visual_entry_id)}` : `/docling-review?job=${encodeURIComponent(el('book').value)}&page=${page}`
+        : gap.structural_route_id ? `/${gap.structural_code === 'TABLE_ROW_COLLAPSE' ? 'table-repair' : 'structural-review'}?job=${encodeURIComponent(el('book').value)}&route=${encodeURIComponent(gap.structural_route_id)}`
+        : `/docling-review?job=${encodeURIComponent(el('book').value)}&page=${page}`;
+      link.textContent = `${gap.priority === 'high' ? 'Priority · ' : ''}Page ${page} · ${gap.recovery_route === 'visual_review' ? 'visual review' : gap.kind} · ${(gap.related_source_refs || []).length || 1} related items · ${gap.text_preview || gap.ref}`;
       el('coverage-gaps').appendChild(link);
     }
   }
