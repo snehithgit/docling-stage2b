@@ -6400,6 +6400,30 @@ async def stage3_build_book(postprocess_job_id: int) -> dict:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+@app.post("/api/stage3/books/{postprocess_job_id}/recover-prose")
+async def recover_book_prose(postprocess_job_id: int, apply: bool = False) -> dict:
+    from .source_recovery import recover_existing_prose
+    job = await runtime.postprocess_store.get_job(postprocess_job_id)
+    if not job or not job.get("result_dir"):
+        raise HTTPException(status_code=404, detail="Book not found.")
+    directory = Path(runtime.config.processed_dir) / Path(str(job["result_dir"])).name
+    async with runtime.book_lifecycle_locks.get(postprocess_job_id):
+        rows = await runtime.stage2b_store.list_book_jobs_raw(postprocess_job_id)
+        s2c = stage2c_freshness(directory, rows, rule_version=STAGE2C_RULE_VERSION,
+                              artifact_sweep_required=bool(getattr(runtime.config, "stage2b_artifact_sweep_required_for_finalize", True)))
+        s3 = stage3_freshness(directory, s2c, stage3_rule_version=STAGE3_RULE_VERSION, retrieval_rule_version=RETRIEVAL_RULE_VERSION)
+        if not s3.get("ready") or (runtime.stage3_builder.state_for(postprocess_job_id) or {}).get("status") in {"queued", "running"}:
+            raise HTTPException(status_code=409, detail="Finish current correction and indexing work before recovery.")
+        try:
+            manifest = await asyncio.to_thread(_load_json_file, directory / "source_manifest.json")
+            source = Path(runtime.config.output_dir) / Path(str(manifest["converted_zip"])).name
+            result = await asyncio.to_thread(recover_existing_prose, directory, source,
+                                           max_tokens=runtime.config.stage3_chunk_max_tokens, apply=apply)
+        except (OSError, ValueError, KeyError) as exc:
+            raise HTTPException(status_code=409, detail="Recovery stopped; source or corrections require inspection.") from exc
+    return {"postprocess_job_id": postprocess_job_id, **result}
+
+
 @app.get("/api/stage3/books/{postprocess_job_id}/status")
 async def stage3_book_status(postprocess_job_id: int) -> dict:
     job = await runtime.postprocess_store.get_job(postprocess_job_id)

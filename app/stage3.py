@@ -20,6 +20,7 @@ from .postprocess_store import PostprocessStore
 from .pipeline_state import stage2c_semantic_signature, stage2a_human_review_summary, stage2c_freshness, stage2c_output_signature, verification_rows_for_stage2c, verification_signature
 from .technical_evidence import write_evidence_ledger
 from .source_coverage import coverage_pipeline
+from .source_recovery import omitted_prose_chunks
 from .retrieval import RETRIEVAL_RULE_VERSION, annotate_retrieval_rows, _write_jsonl_atomic as _write_retrieval_jsonl
 from .stage2c import STAGE2C_RULE_VERSION, human_review_summary, rebuild_chunk_overlays, verifier_audit_summary
 from .book_lifecycle_lock import LifecycleLockGetter
@@ -408,6 +409,11 @@ class Stage3ChunkBuilder:
             if picture_chunks:
                 chunks.extend(picture_chunks)
             state["picture_child_evidence_chunks"] = len(picture_chunks)
+
+            recovered_prose = await asyncio.to_thread(omitted_prose_chunks, working_document, chunks,
+                                                     max_tokens=config.stage3_chunk_max_tokens)
+            chunks.extend(recovered_prose)
+            state["omitted_prose_recovered"] = len(recovered_prose)
 
             source_sha = str(manifest.get("converted_zip_sha256") or "")
             output_rows: list[dict[str, Any]] = []
@@ -1222,6 +1228,7 @@ class Stage3ChunkBuilder:
         *,
         max_tokens: int = 256,
         repeat_table_header: bool = True,
+        additional_chunks: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Re-run only the deterministic Stage 3 post-validator and retrieval index.
 
@@ -1240,6 +1247,7 @@ class Stage3ChunkBuilder:
             value = json.loads(line)
             if isinstance(value, dict):
                 chunks.append(value)
+        chunks.extend(additional_chunks or [])
         optimized, post_stats = cls._post_validate_chunks(
             chunks,
             max_tokens=max_tokens,
