@@ -39,6 +39,13 @@
 
     <div id="status" class="status-message page-feedback" role="status" aria-live="polite"></div>
 
+    <section class="vision-audit-summary" aria-label="Technical evidence totals">
+      <div class="vision-audit-stat"><span>Detected</span><strong id="te-detected">0</strong></div>
+      <div class="vision-audit-stat"><span>Picture-linked</span><strong id="te-pictures">0</strong></div>
+      <div class="vision-audit-stat"><span>Graphs extracted</span><strong id="te-extracted">0</strong></div>
+      <div class="vision-audit-stat"><span>Validated</span><strong id="te-validated">0</strong></div>
+    </section>
+
     <section class="panel queue-panel" aria-labelledby="evidence-source-title">
       <div class="panel-heading">
         <div><p class="eyebrow">Source</p><h2 id="evidence-source-title">Choose evidence</h2><p class="format-note">Load one manual, then select the source item and picture you want to inspect.</p></div>
@@ -46,7 +53,10 @@
       <div class="doc-panel-body">
         <div class="technical-evidence-controls">
           <div class="field"><label for="book">Manual</label><select id="book"></select></div>
-          <button class="secondary-button" id="load" type="button">Load candidates</button>
+          <div class="technical-evidence-actions">
+            <button class="secondary-button" id="load" type="button">Load candidates</button>
+            <button class="secondary-button" id="detect" type="button">Refresh detection</button>
+          </div>
         </div>
         <div class="technical-evidence-selection">
           <div class="field"><label for="entry">Source item</label><select id="entry"></select></div>
