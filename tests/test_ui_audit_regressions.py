@@ -80,6 +80,7 @@ def test_wide_operational_tables_are_keyboard_scrollable() -> None:
     script = _text("nav.js")
     assert ".table-wrap:has(#quality-jobs)" in script
     assert ".table-wrap:has(#verification-books)" in script
+    assert ".table-wrap:has(#jobs-body)" in script
     assert "node.tabIndex = 0" in script
     assert "use arrow keys to scroll horizontally" in script
 
@@ -90,6 +91,7 @@ def test_shared_audit_css_hides_closed_drawer_and_preserves_table_actions() -> N
     assert "visibility: hidden" in css
     assert ".table-wrap:has(#quality-jobs)" in css
     assert ".table-wrap:has(#verification-books)" in css
+    assert ".table-wrap:has(#jobs-body)" in css
     assert "position: sticky" in css
 
 
@@ -105,3 +107,13 @@ def test_human_review_textareas_have_accessible_labels() -> None:
     page = _text("review.html")
     assert '<label class="visually-hidden" for="original">Raw Docling target text</label>' in page
     assert '<label class="visually-hidden" for="correction">Human correction text</label>' in page
+
+
+def test_snapshot_followup_repairs_filter_controls_and_mobile_nav() -> None:
+    css = _text("ui-audit-fixes.css")
+    script = _text("nav.js")
+    assert '.vision-audit-filters input[type="checkbox"]' in css
+    assert "width: 18px" in css
+    assert ".hamburger," in css
+    assert "width: 44px" in css
+    assert "ui-audit-fixes.css?v=5.0.8.1" in script
