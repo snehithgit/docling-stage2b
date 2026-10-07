@@ -1,0 +1,11 @@
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+function harness(status='current'){
+ const nodes=new Map(),requests=[];
+ const make=()=>({value:'',children:[],append(...items){this.children.push(...items);this.options=this.children;if(this.value===''&&items[0]?.value!==undefined)this.value=String(items[0].value)},replaceChildren(){this.children=[];this.options=[];this.value=''}});
+ const el=id=>{if(!nodes.has(id))nodes.set(id,make());return nodes.get(id)};
+ const section={section_id:'s1',title:'Safety <script>',breadcrumb:['Safety <script>'],category:'SAFETY',start_page:2,end_page:3,chunk_ids:['c1'],children:[],structure_source:['chunk_heading']};
+ vm.runInNewContext(fs.readFileSync('app/static/manual-map.js','utf8'),{document:{getElementById:el,createElement:make},location:{search:'?job=7'},URLSearchParams,fetch:async(url,options)=>{requests.push({url,options});return {ok:true,json:async()=>url==='/api/retrieval/status'?{books:[{postprocess_job_id:7,source_filename:'Manual.pdf'}]}:url.includes('/chunks')?{rows:[{text:'<img> literal source',page_numbers:[2]}],total:1}:{status,sections:[section],categories:['SAFETY'],diagnostics:{sections:1,assigned_chunks:1,total_chunks:1,unresolved:[]}}}}});return {el,requests};
+}
+const settle=()=>new Promise(r=>setImmediate(r));
+test('manual map renders source text literally and opens source pages for the selected manual',async()=>{const {el,requests}=harness();await settle();const tree=el('map-tree').children[0];assert.equal(tree.children[0].textContent,'Safety <script> · PDF pages 2–3');await tree.children[1].onclick();await settle();assert.equal(el('map-chunks').children[1].textContent,'<img> literal source');assert.equal(el('map-pages').children[0].href,'/docling-review?job=7&page=2');assert.ok(requests.some(r=>r.url.includes('/7/manual-structure/s1/chunks')));});
+test('stale maps refuse section editing until rebuilt',async()=>{const {el,requests}=harness('stale');await settle();await el('map-tree').children[0].children[1].onclick();await settle();assert.equal(el('map-status').textContent,'Refresh this map first.');assert.equal(el('map-detail').hidden,true);assert.ok(!requests.some(r=>r.url.includes('/chunks')));});

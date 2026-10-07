@@ -509,6 +509,8 @@ class Stage3ChunkBuilder:
             await asyncio.to_thread(self._write_jsonl_atomic, result_dir / "chunks.jsonl", output_rows)
             await asyncio.to_thread(write_evidence_ledger, result_dir, retrieval_rows)
             await asyncio.to_thread(_write_retrieval_jsonl, result_dir / "retrieval_index.jsonl", retrieval_rows)
+            from .manual_structure import rebuild_structure
+            await asyncio.to_thread(rebuild_structure, result_dir)
             await asyncio.to_thread(_write_retrieval_jsonl, result_dir / "table_evidence.jsonl", [row for row in retrieval_rows if row.get("stitched_table")])
             quality_tmp = result_dir / "retrieval_quality.json.tmp"
             quality_tmp.write_text(json.dumps(retrieval_quality, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -1283,6 +1285,8 @@ class Stage3ChunkBuilder:
         cls._write_jsonl_atomic(chunks_path, optimized)
         write_evidence_ledger(result_dir, retrieval_rows)
         _write_retrieval_jsonl(result_dir / "retrieval_index.jsonl", retrieval_rows)
+        from .manual_structure import rebuild_structure
+        rebuild_structure(result_dir)
         _write_retrieval_jsonl(result_dir / "table_evidence.jsonl", [row for row in retrieval_rows if row.get("stitched_table")])
         tmp = result_dir / "retrieval_quality.json.tmp"
         tmp.write_text(json.dumps(retrieval_quality, indent=2, ensure_ascii=False), encoding="utf-8")

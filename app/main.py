@@ -544,6 +544,7 @@ def _require_exact_retrieval_scope(postprocess_job_id: int | None, equipment_id:
 
 
 class RetrievalSearchRequest(BaseModel):
+    structure_mode: str = Field(default="auto", pattern="^(auto|current|structural)$")
     query: str = Field(min_length=2, max_length=1000)
     top_k: int = Field(default=5, ge=1, le=20)
     postprocess_job_id: int | None = None
@@ -557,6 +558,7 @@ class RetrievalSearchRequest(BaseModel):
 
 
 class RetrievalGenerateRequest(BaseModel):
+    structure_mode: str = Field(default="auto", pattern="^(auto|current|structural)$")
     query: str = Field(min_length=2, max_length=1000)
     provider: str = Field(pattern="^(pi5|oneplus|groq|colab)$")
     top_k: int = Field(default=5, ge=1, le=10)
@@ -571,6 +573,7 @@ class RetrievalGenerateRequest(BaseModel):
 
 
 class RetrievalPromptExportRequest(BaseModel):
+    structure_mode: str = Field(default="auto", pattern="^(auto|current|structural)$")
     query: str = Field(min_length=2, max_length=1000)
     top_k: int = Field(default=5, ge=1, le=10)
     postprocess_job_id: int | None = None
@@ -5641,7 +5644,26 @@ async def _retrieval_results_for_question(
     equipment_id: str | None,
     top_k: int,
     retrieval_mode: str = "hybrid",
+    structure_mode: str = "auto",
 ) -> tuple[list[dict], int, list[dict], dict]:
+    use_structure = structure_mode == "structural" or (structure_mode == "auto" and runtime.config.retrieval_structural_enabled)
+    requested_k = top_k
+    if use_structure:
+        top_k = max(top_k, 20)
+    async def structural_finish(results, paths, scope):
+        if not use_structure:
+            scope['structure'] = {'mode':'current','global_fallback':True}
+            return results
+        from .structural_retrieval import hierarchical_results
+        query_vector = (scope.get('hybrid') or {}).pop('_structural_query_vector', None)
+        results, scope['structure'] = await asyncio.to_thread(
+            hierarchical_results, paths, query, results, top_k=requested_k,
+            section_limit=runtime.config.retrieval_structural_section_limit,
+            section_candidates=runtime.config.retrieval_structural_candidate_depth,
+            boost=runtime.config.retrieval_structural_boost,
+            adjacent=runtime.config.retrieval_structural_adjacent_enabled,
+            query_vector=query_vector, model=runtime.config.retrieval_embedding_model)
+        return results
     books = await _retrieval_books()
     selected: list[dict] = []
     paths: list[Path] = []
@@ -5674,6 +5696,7 @@ async def _retrieval_results_for_question(
         } for row in selected]
         from .retrieval_recovery import recover_scoped_evidence
         results, scope["evidence_recovery"] = await asyncio.to_thread(recover_scoped_evidence, paths, query, results, top_k)
+        results = await structural_finish(results, paths, scope)
         return results, len(paths), selected, scope
 
     if equipment_id:
@@ -5708,6 +5731,7 @@ async def _retrieval_results_for_question(
                 candidate_depth=runtime.config.retrieval_hybrid_candidate_depth,
                 rrf_k=runtime.config.retrieval_hybrid_rrf_k,
                 top_k=top_k,
+                include_query_vector=use_structure,
             )
         except HybridIndexNotReady as exc:
             raise HTTPException(status_code=409, detail=f"Machine hybrid index is not ready. Use ‘Build machine embeddings’ first. {exc}") from exc
@@ -5727,13 +5751,15 @@ async def _retrieval_results_for_question(
     } for row in selected]
     from .retrieval_recovery import recover_scoped_evidence
     results, scope["evidence_recovery"] = await asyncio.to_thread(recover_scoped_evidence, paths, query, results, top_k)
+    results = await structural_finish(results, paths, scope)
     return results, len(paths), selected, scope
 
 
 @app.post("/api/retrieval/search")
 async def retrieval_search(update: RetrievalSearchRequest) -> dict:
     results, searched_books, selected_books, scope = await _retrieval_results_for_question(
-        update.query, update.postprocess_job_id, update.equipment_id, update.top_k, update.retrieval_mode
+        update.query, update.postprocess_job_id, update.equipment_id, update.top_k, update.retrieval_mode,
+        **({'structure_mode':update.structure_mode} if update.structure_mode != 'auto' else {})
     )
     visual_results = await _visual_results_for_question(
         update.query, results, update.postprocess_job_id, min(5, update.top_k),
@@ -5758,7 +5784,8 @@ async def retrieval_prompt_bundle(update: RetrievalPromptExportRequest) -> dict:
     top_k = min(int(update.top_k), int(runtime.config.rag_answer_max_sources))
     candidate_k = min(20, max(top_k, top_k * 4))
     results, searched_books, selected_books, scope = await _retrieval_results_for_question(
-        update.query, update.postprocess_job_id, update.equipment_id, candidate_k, update.retrieval_mode
+        update.query, update.postprocess_job_id, update.equipment_id, candidate_k, update.retrieval_mode,
+        **({'structure_mode':update.structure_mode} if update.structure_mode != 'auto' else {})
     )
     visual_results = await _visual_results_for_question(
         update.query, results, update.postprocess_job_id, min(5, candidate_k),
@@ -5793,7 +5820,8 @@ async def _execute_retrieval_generation(update: RetrievalGenerateRequest) -> dic
     top_k = min(int(update.top_k), int(runtime.config.rag_answer_max_sources))
     candidate_k = min(20, max(top_k, top_k * 4))
     results, searched_books, selected_books, scope = await _retrieval_results_for_question(
-        update.query, update.postprocess_job_id, update.equipment_id, candidate_k, update.retrieval_mode
+        update.query, update.postprocess_job_id, update.equipment_id, candidate_k, update.retrieval_mode,
+        **({'structure_mode':update.structure_mode} if update.structure_mode != 'auto' else {})
     )
     visual_results = await _visual_results_for_question(
         update.query, results, update.postprocess_job_id, min(5, candidate_k),
@@ -6874,6 +6902,95 @@ async def _docling_review_source_pdf(job: dict) -> tuple[Path, dict]:
     if pdf_path.suffix.lower() != ".pdf" or not pdf_path.is_file():
         raise HTTPException(status_code=404, detail="Original PDF is not available for Docling page review.")
     return pdf_path, (conversion or {})
+
+
+class ManualStructureOverrideRequest(BaseModel):
+    actor: str = Field(min_length=1, max_length=100)
+    title: str | None = Field(default=None, max_length=300)
+    category: str | None = None
+    start_page: int | None = Field(default=None, ge=1)
+    end_page: int | None = Field(default=None, ge=1)
+    reset: bool = False
+
+
+async def _manual_structure_directory(job_id):
+    job = await runtime.postprocess_store.get_job(int(job_id))
+    if not job or not job.get('result_dir'):
+        raise HTTPException(status_code=404, detail='Manual not found')
+    directory = Path(runtime.config.processed_dir) / Path(job['result_dir']).name
+    if not (directory / 'retrieval_index.jsonl').is_file():
+        raise HTTPException(status_code=409, detail='Build searchable text for this manual first.')
+    return job, directory
+
+
+@app.get('/api/postprocess/jobs/{job_id}/manual-structure')
+async def manual_structure_get(job_id: int):
+    from .manual_structure import structure_status, CATEGORIES
+    _, directory = await _manual_structure_directory(job_id)
+    return {**await asyncio.to_thread(structure_status, directory), 'categories':list(CATEGORIES)}
+
+
+@app.post('/api/postprocess/jobs/{job_id}/manual-structure/rebuild')
+async def manual_structure_rebuild(job_id: int):
+    from .manual_structure import rebuild_structure
+    async with runtime.book_lifecycle_locks.get(job_id):
+        job, directory = await _manual_structure_directory(job_id)
+        try:
+            pdf_path, _ = await _docling_review_source_pdf(job)
+        except HTTPException:
+            pdf_path = None
+        report = await asyncio.to_thread(rebuild_structure, directory, pdf_path=pdf_path)
+    return {**report, 'status':'current', 'original_content_changed':False, 'model_calls':0}
+
+
+@app.get('/api/postprocess/jobs/{job_id}/manual-structure/{section_id}/chunks')
+async def manual_structure_chunks(job_id: int, section_id: str, offset: int = 0):
+    from .manual_structure import structure_status, read_rows, chunk_context
+    _, directory = await _manual_structure_directory(job_id)
+    report = await asyncio.to_thread(structure_status, directory)
+    if report['status'] != 'current':
+        raise HTTPException(status_code=409, detail='Rebuild the manual map first.')
+    section = next((s for s in report['sections'] if s['section_id']==section_id), None)
+    if not section:
+        raise HTTPException(status_code=404, detail='Section not found')
+    ids = set(section['chunk_ids'])
+    rows = [chunk_context(r, report) for r in await asyncio.to_thread(read_rows, directory) if r['chunk_id'] in ids]
+    offset = max(0, offset)
+    return {'rows':rows[offset:offset+20], 'total':len(rows), 'offset':offset, 'source_text_unchanged':True}
+
+
+@app.post('/api/postprocess/jobs/{job_id}/manual-structure/embeddings')
+async def manual_structure_embeddings(job_id: int):
+    from .manual_structure import build_section_embeddings
+    async with runtime.book_lifecycle_locks.get(job_id):
+        _, directory = await _manual_structure_directory(job_id)
+        try:
+            return await asyncio.to_thread(build_section_embeddings, directory,
+                base_url=runtime.config.retrieval_embedding_url, model=runtime.config.retrieval_embedding_model,
+                document_prefix=runtime.config.retrieval_embedding_document_prefix,
+                timeout_seconds=runtime.config.retrieval_embedding_timeout_seconds)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except EmbeddingServiceError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.put('/api/postprocess/jobs/{job_id}/manual-structure/{section_id}')
+async def manual_structure_override(job_id: int, section_id: str, update: ManualStructureOverrideRequest):
+    from .manual_structure import save_override
+    async with runtime.book_lifecycle_locks.get(job_id):
+        _, directory = await _manual_structure_directory(job_id)
+        try:
+            report = await asyncio.to_thread(save_override, directory, section_id,
+                update.model_dump(exclude_none=True, exclude={'actor','reset'}), actor=update.actor, reset=update.reset)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {**report, 'status':'current', 'original_content_changed':False}
+
+
+@app.get('/manual-map')
+async def manual_structure_page():
+    return FileResponse(STATIC_DIR / 'manual-map.html')
 
 
 @app.get("/api/postprocess/jobs/{job_id}/docling-review")

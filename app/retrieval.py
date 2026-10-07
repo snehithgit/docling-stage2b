@@ -1715,7 +1715,7 @@ def _adjacent_context(docs: list[dict[str, Any]], idx: int, *, limit: int = 2) -
     ]
 
 
-def search_indices(index_paths: list[Path], query: str, *, top_k: int = 5) -> list[dict[str, Any]]:
+def search_indices(index_paths: list[Path], query: str, *, top_k: int = 5, allowed_chunks: set | None = None) -> list[dict[str, Any]]:
     q_tokens = _tokens(query)
     if _LOAD_QUERY_RE.search(query or ""):
         # Generic lifting-load terminology expansion.  Retrieval may surface
@@ -1727,7 +1727,8 @@ def search_indices(index_paths: list[Path], query: str, *, top_k: int = 5) -> li
     docs: list[dict[str, Any]] = []
     for path in index_paths:
         if path.is_file():
-            docs.extend(_load_index(path))
+            docs.extend(row for row in _load_index(path) if allowed_chunks is None
+                        or (str(path.parent), str(row.get('chunk_id'))) in allowed_chunks)
     if not docs:
         return []
 

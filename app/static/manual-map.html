@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Manual contents · Docling Auto-Convert</title>
+<link rel="stylesheet" href="/assets/styles.css?v=5.1.0" />
+<link rel="stylesheet" href="/assets/workflow.css?v=5.1.0" />
+<link rel="stylesheet" href="/assets/ui-audit-fixes.css?v=5.1.0" />
+</head>
+<body class="ui29 ui-audit-surface">
+<a class="skip-link" href="#main-content">Skip to main content</a>
+<header class="mobile-topbar">
+  <button class="hamburger" id="menu-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg></button>
+  <a class="brand" href="/" aria-label="Docling Auto-Convert"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a>
+</header>
+<div id="nav-backdrop" hidden></div>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <button class="sidebar-close" id="sidebar-close" type="button" aria-label="Close navigation">×</button>
+    <a class="brand" href="/" aria-label="Docling Auto-Convert"><span class="brand-mark">D</span><span class="brand-copy">Docling<strong>Auto-Convert</strong></span></a>
+    <div class="sidebar-label">Workspace</div>
+    <nav class="nav" aria-label="Main navigation">
+      <a href="/">Books</a><a href="/processing">Processing</a><a href="/review-center">Review</a><a href="/retrieval">Ask</a><a href="/settings">Settings</a>
+      <details class="nav-advanced"><summary>Advanced</summary><a href="/errors">Errors &amp; diagnostics</a><a href="/quality">Extraction quality</a><a href="/chunks">Chunk inspection</a><a href="/artifact-audit">Artifact audit</a><a href="/technical-evidence">Technical evidence</a><a href="/convert">One-off conversion</a></details>
+    </nav>
+    <div class="sidebar-footer"><span class="footer-dot"></span><span><strong>Local pipeline</strong><br><a href="/processing">Processing overview</a></span></div>
+  </aside>
+
+<main class="main-content technical-evidence-main" id="main-content">
+  <header class="page-header"><div><p class="eyebrow">Manual contents</p><h1>Browse your manual by chapter</h1><p class="subtle">See where information belongs, open its source pages and correct a chapter range if needed.</p></div><a class="secondary-button" href="/retrieval">Ask a question</a></header>
+  <section class="panel"><div class="doc-panel-body"><p>This map uses the headings in searchable text. PDF bookmarks and contents entries are compared with those headings; conflicting entries remain visible for checking. Building it does not rerun OCR or change your book.</p><div class="technical-evidence-controls"><label>Manual<select id="map-book"></select></label><button id="map-rebuild" class="primary-button" type="button">Build or refresh chapter map</button></div><p id="map-status" role="status" aria-live="polite"></p><p>Page numbers here are PDF pages. Printed page numbers in a contents list may be different. A chapter match helps search; it does not prove an answer.</p></div></section>
+  <section class="panel"><div class="doc-panel-body"><h2>Chapters and sections</h2><p>Open a section to see its passages or change its title, category and PDF page range. Your saved changes survive rebuilding.</p><div id="map-tree"></div></div></section>
+  <section class="panel" id="map-detail" hidden><div class="doc-panel-body"><h2 id="map-section-title"></h2><p id="map-provenance"></p><div id="map-pages" class="document-actions"></div><h3>Change this section</h3><label>Section title<input id="map-title" class="text-input" /></label><label>Type of information<select id="map-category"></select></label><div class="technical-evidence-selection"><label>First PDF page<input id="map-start" class="text-input" type="number" min="1" /></label><label>Last PDF page<input id="map-end" class="text-input" type="number" min="1" /></label></div><label>Your name<input id="map-actor" class="text-input" maxlength="100" /></label><div class="technical-evidence-actions"><button id="map-save" class="primary-button">Save section change</button><button id="map-reset" class="secondary-button">Use detected section again</button></div><p>These changes organize search. They do not change the words or diagram relationships in the manual.</p><h3>Source passages in this section</h3><div id="map-chunks"></div><button id="map-more" type="button" hidden>Show more passages</button></div></section>
+  <details class="panel"><summary>Checks, semantic chapter search and original contents clues</summary><div class="doc-panel-body"><p id="map-diagnostics"></p><button id="map-embeddings" class="secondary-button">Prepare semantic chapter search</button><p>This uses the existing embedding service, not a Colab vision worker. Unchanged chapter vectors are reused. Hybrid chapter-guided search can then use semantic section matches as well as heading terms.</p><div id="map-evidence"></div></div></details>
+</main></div>
+<script src="/assets/manual-map.js?v=5.1.0"></script><script src="/assets/nav.js?v=5.1.0"></script>
+</body></html>
+
+

@@ -2,7 +2,7 @@
   if (!document.querySelector('link[href*="ui-audit-fixes.css"]')) {
     const link = document.createElement('link');
     link.rel = 'stylesheet';
-    link.href = '/assets/ui-audit-fixes.css?v=5.0.9.6';
+    link.href = '/assets/ui-audit-fixes.css?v=5.1.0';
     document.head.appendChild(link);
   }
 })();
@@ -98,7 +98,7 @@
 })();
 
 (() => {
-  const version = "5.0.9.6";
+  const version = "5.1.0";
   const sidebar = document.querySelector('.sidebar');
   if (!sidebar) return;
   const badge = document.createElement('div');
@@ -143,7 +143,7 @@
   ];
   const groups = {
     '/add-book':'/', '/book':'/', '/queue':'/processing', '/verification':'/processing',
-    '/anomaly-review':'/review-center', '/text-audit':'/review-center', '/review':'/review-center',
+    '/manual-map':'/', '/anomaly-review':'/review-center', '/text-audit':'/review-center', '/review':'/review-center',
     '/vision-audit':'/review-center', '/table-repair':'/review-center', '/structural-review':'/review-center',
     '/reading-order-review':'/review-center', '/docling-review':'/review-center',
     '/workers':'/settings', '/review-workers':'/settings', '/oneplus':'/settings',

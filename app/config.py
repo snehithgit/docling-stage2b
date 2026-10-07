@@ -309,6 +309,11 @@ class AppConfig:
     # Stage 3 hybrid retrieval. Embeddings are generated once per book and
     # combined only inside the explicitly selected book/equipment scope.
     retrieval_hybrid_enabled: bool = True
+    retrieval_structural_enabled: bool = False
+    retrieval_structural_section_limit: int = 5
+    retrieval_structural_candidate_depth: int = 15
+    retrieval_structural_boost: float = 0.03
+    retrieval_structural_adjacent_enabled: bool = True
     retrieval_embedding_url: str = "http://embeddings:80"
     retrieval_embedding_model: str = "BAAI/bge-small-en-v1.5"
     retrieval_embedding_query_prefix: str = "Represent this sentence for searching relevant passages: "
@@ -545,6 +550,10 @@ class AppConfig:
             raise ValueError("Retrieval hybrid candidate depth must be between 10 and 500")
         if not 1 <= int(self.retrieval_hybrid_rrf_k) <= 500:
             raise ValueError("Retrieval RRF k must be between 1 and 500")
+        if not 1 <= self.retrieval_structural_section_limit <= 20 or not 1 <= self.retrieval_structural_candidate_depth <= 100:
+            raise ValueError("Structural retrieval candidate limits are out of range")
+        if not 0 <= self.retrieval_structural_boost <= 0.25:
+            raise ValueError("Structural preference must be between 0 and 0.25")
         if not self.oneplus_ssh_host.strip():
             raise ValueError("OnePlus SSH host cannot be empty")
         if not 1 <= int(self.oneplus_ssh_port) <= 65535:
@@ -642,6 +651,7 @@ class AppConfig:
             "rag_answer_local_max_tokens": self.rag_answer_local_max_tokens,
             "rag_answer_cloud_max_tokens": self.rag_answer_cloud_max_tokens,
             "retrieval_hybrid_enabled": self.retrieval_hybrid_enabled,
+            "retrieval_structural_enabled": self.retrieval_structural_enabled,
             "retrieval_embedding_url": self.retrieval_embedding_url,
             "retrieval_embedding_model": self.retrieval_embedding_model,
             "retrieval_hybrid_candidate_depth": self.retrieval_hybrid_candidate_depth,
