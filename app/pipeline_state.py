@@ -42,6 +42,87 @@ def verification_rows_for_stage2c(rows: list[dict[str, Any]], *, artifact_sweep_
             selected.append(row)
     return selected
 
+def required_verification_state(
+    rows: list[dict[str, Any]],
+    *,
+    discovery_current: bool,
+    artifact_sweep_required: bool = True,
+) -> dict[str, Any]:
+    """Canonical Stage 2B dependency state used by sequencing and UI.
+
+    Rows excluded by verification_rows_for_stage2c are advisory/additive and
+    must not block Stage 2C. A book with no required rows is complete only after
+    route discovery is known current; this is the clean zero-route case.
+    """
+    selected = verification_rows_for_stage2c(
+        rows, artifact_sweep_required=artifact_sweep_required
+    )
+    counts = {
+        status: sum(str(row.get("status") or "") == status for row in selected)
+        for status in ("pending", "processing", "completed", "failed")
+    }
+    ready = (
+        counts["completed"] == len(selected)
+        and counts["pending"] == 0
+        and counts["processing"] == 0
+        and counts["failed"] == 0
+        and (bool(selected) or bool(discovery_current))
+    )
+    return {
+        "ready": bool(ready),
+        "total": len(selected),
+        **counts,
+        "discovery_current": bool(discovery_current),
+        "raw_total": len(rows),
+        "excluded_rows": max(0, len(rows) - len(selected)),
+    }
+
+
+def resolve_pipeline_stage(
+    *,
+    stage2a_ready: bool,
+    verification: dict[str, Any],
+    stage2c_ready: bool,
+    stage2c_reason: str | None = None,
+    structural_review_pending: int = 0,
+    verifier_audit_pending: int = 0,
+    verifier_audit_blocking: int = 0,
+    audit_bypassed: bool = False,
+    stage3_ready: bool = False,
+    stage3_reason: str | None = None,
+) -> dict[str, Any]:
+    """Return the single operator-facing next stage for the canonical sequence."""
+    if not stage2a_ready:
+        return {"next_stage": "stage2a", "blocked_reason": None}
+    if not verification.get("ready"):
+        if int(verification.get("failed") or 0):
+            reason = "Verification has failed required routes; retry them before finalization."
+        elif not verification.get("discovery_current") and not int(verification.get("raw_total") or 0):
+            reason = "Verification routes are still being prepared for this book."
+        else:
+            reason = "Required verification must finish before Stage 2C."
+        return {"next_stage": "stage2b", "blocked_reason": reason}
+    if not stage2c_ready:
+        return {"next_stage": "stage2c", "blocked_reason": stage2c_reason}
+    if int(structural_review_pending or 0) > 0:
+        return {
+            "next_stage": "stage2a_human_review",
+            "blocked_reason": f"{int(structural_review_pending)} structural review item(s) must be resolved before Stage 3.",
+        }
+    if int(verifier_audit_blocking or 0) > 0:
+        return {
+            "next_stage": "verifier_audit",
+            "blocked_reason": f"{int(verifier_audit_blocking)} verifier audit item(s) require a human decision before Stage 3.",
+        }
+    if not stage3_ready:
+        return {"next_stage": "stage3", "blocked_reason": stage3_reason}
+    return {
+        "next_stage": "post_stage3",
+        "blocked_reason": None,
+        "verifier_audit_pending": int(verifier_audit_pending or 0),
+        "audit_bypassed": bool(audit_bypassed),
+    }
+
 def verification_signature(rows: list[dict[str, Any]]) -> str:
     """Stable signature of the current Stage 2B outputs for one book."""
     normalized: list[dict[str, Any]] = []
