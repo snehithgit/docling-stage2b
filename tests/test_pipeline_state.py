@@ -6,7 +6,7 @@ import pytest
 
 from app.config import AppConfig
 from app.events import EventBroker
-from app.pipeline_state import stage2c_freshness, stage2c_output_signature, stage3_freshness, verification_rows_for_stage2c, verification_signature
+from app.pipeline_state import stage2c_freshness, stage2c_output_signature, stage3_freshness, verification_rows_for_stage2c, verification_signature, required_verification_state, resolve_pipeline_stage
 from app.stage2b import Stage2BWorker
 from app.stage2c import STAGE2C_RULE_VERSION
 from app.stage3 import Stage3ChunkBuilder
@@ -40,6 +40,62 @@ def _write_current_stage2c(result_dir: Path, rows):
     }), encoding="utf-8")
 
 
+
+
+def test_required_verification_state_handles_clean_zero_route_books():
+    state = required_verification_state([], discovery_current=True, expected_total=0)
+    assert state["ready"] is True
+    assert state["total"] == 0
+    assert state["discovery_current"] is True
+
+
+def test_required_verification_state_fails_closed_on_missing_raw_snapshot():
+    state = required_verification_state([], discovery_current=True, expected_total=2)
+    assert state["ready"] is False
+    assert state["snapshot_missing"] is True
+
+
+def test_optional_unfinished_artifact_sweep_does_not_block_stage2c():
+    rows = [{
+        "id": 9, "route_id": "AV000009", "code": "FULL_TECHNICAL_VISUAL",
+        "status": "pending", "target": "oneplus",
+    }]
+    state = required_verification_state(
+        rows, discovery_current=True, artifact_sweep_required=False, expected_total=1
+    )
+    assert state["ready"] is True
+    assert state["total"] == 0
+    assert state["excluded_rows"] == 1
+
+
+def test_pipeline_stage_resolver_exposes_verifier_audit_before_stage3():
+    verification = {"ready": True, "failed": 0, "raw_total": 1, "discovery_current": True}
+    state = resolve_pipeline_stage(
+        stage2a_ready=True,
+        verification=verification,
+        stage2c_ready=True,
+        structural_review_pending=0,
+        verifier_audit_pending=3,
+        verifier_audit_blocking=2,
+        stage3_ready=False,
+    )
+    assert state["next_stage"] == "verifier_audit"
+    assert "2 verifier audit item" in state["blocked_reason"]
+
+
+def test_testing_bypass_keeps_unresolved_audit_visible_but_allows_stage3():
+    verification = {"ready": True, "failed": 0, "raw_total": 1, "discovery_current": True}
+    state = resolve_pipeline_stage(
+        stage2a_ready=True,
+        verification=verification,
+        stage2c_ready=True,
+        structural_review_pending=0,
+        verifier_audit_pending=3,
+        verifier_audit_blocking=0,
+        audit_bypassed=True,
+        stage3_ready=False,
+    )
+    assert state["next_stage"] == "stage3"
 
 
 def test_human_visual_recovery_rows_do_not_change_stage2c_signature_inputs():

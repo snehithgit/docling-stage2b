@@ -192,6 +192,10 @@ def test_book_workflow_uses_automatic_stage2c_and_contextual_audit_gate():
     assert "stage2c_auto_finalize" in js
     assert 'id="book-audit-bypass-panel"' not in html
     assert "showBypass = stage2bDone" in js
+    assert "pipeline.stage2b_ready === true" in js
+    assert "pipeline.next_stage === 'verifier_audit'" in js
+    assert "Verifier review required" in js
+    assert "Resolve verifier audit" in js
 
 
 def test_verification_exposes_manual_crossover_and_optional_audit():

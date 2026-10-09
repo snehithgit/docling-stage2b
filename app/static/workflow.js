@@ -32,6 +32,10 @@
       return {code:'Verify', label:'Verification required', tone:'active', next:'Open'};
     }
     if (Number(pipeline.stage2a_human_review_pending || 0)) return {code:'Review', label:'Source review needs your decision', tone:'attention', next:'Review'};
+    if (pipeline.next_stage === 'verifier_audit') {
+      const count = Number(pipeline.verifier_audit_blocking || pipeline.verifier_audit_pending || 0);
+      return {code:'Review', label:`${count} verifier audit item${count === 1 ? '' : 's'} need a decision`, tone:'attention', next:'Review'};
+    }
     if (pipeline.next_stage === 'stage2c') return {code:'Finalize', label:'Corrections/enrichment rebuilding', tone:'active', next:'Open'};
     if (pipeline.next_stage === 'stage3') return {code:'Chunk', label:'Stage 3 chunks rebuilding', tone:'active', next:'Open'};
     if (pipeline.next_stage === 'assign_machine') return {code:'Machine', label:'Assign manual to its machine', tone:'attention', next:'Open'};

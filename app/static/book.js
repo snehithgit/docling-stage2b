@@ -68,8 +68,16 @@
   function render() {
     if (!book) return;
     const c = counts();
-    const stage2bDone = c.total === 0 ? book.status === 'completed' : c.pending===0 && c.processing===0 && c.failed===0 && c.completed===c.total;
-    const stage2bFailed = c.failed > 0;
+    const pipeline = book.pipeline || {};
+    const requiredVerification = pipeline.required_verification || {};
+    const requiredPending = Number(requiredVerification.pending ?? c.pending);
+    const requiredProcessing = Number(requiredVerification.processing ?? c.processing);
+    const requiredFailed = Number(requiredVerification.failed ?? c.failed);
+    const stage2bDone = pipeline.stage2b_ready === true || (
+      pipeline.stage2b_ready === undefined &&
+      (c.total === 0 ? book.status === 'completed' : c.pending===0 && c.processing===0 && c.failed===0 && c.completed===c.total)
+    );
+    const stage2bFailed = requiredFailed > 0;
     const reviewRequired = Number(auditGate?.review_required ?? review?.review_required ?? book.review_required ?? 0);
     const automationUnresolved = Number(review?.automation_unresolved ?? reviewRequired);
     const auditBypassed = auditGate?.bypassed_for_testing === true;
@@ -79,7 +87,6 @@
     const textCloudPaused = stage2bStatus?.text_provider?.provider === 'groq' && stage2bStatus?.text_provider?.quota?.paused === true;
     const visionCloudPaused = stage2bStatus?.vision_provider?.provider === 'groq' && stage2bStatus?.vision_provider?.quota?.paused === true;
     const quotaPaused = textCloudPaused || visionCloudPaused;
-    const pipeline = book.pipeline || {};
     window.EvidenceReadiness?.render($('book-readiness'), book.readiness);
     const stage2cBuilt = pipeline.stage2c_ready === true;
     const chunksBuilt = pipeline.stage3_ready === true;
@@ -89,7 +96,7 @@
     $('book-title').textContent = String(book.source_filename || 'Book').replace(/\.zip$/i,'');
     if ($('book-manual-map')) $('book-manual-map').href = `/manual-map?job=${jobId}`;
     $('book-subtitle').textContent = `${book.source_kind === 'converted_folder' ? 'Imported Docling ZIP' : 'Converted source'} · Raw Docling output remains immutable.`;
-    $('book-status-tag').textContent = machineEmbeddingReady ? 'Machine search ready' : chunksBuilt && !machineAssigned ? 'Assign machine next' : chunksBuilt ? 'Machine embeddings next' : stage2cBuilt ? 'Stage 3 next' : quotaPaused && (c.pending || c.processing) ? 'Cloud quota paused' : c.processing ? 'Verification running' : stage2bDone ? 'Auto finalizing' : 'In workflow';
+    $('book-status-tag').textContent = pipeline.next_stage === 'stage2a_human_review' ? 'Source review required' : pipeline.next_stage === 'verifier_audit' ? 'Verifier audit required' : machineEmbeddingReady ? 'Machine search ready' : chunksBuilt && !machineAssigned ? 'Assign machine next' : chunksBuilt ? 'Machine embeddings next' : stage2cBuilt ? 'Stage 3 next' : quotaPaused && (requiredPending || requiredProcessing) ? 'Cloud quota paused' : requiredProcessing ? 'Verification running' : stage2bDone ? 'Auto finalizing' : 'In workflow';
     $('book-status-tag').className = `workflow-tag ${stage2bFailed ? 'attention' : ''}`;
     const deleteButton = $('delete-book-button');
     if (deleteButton) {
@@ -124,9 +131,9 @@
 
     let bState='blocked', bLabel='Waiting', bActions='';
     if (book.status==='completed') {
-      if (c.processing) { bState='active'; bLabel='In progress'; bActions=`<a class="secondary-button" href="/verification?job=${jobId}">Watch device verification</a>`; }
+      if (requiredProcessing) { bState='active'; bLabel='In progress'; bActions=`<a class="secondary-button" href="/verification?job=${jobId}">Watch device verification</a>`; }
       else if (stage2bFailed) { bState='blocked'; bLabel='Needs attention'; bActions=`<a class="primary-button" href="/verification?job=${jobId}">Fix failed checks</a>`; }
-      else if (c.pending) {
+      else if (requiredPending) {
         if (textCloudPaused && !visionCloudPaused && c.onePending > 0) { bState='active'; bLabel='Text cloud paused · vision can continue'; bActions=`<button class="primary-button" data-action="verify">Continue available verification</button><a class="secondary-button" href="/verification?job=${jobId}">View quota status</a>`; }
         else if (visionCloudPaused && !textCloudPaused && c.piPending > 0) { bState='active'; bLabel='Vision cloud paused · text can continue'; bActions=`<button class="primary-button" data-action="verify">Continue available verification</button><a class="secondary-button" href="/verification?job=${jobId}">View quota status</a>`; }
         else if (quotaPaused) { bState='blocked'; bLabel='Groq quota paused'; bActions=`<a class="primary-button" href="/verification?job=${jobId}">View quota status</a>`; }
@@ -153,7 +160,9 @@
 
     let chState='blocked', chLabel='Waiting', chActions='';
     if (stage2cBuilt) {
-      if (['running','queued'].includes(book.stage3_status)) { chState='active'; chLabel='Building'; }
+      if (pipeline.next_stage === 'stage2a_human_review') { chState='blocked'; chLabel='Source review required'; chActions=`<a class="primary-button" href="/quality?job=${jobId}">Resolve source review</a>`; }
+      else if (pipeline.next_stage === 'verifier_audit') { chState='blocked'; chLabel='Verifier review required'; chActions=`<a class="primary-button" href="/vision-audit?book=${jobId}">Resolve verifier audit</a>`; }
+      else if (['running','queued'].includes(book.stage3_status)) { chState='active'; chLabel='Building'; }
       else if (chunksBuilt) { chState='done'; chLabel='Ready'; chActions=`<a class="secondary-button" href="/api/postprocess/jobs/${jobId}/artifact/chunks.jsonl" target="_blank">Download chunks</a><button class="secondary-button" data-action="chunks">Rebuild chunks</button>`; }
       else { chState='active'; chLabel='Ready'; chActions=`<button class="primary-button" data-action="chunks">Build Hybrid chunks</button>`; }
     }
