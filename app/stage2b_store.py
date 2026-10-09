@@ -1409,10 +1409,20 @@ class Stage2BStore:
     async def list_books(self) -> list[dict[str, Any]]:
         return await self._run(self._list_books_sync)
 
-    def _list_books_sync(self) -> list[dict[str, Any]]:
+    async def get_book_summary(self, postprocess_job_id: int) -> dict[str, Any] | None:
+        """Return the current aggregate verification state for one book only."""
+        rows = await self._run(self._list_books_sync, int(postprocess_job_id))
+        return rows[0] if rows else None
+
+    def _list_books_sync(self, postprocess_job_id: int | None = None) -> list[dict[str, Any]]:
         with self._connection() as conn:
+            where = "WHERE is_current=1"
+            params: tuple[Any, ...] = ()
+            if postprocess_job_id is not None:
+                where += " AND postprocess_job_id=?"
+                params = (int(postprocess_job_id),)
             rows = conn.execute(
-                """SELECT postprocess_job_id, result_dir, output_filename,
+                f"""SELECT postprocess_job_id, result_dir, output_filename,
                           -- Legacy worker-lane counters are preserved for existing API consumers.
                           -- FULL_TECHNICAL_VISUAL is a shared artifact pool even though older rows
                           -- may be stored under either historical worker target.
@@ -1451,9 +1461,10 @@ class Stage2BStore:
                           SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed,
                           COUNT(*) AS total
                    FROM verification_jobs
-                   WHERE is_current=1
+                   {where}
                    GROUP BY postprocess_job_id, result_dir, output_filename
-                   ORDER BY postprocess_job_id DESC"""
+                   ORDER BY postprocess_job_id DESC""",
+                params,
             ).fetchall()
             return [dict(row) for row in rows]
 
