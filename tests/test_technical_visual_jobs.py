@@ -34,6 +34,16 @@ async def test_queue_deduplicates_and_records_assigned_worker_before_completion(
     finally:await queue.stop()
 
 
+def test_active_job_identity_includes_evidence_entry(tmp_path):
+    queue=TechnicalVisualJobs(str(tmp_path/'jobs.db'),None)
+    first=queue.enqueue({'book':21,'entry':'entry-a','picture':7,'kind':'read'},'entry-a')
+    assert queue.enqueue({'book':21,'entry':'entry-a','picture':7,'kind':'read'},'same-entry')==first
+    second=queue.enqueue({'book':21,'entry':'entry-b','picture':7,'kind':'read'},'entry-b')
+    assert second!=first
+    jobs=queue.list(21)['jobs']
+    assert {job['payload']['entry'] for job in jobs}=={'entry-a','entry-b'}
+
+
 @pytest.mark.asyncio
 async def test_interrupt_resumes_and_busy_jobs_can_be_cancelled_without_restarting_worker(tmp_path):
     async def unavailable(payload,progress):raise RuntimeError('Selected worker is busy or unavailable')
