@@ -3278,7 +3278,10 @@ async def documents() -> dict:
         equipment_id = str(equipment.get("equipment_id") or "").strip()
         if not equipment_id:
             continue
-        manual_items = list(equipment.get("manuals") or [])
+        manual_items = [
+            manual for manual in (equipment.get("manuals") or [])
+            if manual.get("active_for_rag", True)
+        ]
         index_paths: list[Path] = []
         manual_types: dict[int, str] = {}
         complete = bool(manual_items)
@@ -3320,42 +3323,13 @@ async def documents() -> dict:
 
     for row in rows:
         job_id = int(row.get("id") or 0)
-        pipeline = row.get("pipeline") or {}
         owner = owner_by_job.get(job_id)
-        if owner:
-            equipment_id = str(owner.get("equipment_id") or "")
-            pipeline["machine_assigned"] = True
-            pipeline["machine_id"] = equipment_id
-            pipeline["machine_name"] = owner.get("name")
-            machine_status = equipment_embedding_status.get(equipment_id, {"ready": False, "reason": "machine_embedding_not_built"})
-            pipeline["machine_embedding_ready"] = bool(machine_status.get("ready"))
-            pipeline["machine_embedding_reason"] = machine_status.get("reason")
-            pipeline["machine_embedding_rows"] = int(machine_status.get("rows") or 0)
-        else:
-            pipeline["machine_embedding_ready"] = False
-            pipeline["machine_embedding_reason"] = "manual_not_assigned_to_machine"
-            pipeline["machine_embedding_rows"] = 0
-
-        if pipeline.get("next_stage") == "post_stage3":
-            if not owner:
-                pipeline["next_stage"] = "assign_machine"
-                pipeline["blocked_reason"] = "Assign this manual to its physical machine before hybrid retrieval."
-            elif pipeline.get("machine_embedding_ready"):
-                pipeline["next_stage"] = "rag_ready"
-                pipeline["blocked_reason"] = None
-            else:
-                pipeline["next_stage"] = "machine_embedding"
-                pipeline["blocked_reason"] = "Machine embeddings are waiting for all assigned manuals to finish Stage 3, or are rebuilding after an upstream change."
-        row["pipeline"] = pipeline
-        coverage = await asyncio.to_thread(evidence_coverage, Path(runtime.config.processed_dir) / Path(str(row["result_dir"])).name) if row.get("result_dir") else {"status": "not_scanned", "detected": None, "validated": None, "whole_manual_coverage_measured": False}
-        row["readiness"] = book_readiness(
-            correction_current=bool(pipeline.get("stage2c_ready")),
-            verification_ready=bool(pipeline.get("required_verification_ready")),
-            blocking_reviews=int(pipeline.get("blocking_reviews") or 0),
-            index_current=bool(pipeline.get("stage3_ready")), coverage=coverage,
-            hybrid_ready=bool(pipeline.get("machine_embedding_ready")),
-            audit_bypassed=bool(pipeline.get("audit_bypassed")),
+        machine_status = (
+            equipment_embedding_status.get(str(owner.get("equipment_id") or ""))
+            if owner else None
         )
+        _apply_document_machine_state(row, owner, machine_status)
+        await _apply_document_readiness(row)
 
     return {
         "documents": rows,
