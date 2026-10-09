@@ -72,6 +72,48 @@ def test_unreviewed_diagram_children_group_once_without_automatic_exclusion(tmp_
     assert report["review_groups"][0]["related_source_refs"] == ["#/pictures/0", "#/texts/0"]
 
 
+def test_unresolved_visual_candidate_is_not_counted_as_searchable_until_rag_indexed(tmp_path):
+    import json
+    from app.source_coverage import coverage_pipeline, coverage_status
+
+    doc = {"pictures": [{"prov": [{"page_no": 4}]}], "texts": [], "tables": []}
+    candidate = {
+        "visual_evidence_id": "V-1-000000",
+        "postprocess_job_id": 1,
+        "source_filename": "Manual.pdf",
+        "source_page": 4,
+        "picture_index": 0,
+        "docling_ref": "#/pictures/0",
+        "category": "engineering_drawing",
+        "search_text": "SW1 diagram",
+        "visible_text": ["SW1"],
+        "verification_verdict": "TECHNICAL_USEFUL",
+        "stage2c_status": "applied",
+        "rag_eligible": False,
+        "unresolved": True,
+    }
+    (tmp_path / "visual_evidence.jsonl").write_text(json.dumps(candidate) + "\n", encoding="utf-8")
+    report = coverage_pipeline(doc, tmp_path)
+    assert report["search_referenced_items"] == 0
+    assert report["missing_by_kind"] == {"pictures": 1}
+    assert report["recovery_queue"][0]["ref"] == "#/pictures/0"
+
+    indexed = {
+        **candidate,
+        "chunk_id": candidate["visual_evidence_id"],
+        "page_numbers": [4],
+        "doc_items": ["#/pictures/0"],
+        "text": "SW1 diagram",
+        "rag_eligible": True,
+        "unresolved": False,
+    }
+    (tmp_path / "visual_evidence_index.jsonl").write_text(json.dumps(indexed) + "\n", encoding="utf-8")
+    assert coverage_status(tmp_path)["status"] == "stale"
+    report = coverage_pipeline(doc, tmp_path)
+    assert report["search_referenced_items"] == 1
+    assert report["missing_by_kind"] == {}
+
+
 def test_advisory_worker_history_does_not_invalidate_reference_coverage(tmp_path):
     import json
     from app.source_coverage import _input_stats,coverage_status
