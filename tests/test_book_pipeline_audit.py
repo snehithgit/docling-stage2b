@@ -63,7 +63,10 @@ async def test_sequence_advances_clean_zero_route_book_after_discovery(tmp_path,
 async def test_exact_document_endpoint_does_not_list_unrelated_library_jobs(tmp_path, monkeypatch):
     raw = {"id": 7, "status": "completed", "result_dir": "book", "source_filename": "Manual.pdf"}
     post_store = SimpleNamespace(get_job=AsyncMock(return_value=raw))
-    stage2b_store = SimpleNamespace(list_books=AsyncMock(return_value=[]))
+    stage2b_store = SimpleNamespace(
+        get_book_summary=AsyncMock(return_value={}),
+        list_books=AsyncMock(side_effect=AssertionError("exact endpoint must not scan all verification books")),
+    )
     original_runtime = main.runtime
     main.runtime = SimpleNamespace(
         config=SimpleNamespace(processed_dir=str(tmp_path)),
@@ -89,6 +92,8 @@ async def test_exact_document_endpoint_does_not_list_unrelated_library_jobs(tmp_
         main.runtime = original_runtime
 
     post_store.get_job.assert_awaited_once_with(7)
+    stage2b_store.get_book_summary.assert_awaited_once_with(7)
+    stage2b_store.list_books.assert_not_awaited()
     assert result["document"]["id"] == 7
     assert result["document"]["pipeline"]["next_stage"] == "assign_machine"
     assert result["document"]["readiness"]["search"]["lexical_ready"] is True
