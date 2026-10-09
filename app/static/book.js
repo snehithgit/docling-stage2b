@@ -29,6 +29,28 @@
     box.textContent = `${quota.paused ? 'Groq API use is paused before the configured free-tier reserve.' : 'Groq free quota is approaching the safety reserve.'} ${Number(quota.tokens_used_24h||0).toLocaleString()}/${Number(quota.token_limit||0).toLocaleString()} locally tracked tokens and ${Number(quota.requests_used_24h||0).toLocaleString()}/${Number(quota.request_limit||0).toLocaleString()} requests in the last 24h.${resume}`;
     box.hidden=false;
   }
+  function bookStatusLabel(pipeline, flags={}) {
+    const next = String(pipeline?.next_stage || 'stage2a');
+    if (next === 'stage2a_human_review') return 'Source review required';
+    if (next === 'verifier_audit') return 'Verifier audit required';
+    if (next === 'stage2b') {
+      if (flags.stage2bFailed) return 'Verification needs attention';
+      if (flags.quotaPaused && (flags.requiredPending || flags.requiredProcessing)) return 'Cloud quota paused';
+      if (flags.requiredProcessing) return 'Verification running';
+      return 'Verification waiting';
+    }
+    if (next === 'stage2c') return flags.stage2cRunning ? 'Finalizing corrections' : 'Stage 2C next';
+    if (next === 'stage3') return flags.stage3Running ? 'Building Stage 3' : 'Stage 3 next';
+    if (next === 'assign_machine') return 'Assign machine next';
+    if (next === 'machine_embedding') return 'Machine embeddings next';
+    if (next === 'rag_ready') return 'Machine search ready';
+    if (flags.machineEmbeddingReady) return 'Machine search ready';
+    if (flags.chunksBuilt && !flags.machineAssigned) return 'Assign machine next';
+    if (flags.chunksBuilt) return 'Machine embeddings next';
+    if (flags.stage2cBuilt) return 'Stage 3 next';
+    return 'Analysis in progress';
+  }
+
   function counts() {
     const v = book?.verification || {};
     return {
@@ -103,7 +125,18 @@
     $('book-title').textContent = String(book.source_filename || 'Book').replace(/\.zip$/i,'');
     if ($('book-manual-map')) $('book-manual-map').href = `/manual-map?job=${jobId}`;
     $('book-subtitle').textContent = `${book.source_kind === 'converted_folder' ? 'Imported Docling ZIP' : 'Converted source'} · Raw Docling output remains immutable.`;
-    $('book-status-tag').textContent = pipeline.next_stage === 'stage2a_human_review' ? 'Source review required' : pipeline.next_stage === 'verifier_audit' ? 'Verifier audit required' : machineEmbeddingReady ? 'Machine search ready' : chunksBuilt && !machineAssigned ? 'Assign machine next' : chunksBuilt ? 'Machine embeddings next' : stage2cBuilt ? 'Stage 3 next' : quotaPaused && (requiredPending || requiredProcessing) ? 'Cloud quota paused' : requiredProcessing ? 'Verification running' : stage2bDone ? 'Auto finalizing' : 'In workflow';
+    $('book-status-tag').textContent = bookStatusLabel(pipeline, {
+      stage2bFailed,
+      quotaPaused,
+      requiredPending,
+      requiredProcessing,
+      stage2cBuilt,
+      stage2cRunning: ['running','queued'].includes(String(book.stage2c_status || '')),
+      chunksBuilt,
+      stage3Running: ['running','queued'].includes(String(book.stage3_status || '')),
+      machineAssigned,
+      machineEmbeddingReady,
+    });
     $('book-status-tag').className = `workflow-tag ${stage2bFailed ? 'attention' : ''}`;
     const deleteButton = $('delete-book-button');
     if (deleteButton) {
