@@ -1,6 +1,6 @@
 # Stage-wise book and Machine RAG workflow
 
-Version: `5.1.2.1`
+Version: `5.1.2.2`
 
 This document describes the current operator-visible sequence and the backend
 readiness contract. Raw Docling conversion output remains immutable; later
