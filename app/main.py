@@ -3338,6 +3338,137 @@ async def documents() -> dict:
     }
 
 
+async def _exact_equipment_embedding_status(
+    equipment: dict,
+    verification_books: dict[int, dict],
+    current_row: dict,
+) -> dict:
+    """Evaluate only the manuals assigned to one machine, not the whole library."""
+    manual_items = [
+        manual for manual in (equipment.get("manuals") or [])
+        if manual.get("active_for_rag", True)
+    ]
+    equipment_id = str(equipment.get("equipment_id") or "").strip()
+    if not equipment_id or not manual_items:
+        return {
+            "ready": False,
+            "reason": "machine_has_no_active_manuals",
+            "manual_count": len(manual_items),
+            "ready_manual_count": 0,
+        }
+
+    index_paths: list[Path] = []
+    manual_types: dict[int, str] = {}
+    current_id = int(current_row.get("id") or 0)
+    for manual in manual_items:
+        try:
+            manual_job_id = int(manual.get("postprocess_job_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if manual_job_id <= 0:
+            continue
+        manual_types[manual_job_id] = str(manual.get("manual_type") or "other")
+        if manual_job_id == current_id:
+            book_row = current_row
+        else:
+            raw = await runtime.postprocess_store.get_job(manual_job_id)
+            if not raw:
+                continue
+            enriched = await asyncio.to_thread(enrich_postprocess_jobs, [raw])
+            if not enriched:
+                continue
+            book_row = await _enrich_document_core(
+                enriched[0], verification_books.get(manual_job_id, {})
+            )
+        pipeline = book_row.get("pipeline") or {}
+        if pipeline.get("next_stage") != "post_stage3" or not book_row.get("result_dir"):
+            continue
+        index_path = (
+            Path(runtime.config.processed_dir)
+            / Path(str(book_row["result_dir"])).name
+            / "retrieval_index.jsonl"
+        )
+        if index_path.is_file():
+            index_paths.append(index_path)
+
+    if len(index_paths) != len(manual_items):
+        return {
+            "ready": False,
+            "reason": "machine_waiting_for_all_manual_stage3",
+            "manual_count": len(manual_items),
+            "ready_manual_count": len(index_paths),
+        }
+    return equipment_hybrid_index_status(
+        Path(runtime.config.processed_dir),
+        equipment_id,
+        index_paths,
+        model=runtime.config.retrieval_embedding_model,
+        document_prefix=runtime.config.retrieval_embedding_document_prefix,
+        manual_types=manual_types,
+    )
+
+
+@app.get("/api/documents/{job_id}")
+async def document_details(job_id: int) -> dict:
+    """Exact book status for the Book page without recomputing unrelated manuals."""
+    raw = await runtime.postprocess_store.get_job(job_id)
+    if not raw:
+        raise HTTPException(status_code=404, detail="Book not found.")
+    enriched = await asyncio.to_thread(enrich_postprocess_jobs, [raw])
+    if not enriched:
+        raise HTTPException(status_code=404, detail="Book not found.")
+
+    verification_books = {
+        int(item["postprocess_job_id"]): item
+        for item in await runtime.stage2b_store.list_books()
+    }
+    row = await _enrich_document_core(
+        enriched[0], verification_books.get(int(job_id), {})
+    )
+
+    registry = await asyncio.to_thread(
+        load_registry, Path(runtime.config.processed_dir)
+    )
+    owner = None
+    for equipment in registry.get("equipment") or []:
+        if any(
+            int(manual.get("postprocess_job_id") or 0) == int(job_id)
+            for manual in (equipment.get("manuals") or [])
+            if str(manual.get("postprocess_job_id") or "").isdigit()
+        ):
+            owner = equipment
+            break
+
+    equipment_status: dict[str, dict] = {}
+    machine_status = None
+    if owner:
+        equipment_id = str(owner.get("equipment_id") or "")
+        pipeline = row.get("pipeline") or {}
+        if pipeline.get("next_stage") == "post_stage3":
+            machine_status = await _exact_equipment_embedding_status(
+                owner, verification_books, row
+            )
+        else:
+            machine_status = {
+                "ready": False,
+                "reason": "machine_waiting_for_current_book",
+                "manual_count": len([
+                    manual for manual in (owner.get("manuals") or [])
+                    if manual.get("active_for_rag", True)
+                ]),
+                "ready_manual_count": 0,
+            }
+        equipment_status[equipment_id] = machine_status
+
+    _apply_document_machine_state(row, owner, machine_status)
+    await _apply_document_readiness(row)
+    return {
+        "document": row,
+        "pipeline_sequence": dict(runtime.pipeline_sequence_state),
+        "equipment_embedding_status": equipment_status,
+    }
+
+
 @app.post("/api/stage2c/books/{postprocess_job_id}/correction-suggestions")
 async def stage2c_correction_suggestions(postprocess_job_id: int) -> dict:
     try:
