@@ -5,6 +5,7 @@
   let last = '';
   let loading = false;
   let refreshFailed = false;
+  let generation = null;
 
   const deletedMessage = sessionStorage.getItem('book-delete-message');
   if (deletedMessage) {
@@ -92,11 +93,14 @@
     if (loading || (document.visibilityState && document.visibilityState !== 'visible')) return;
     loading = true;
     try {
-      const response = await fetch('/api/documents', {cache:'no-store'});
+      const suffix = generation === null ? '' : `?generation=${encodeURIComponent(generation)}`;
+      const response = await fetch(`/api/documents/summary${suffix}`, {cache:'no-store'});
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || 'Could not load books');
       if (refreshFailed) { $('workflow-feedback').hidden = true; refreshFailed = false; }
-      const signature = JSON.stringify(data);
+      if (Number.isFinite(Number(data.generation))) generation = Number(data.generation);
+      if (data.not_modified) return;
+      const signature = JSON.stringify(data.documents || []);
       if (signature !== last) {
         books = data.documents || [];
         last = signature;
@@ -116,8 +120,8 @@
   $('book-search').addEventListener('input', render);
   $('book-filter').addEventListener('change', render);
   refresh();
-  // /api/documents performs full per-book freshness and readiness checks. Keep
-  // the library current without continuously re-running that expensive work.
+  // The compact summary endpoint reuses an event-invalidated server snapshot,
+  // so idle polling is cheap while pipeline changes still invalidate immediately.
   const refreshTimer = setInterval(() => {
     if (!window.DoclingUI?.shouldDeferRefresh?.()) refresh();
   }, 30000);

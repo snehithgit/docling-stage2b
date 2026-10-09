@@ -17,3 +17,11 @@ async def test_unbounded_alert_stream_does_not_drop_burst():
         seen.append(payload["sequence"])
     assert seen == list(range(20))
     await stream.aclose()
+
+
+def test_event_generation_advances_on_notify():
+    broker = EventBroker()
+    assert broker.generation == 0
+    broker.notify("one")
+    broker.notify("two", postprocess_job_id=7)
+    assert broker.generation == 2

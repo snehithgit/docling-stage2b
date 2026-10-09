@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from app import main
+from app.events import EventBroker
 
 
 @pytest.mark.asyncio
@@ -116,3 +117,37 @@ async def test_colab_artifact_counts_include_every_status(tmp_path):
     assert book["total"] == 4
     assert all(book[status] == 1 for status in ("completed", "processing", "failed", "pending"))
     assert book["pi5_completed"] + book["oneplus_completed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_library_summary_cache_reuses_snapshot_until_event(monkeypatch):
+    broker = EventBroker()
+    original_runtime = main.runtime
+    main.runtime = SimpleNamespace(events=broker)
+    build = AsyncMock(return_value={
+        "documents": [{
+            "id": 7,
+            "status": "completed",
+            "source_filename": "Manual.pdf",
+            "verification": {"completed": 2, "total": 2},
+            "pipeline": {"next_stage": "rag_ready", "machine_name": "Pump"},
+            "readiness": {"evidence": {"status": "validated"}},
+        }],
+        "pipeline_sequence": {"current_stage": "idle"},
+        "equipment_embedding_status": {"unused": {"ready": True}},
+    })
+    monkeypatch.setattr(main, "documents", build)
+    try:
+        first = await main.document_summaries()
+        unchanged = await main.document_summaries(first["generation"])
+        broker.notify("stage_changed", postprocess_job_id=7)
+        changed = await main.document_summaries(first["generation"])
+    finally:
+        main.runtime = original_runtime
+
+    assert build.await_count == 2
+    assert unchanged == {"generation": first["generation"], "not_modified": True}
+    assert changed["generation"] > first["generation"]
+    assert changed["documents"][0]["pipeline"]["next_stage"] == "rag_ready"
+    assert "readiness" not in changed["documents"][0]
+    assert "equipment_embedding_status" not in changed

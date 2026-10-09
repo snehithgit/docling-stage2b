@@ -10,6 +10,13 @@ class EventBroker:
 
     def __init__(self) -> None:
         self._listeners: set[asyncio.Queue[str]] = set()
+        # Monotonic in-process change token for cheap cache invalidation.
+        # SQLite/files remain authoritative; this is only a performance hint.
+        self._generation = 0
+
+    @property
+    def generation(self) -> int:
+        return int(self._generation)
 
     def notify(self, reason: str = "state", **context: object) -> None:
         """Publish a lightweight refresh event with optional alert context.
@@ -18,6 +25,7 @@ class EventBroker:
         from the failure/completion source so notification transports can name
         the affected manual without querying pipeline databases themselves.
         """
+        self._generation += 1
         event: dict[str, object] = {"reason": str(reason or "state")}
         for key, value in context.items():
             if value is None:
