@@ -268,10 +268,10 @@
   async function refresh(force=false) {
     if (loading || (!force && busy)) return; loading=true;
     try {
-      const [data, verifierStatus] = await Promise.all([api('/api/documents'), api('/api/stage2b/status')]);
+      const [data, verifierStatus] = await Promise.all([api(`/api/documents/${jobId}`), api('/api/stage2b/status')]);
       stage2bStatus = verifierStatus;
-      book = (data.documents||[]).find(d => Number(d.id)===jobId);
-      if (!book) throw new Error('Book not found. Return to My books.');
+      book = data.document || null;
+      if (!book || Number(book.id) !== jobId) throw new Error('Book not found. Return to My books.');
       try { review = await api(`/api/postprocess/jobs/${jobId}/human-review`); }
       catch (e) { review = {load_error:true, error:e.message, review_required:null, human_reviewed:null, entries:[]}; }
       try { auditGate = {...await api(`/api/postprocess/jobs/${jobId}/verifier-audit`), available:true, load_error:false}; }
