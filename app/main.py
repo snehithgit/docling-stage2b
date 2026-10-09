@@ -2916,6 +2916,7 @@ async def documents() -> dict:
                 verification_rows,
                 discovery_current=discovery_current,
                 artifact_sweep_required=artifact_sweep_required,
+                expected_total=total,
             )
             pipeline["stage2b_discovery_current"] = bool(discovery_current)
             pipeline["required_verification"] = required_verification
