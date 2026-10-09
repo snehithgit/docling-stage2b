@@ -1,6 +1,6 @@
 # Stage-wise book and Machine RAG workflow
 
-Version: `5.1.2.0`
+Version: `5.1.2.1`
 
 This document describes the current operator-visible sequence and the backend
 readiness contract. Raw Docling conversion output remains immutable; later
@@ -112,6 +112,10 @@ fragmentation evidence. Ambiguous continuations are not silently merged.
 ## UI ownership and normal operator path
 
 - **Books** — library-level state. Open a book for its single next action.
+  It polls the compact `/api/documents/summary` view. The server reuses the
+  current snapshot while the EventBroker generation is unchanged and forces a
+  bounded periodic rebuild, so idle polling does not repeatedly parse every
+  book's ledgers.
 - **Book workflow** — canonical per-book sequence and blocker explanation.
   It uses `/api/documents/{job_id}`, so polling one book does not recompute
   every unrelated manual in the library.
