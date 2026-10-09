@@ -136,7 +136,7 @@ async def test_library_summary_cache_reuses_snapshot_until_event(monkeypatch):
         "pipeline_sequence": {"current_stage": "idle"},
         "equipment_embedding_status": {"unused": {"ready": True}},
     })
-    monkeypatch.setattr(main, "documents", build)
+    monkeypatch.setattr(main, "_build_documents_payload", build)
     try:
         first = await main.document_summaries()
         unchanged = await main.document_summaries(first["generation"])
@@ -146,8 +146,22 @@ async def test_library_summary_cache_reuses_snapshot_until_event(monkeypatch):
         main.runtime = original_runtime
 
     assert build.await_count == 2
+    assert all(item.kwargs == {"include_readiness": False} for item in build.await_args_list)
     assert unchanged == {"generation": first["generation"], "not_modified": True}
     assert changed["generation"] > first["generation"]
     assert changed["documents"][0]["pipeline"]["next_stage"] == "rag_ready"
     assert "readiness" not in changed["documents"][0]
     assert "equipment_embedding_status" not in changed
+
+
+@pytest.mark.asyncio
+async def test_full_documents_endpoint_keeps_detailed_readiness(monkeypatch):
+    build = AsyncMock(return_value={
+        "documents": [],
+        "pipeline_sequence": {},
+        "equipment_embedding_status": {},
+    })
+    monkeypatch.setattr(main, "_build_documents_payload", build)
+    result = await main.documents()
+    build.assert_awaited_once_with(include_readiness=True)
+    assert result["documents"] == []
