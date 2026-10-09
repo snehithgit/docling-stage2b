@@ -3171,6 +3171,80 @@ async def _enrich_document_core(row: dict, verification_book: dict) -> dict:
     return row
 
 
+def _apply_document_machine_state(
+    row: dict,
+    owner: dict | None,
+    machine_status: dict | None,
+) -> dict:
+    pipeline = row.get("pipeline") or {}
+    if owner:
+        equipment_id = str(owner.get("equipment_id") or "")
+        pipeline["machine_assigned"] = True
+        pipeline["machine_id"] = equipment_id
+        pipeline["machine_name"] = owner.get("name")
+        status = machine_status or {
+            "ready": False,
+            "reason": "machine_embedding_not_built",
+        }
+        pipeline["machine_embedding_ready"] = bool(status.get("ready"))
+        pipeline["machine_embedding_reason"] = status.get("reason")
+        pipeline["machine_embedding_rows"] = int(status.get("rows") or 0)
+    else:
+        pipeline["machine_embedding_ready"] = False
+        pipeline["machine_embedding_reason"] = "manual_not_assigned_to_machine"
+        pipeline["machine_embedding_rows"] = 0
+
+    # Only a book that cleared every canonical blocker can advance into machine
+    # assignment/embedding/RAG. A physically present old Stage 3 index is not
+    # sufficient when a newer human-review gate is active.
+    if pipeline.get("next_stage") == "post_stage3":
+        if not owner:
+            pipeline["next_stage"] = "assign_machine"
+            pipeline["blocked_reason"] = (
+                "Assign this manual to its physical machine before hybrid retrieval."
+            )
+        elif pipeline.get("machine_embedding_ready"):
+            pipeline["next_stage"] = "rag_ready"
+            pipeline["blocked_reason"] = None
+        else:
+            pipeline["next_stage"] = "machine_embedding"
+            pipeline["blocked_reason"] = (
+                "Machine embeddings are waiting for all assigned manuals to finish "
+                "Stage 3, or are rebuilding after an upstream change."
+            )
+    row["pipeline"] = pipeline
+    return row
+
+
+async def _apply_document_readiness(row: dict) -> dict:
+    result_dir = (
+        Path(runtime.config.processed_dir) / Path(str(row["result_dir"])).name
+        if row.get("result_dir")
+        else None
+    )
+    coverage = (
+        await asyncio.to_thread(evidence_coverage, result_dir)
+        if result_dir is not None
+        else {
+            "status": "not_scanned",
+            "detected": None,
+            "validated": None,
+            "whole_manual_coverage_measured": False,
+        }
+    )
+    pipeline = row.get("pipeline") or {}
+    row["readiness"] = book_readiness(
+        correction_current=bool(pipeline.get("stage2c_ready")),
+        verification_ready=bool(pipeline.get("required_verification_ready")),
+        blocking_reviews=int(pipeline.get("blocking_reviews") or 0),
+        index_current=bool(pipeline.get("stage3_ready")),
+        coverage=coverage,
+        hybrid_ready=bool(pipeline.get("machine_embedding_ready")),
+        audit_bypassed=bool(pipeline.get("audit_bypassed")),
+    )
+    return row
+
+
 @app.get("/api/documents")
 async def documents() -> dict:
     """Unified document library with strict sequential-pipeline readiness."""
