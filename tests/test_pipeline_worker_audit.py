@@ -195,7 +195,10 @@ async def test_pipeline_one_bad_book_does_not_stop_next_book(tmp_path, monkeypat
     jobs = [{"id": i, "conversion_job_id": i, "status": "completed", "result_dir": str(i)} for i in (1, 2)]
     cfg = SimpleNamespace(processed_dir=str(tmp_path), stage2c_auto_finalize_after_stage2b=True, retrieval_hybrid_enabled=False)
     worker = SimpleNamespace(stage2c_state_for=lambda _: {}, start_stage2c_backfill=AsyncMock(return_value={"accepted": True}))
-    rt = SimpleNamespace(config=cfg, postprocess_store=SimpleNamespace(list_jobs=AsyncMock(return_value=jobs)), stage2b_store=SimpleNamespace(list_books=AsyncMock(return_value=[{"postprocess_job_id": i, "total": 1} for i in (1, 2)]), list_book_jobs_raw=AsyncMock(return_value=[])), stage2b_worker=worker, pipeline_sequence_state={}, events=SimpleNamespace(notify=lambda *args: None))
+    completed_rows = [{"id": i, "route_id": f"R{i}", "target": "pi5", "status": "completed"} for i in (1, 2)]
+    async def raw_rows(job_id):
+        return [row for row in completed_rows if row["id"] == job_id]
+    rt = SimpleNamespace(config=cfg, postprocess_store=SimpleNamespace(list_jobs=AsyncMock(return_value=jobs)), stage2b_store=SimpleNamespace(list_books=AsyncMock(return_value=[{"postprocess_job_id": i, "total": 1} for i in (1, 2)]), list_book_jobs_raw=AsyncMock(side_effect=raw_rows)), stage2b_worker=worker, pipeline_sequence_state={}, events=SimpleNamespace(notify=lambda *args: None))
     def identity(path, job_id, **kwargs):
         if job_id == 1:
             raise OSError("NAS unavailable")
