@@ -83,6 +83,21 @@ def test_pipeline_stage_resolver_exposes_verifier_audit_before_stage3():
     assert "2 verifier audit item" in state["blocked_reason"]
 
 
+def test_testing_bypass_keeps_unresolved_audit_visible_but_allows_stage3():
+    verification = {"ready": True, "failed": 0, "raw_total": 1, "discovery_current": True}
+    state = resolve_pipeline_stage(
+        stage2a_ready=True,
+        verification=verification,
+        stage2c_ready=True,
+        structural_review_pending=0,
+        verifier_audit_pending=3,
+        verifier_audit_blocking=0,
+        audit_bypassed=True,
+        stage3_ready=False,
+    )
+    assert state["next_stage"] == "stage3"
+
+
 def test_human_visual_recovery_rows_do_not_change_stage2c_signature_inputs():
     normal = _verification_row(row_id=1)
     recovery = {**_verification_row(row_id=2), "code": "HUMAN_VISUAL_EVIDENCE_RECOVERY", "route_id": "HUMAN_RECOVERY:g:vision:R1"}
