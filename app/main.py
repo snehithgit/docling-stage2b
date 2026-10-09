@@ -3338,9 +3338,20 @@ async def documents() -> dict:
     }
 
 
+async def _stage2b_book_summary(postprocess_job_id: int) -> dict:
+    """Fetch one book's verifier aggregate without scanning every verification book."""
+    getter = getattr(runtime.stage2b_store, "get_book_summary", None)
+    if getter is not None:
+        return await getter(int(postprocess_job_id)) or {}
+    # Compatibility for lightweight test doubles and older injected stores.
+    for item in await runtime.stage2b_store.list_books():
+        if int(item.get("postprocess_job_id") or 0) == int(postprocess_job_id):
+            return item
+    return {}
+
+
 async def _exact_equipment_embedding_status(
     equipment: dict,
-    verification_books: dict[int, dict],
     current_row: dict,
 ) -> dict:
     """Evaluate only the manuals assigned to one machine, not the whole library."""
@@ -3378,7 +3389,7 @@ async def _exact_equipment_embedding_status(
             if not enriched:
                 continue
             book_row = await _enrich_document_core(
-                enriched[0], verification_books.get(manual_job_id, {})
+                enriched[0], await _stage2b_book_summary(manual_job_id)
             )
         pipeline = book_row.get("pipeline") or {}
         if pipeline.get("next_stage") != "post_stage3" or not book_row.get("result_dir"):
@@ -3418,12 +3429,8 @@ async def document_details(job_id: int) -> dict:
     if not enriched:
         raise HTTPException(status_code=404, detail="Book not found.")
 
-    verification_books = {
-        int(item["postprocess_job_id"]): item
-        for item in await runtime.stage2b_store.list_books()
-    }
     row = await _enrich_document_core(
-        enriched[0], verification_books.get(int(job_id), {})
+        enriched[0], await _stage2b_book_summary(job_id)
     )
 
     registry = await asyncio.to_thread(
@@ -3446,7 +3453,7 @@ async def document_details(job_id: int) -> dict:
         pipeline = row.get("pipeline") or {}
         if pipeline.get("next_stage") == "post_stage3":
             machine_status = await _exact_equipment_embedding_status(
-                owner, verification_books, row
+                owner, row
             )
         else:
             machine_status = {
