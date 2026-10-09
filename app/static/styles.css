@@ -1294,6 +1294,7 @@ button.mini-action { cursor: pointer; }
 .v5-readiness-card p { font-size:13px; line-height:1.5; margin:10px 0 0; color:#666878; }
 .v5-readiness-card.current { border-top:3px solid #249b77; }
 .v5-readiness-card.attention { border-top:3px solid #bb8b25; }
+.v5-readiness-card.neutral { border-top:3px solid #8b8e9b; }
 
 .nav-advanced summary { padding:12px; cursor:pointer; color:var(--ink); font-weight:700; }
 .hub-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:16px; }
