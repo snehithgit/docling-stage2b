@@ -756,6 +756,15 @@ class Stage2BBackoffAndBookTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(book["pi5_pending"], 3)
         self.assertEqual(book["oneplus_pending"], 2)
 
+        exact = await self.store.get_book_summary(3)
+        self.assertIsNotNone(exact)
+        self.assertEqual(exact["postprocess_job_id"], 3)
+        self.assertEqual(exact["text_total"], book["text_total"])
+        self.assertEqual(exact["vision_total"], book["vision_total"])
+        self.assertEqual(exact["artifact_total"], book["artifact_total"])
+
+        self.assertIsNone(await self.store.get_book_summary(999999))
+
     async def test_raw_book_rows_preserve_persisted_request_and_result_for_stage2c_backfill(self):
         await self.store.sync_routes(9, 90, "g9", [route("R9", "pi5")], "book__job9", "book.zip")
         await self.store.start_manual_book(9)
