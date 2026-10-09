@@ -32,7 +32,10 @@
       if (pending || total === 0) return {code:'Verify', label:total ? `${pending} checks waiting` : 'Verification not prepared', tone:'active', next:'Open'};
       return {code:'Verify', label:'Verification required', tone:'active', next:'Open'};
     }
-    if (Number(pipeline.stage2a_human_review_pending || 0)) return {code:'Review', label:'Source review needs your decision', tone:'attention', next:'Review'};
+    if (pipeline.next_stage === 'stage2a_human_review') {
+      const count = Number(pipeline.stage2a_human_review_pending || 0);
+      return {code:'Review', label:count ? `${count} source review item${count === 1 ? '' : 's'} need a decision` : 'Source review needs your decision', tone:'attention', next:'Review'};
+    }
     if (pipeline.next_stage === 'verifier_audit') {
       const count = Number(pipeline.verifier_audit_blocking || pipeline.verifier_audit_pending || 0);
       return {code:'Review', label:`${count} verifier audit item${count === 1 ? '' : 's'} need a decision`, tone:'attention', next:'Review'};
