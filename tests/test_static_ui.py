@@ -246,7 +246,7 @@ def test_review_page_uses_shared_shell_queue_and_docling_context():
 
 def test_book_workflow_uses_exact_status_endpoint_and_fail_closed_review_ui():
     js = read("book.js")
-    assert "api(\`/api/documents/\${jobId}\`)" in js
+    assert "api(`/api/documents/${jobId}`)" in js
     assert "api('/api/documents')" not in js
     assert "load_error:true" in js
     assert "Status unavailable" in js
