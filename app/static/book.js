@@ -51,6 +51,9 @@
     </article>`;
   }
   function reviewRows() {
+    if (review?.load_error) {
+      return `<div class="stage-note warning-note"><strong>Review status unavailable.</strong><p>The pipeline state is still enforced by the server. Reload this page or open Review before assuming there is nothing to decide.</p></div>`;
+    }
     const entries = review?.entries || [];
     const waiting = entries.filter(e => !e.human_verified && ['pending','proposed'].includes(String(e.status || '').toLowerCase()));
     if (!waiting.length) return `<div class="stage-note success-note">No unresolved text is waiting. Automatic applied corrections are already in the Stage 2C overlay and need no Save click.</div>`;
@@ -78,10 +81,14 @@
       (c.total === 0 ? book.status === 'completed' : c.pending===0 && c.processing===0 && c.failed===0 && c.completed===c.total)
     );
     const stage2bFailed = requiredFailed > 0;
-    const reviewRequired = Number(auditGate?.review_required ?? review?.review_required ?? book.review_required ?? 0);
+    const auditLoadError = auditGate?.load_error === true;
+    const pipelineAuditPending = Number(pipeline.verifier_audit_pending || pipeline.verifier_audit_blocking || 0);
+    const reviewRequired = auditLoadError
+      ? pipelineAuditPending
+      : Number(auditGate?.review_required ?? review?.review_required ?? pipelineAuditPending ?? book.review_required ?? 0);
     const automationUnresolved = Number(review?.automation_unresolved ?? reviewRequired);
-    const auditBypassed = auditGate?.bypassed_for_testing === true;
-    const auditAvailable = auditGate?.available !== false && book.status === 'completed';
+    const auditBypassed = auditGate?.bypassed_for_testing === true || pipeline.audit_bypassed === true;
+    const auditAvailable = !auditLoadError && auditGate?.available !== false && book.status === 'completed';
     const textVerifier = stage2bStatus?.text_provider?.label || book.text_verifier_label || 'Text verifier';
     const visionVerifier = stage2bStatus?.vision_provider?.label || 'Vision verifier';
     const textCloudPaused = stage2bStatus?.text_provider?.provider === 'groq' && stage2bStatus?.text_provider?.quota?.paused === true;
@@ -150,12 +157,14 @@
       else { cState='active'; cLabel=book.stage2c_auto_finalize?'Auto finalizing':'Ready'; cActions=`<button class="secondary-button" data-action="stage2c">Finalize now</button>`; }
     }
     cActions += `<a class="secondary-button" href="/vision-audit?book=${jobId}">Open verifier audit</a>`;
-    const auditState = !auditAvailable ? 'Available after extraction' : auditBypassed ? 'BYPASSED FOR TESTING' : reviewRequired > 0 ? `${reviewRequired} unresolved` : 'Complete';
+    const auditState = auditLoadError ? 'Status unavailable' : !auditAvailable ? 'Available after extraction' : auditBypassed ? 'BYPASSED FOR TESTING' : reviewRequired > 0 ? `${reviewRequired} unresolved` : 'Complete';
     const showBypass = stage2bDone && auditAvailable && (reviewRequired > 0 || auditBypassed);
     const bypassControl = showBypass ? `<div class="stage-note ${auditBypassed ? 'warning-note' : ''}"><div class="stage-note-control"><div><strong>${auditBypassed ? 'Testing bypass is active' : 'Audit is blocking Stage 3'}</strong><p>${auditBypassed ? `${reviewRequired} unresolved audit item(s) remain unresolved and are not accepted.` : `${reviewRequired} unresolved audit item(s) remain. For testing only, you may continue downstream without accepting them.`}</p></div><button class="secondary-button" data-action="${auditBypassed ? 'audit-enforce' : 'audit-bypass'}" ${busy ? 'disabled' : ''}>${auditBypassed ? 'Remove testing bypass' : 'Bypass audit for testing'}</button></div></div>` : '';
-    const auditNote = reviewRequired > 0 && !auditBypassed
-      ? `<div class="stage-note">Review unresolved verifier evidence before building canonical chunks. Human decisions remain authoritative.</div>`
-      : auditBypassed ? '' : `<div class="stage-note success-note">Verifier Audit gate is complete for the current generation.</div>`;
+    const auditNote = auditLoadError
+      ? `<div class="stage-note warning-note"><strong>Verifier Audit details could not be loaded.</strong><p>The server pipeline gate remains authoritative. Reload or open the audit page; this UI will not treat an unknown status as complete.</p></div>`
+      : reviewRequired > 0 && !auditBypassed
+        ? `<div class="stage-note">Review unresolved verifier evidence before building canonical chunks. Human decisions remain authoritative.</div>`
+        : auditBypassed ? '' : `<div class="stage-note success-note">Verifier Audit gate is complete for the current generation.</div>`;
     cards.push(stageCard('2C','Correction finalization · Stage 2C','Apply safe source-image corrections and accepted visual evidence to the current overlay. Unreadable text keeps the original Docling content.',cState,cLabel,`<div class="stage-summary-grid"><div><span>Audit unresolved</span><strong>${reviewRequired}</strong></div><div><span>Audit gate</span><strong>${esc(auditState)}</strong></div><div><span>Policy</span><strong>Keep original if unreadable</strong></div><div><span>Final state</span><strong>${esc(book.stage2c_status || 'not built')}</strong></div></div>${auditNote}${bypassControl}`,cActions)); rail.push(cState==='done'?'done':cState);
 
     let chState='blocked', chLabel='Waiting', chActions='';
@@ -168,13 +177,20 @@
     }
     cards.push(stageCard('3','Canonical chunks · Stage 3','Build searchable technical chunks from the current correction overlay. Any upstream verification/correction change makes these chunks stale and they are rebuilt before RAG.',chState,chLabel,`<div class="stage-summary-grid"><div><span>Stage 2C</span><strong>${stage2cBuilt?'Current':'Not current'}</strong></div><div><span>Chunks</span><strong>${chunksBuilt?'Current':'Not current'}</strong></div></div>`,chActions)); rail.push(chState==='done'?'done':chState);
 
+    const evidence = book.readiness?.evidence || {};
+    const evidenceResolved = ['tracked_candidates_validated','tracked_candidates_resolved'].includes(String(evidence.status || ''));
+    const evidenceNeedsAttention = ['legacy','invalid','stale','pending','incomplete'].includes(String(evidence.status || ''));
+    const evidenceNote = chunksBuilt ? `<div class="stage-note ${evidenceNeedsAttention ? 'warning-note' : evidenceResolved ? 'success-note' : ''}"><strong>Optional evidence & diagram enrichment</strong><p>${evidenceResolved ? 'Tracked technical evidence is resolved for this manual.' : evidenceNeedsAttention ? 'Some detected evidence or diagrams still need checking. This does not silently bypass any blocking review gate.' : 'Text search can work without scanning every diagram. Use this when an answer misses a diagram, flowchart, boxed note or source item.'}</p><a class="secondary-button" href="/technical-evidence?job=${jobId}">Open evidence & diagrams</a></div>` : '';
+
     let mState='blocked', mLabel='Waiting', mActions='';
-    if (chunksBuilt) {
+    if (pipeline.next_stage === 'stage2a_human_review' || pipeline.next_stage === 'verifier_audit') {
+      mState='blocked'; mLabel='Review first';
+    } else if (chunksBuilt) {
       if (!machineAssigned) { mState='active'; mLabel='Assign machine'; mActions=`<a class="primary-button" href="/retrieval?job=${jobId}">Open RAG setup</a>`; }
       else if (!machineEmbeddingReady) { mState='active'; mLabel='Rebuilding'; mActions=`<a class="secondary-button" href="/retrieval?job=${jobId}">Open ${esc(pipeline.machine_name || 'machine')} RAG</a>`; }
       else { mState='done'; mLabel='RAG ready'; mActions=`<a class="primary-button" href="/retrieval?job=${jobId}">Test RAG</a><a class="secondary-button" href="/chunks?equipment=${encodeURIComponent(pipeline.machine_id || '')}">Browse chunks</a>`; }
     }
-    cards.push(stageCard('4','Retrieval-Augmented Generation (RAG)','All manuals assigned to one physical machine form one embedding corpus. This stage runs only after every assigned manual has current Stage 3 chunks.',mState,mLabel,`<div class="stage-summary-grid"><div><span>Machine</span><strong>${esc(pipeline.machine_name || 'Not assigned')}</strong></div><div><span>Machine embeddings</span><strong>${machineEmbeddingReady?'Current':machineAssigned?'Waiting / stale':'Not available'}</strong></div><div><span>Rows</span><strong>${Number(pipeline.machine_embedding_rows || 0).toLocaleString()}</strong></div></div>${pipeline.blocked_reason ? `<div class="stage-note">${esc(pipeline.blocked_reason)}</div>` : ''}`,mActions)); rail.push(mState==='done'?'done':mState);
+    cards.push(stageCard('4','Retrieval-Augmented Generation (RAG)','All manuals assigned to one physical machine form one embedding corpus. Blocking human reviews must be resolved first; evidence/diagram enrichment is optional and can improve later answers.',mState,mLabel,`<div class="stage-summary-grid"><div><span>Machine</span><strong>${esc(pipeline.machine_name || 'Not assigned')}</strong></div><div><span>Machine embeddings</span><strong>${machineEmbeddingReady?'Current':machineAssigned?'Waiting / stale':'Not available'}</strong></div><div><span>Rows</span><strong>${Number(pipeline.machine_embedding_rows || 0).toLocaleString()}</strong></div></div>${pipeline.blocked_reason ? `<div class="stage-note">${esc(pipeline.blocked_reason)}</div>` : ''}${evidenceNote}`,mActions)); rail.push(mState==='done'?'done':mState);
 
     $('stage-cards').innerHTML = cards.join('');
     renderRail(rail);
@@ -256,8 +272,10 @@
       stage2bStatus = verifierStatus;
       book = (data.documents||[]).find(d => Number(d.id)===jobId);
       if (!book) throw new Error('Book not found. Return to My books.');
-      try { review = await api(`/api/postprocess/jobs/${jobId}/human-review`); } catch (_) { review = {review_required:0,human_reviewed:0,entries:[]}; }
-      try { auditGate = {...await api(`/api/postprocess/jobs/${jobId}/verifier-audit`), available:true}; } catch (_) { auditGate = {available:false, review_required:0, blocking_review_required:0, bypassed_for_testing:false}; }
+      try { review = await api(`/api/postprocess/jobs/${jobId}/human-review`); }
+      catch (e) { review = {load_error:true, error:e.message, review_required:null, human_reviewed:null, entries:[]}; }
+      try { auditGate = {...await api(`/api/postprocess/jobs/${jobId}/verifier-audit`), available:true, load_error:false}; }
+      catch (e) { auditGate = {available:false, load_error:true, error:e.message, review_required:null, blocking_review_required:null, bypassed_for_testing:false}; }
       const renderSignature = JSON.stringify({book, review, auditGate, stage2bStatus});
       if (force || renderSignature !== lastRenderSignature) {
         render();
