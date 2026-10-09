@@ -3169,7 +3169,12 @@ async def documents() -> dict:
                 continue
             manual_types[manual_job_id] = str(manual.get("manual_type") or "other")
             book_row = row_by_job.get(manual_job_id)
-            if not book_row or not bool((book_row.get("pipeline") or {}).get("stage3_ready")) or not book_row.get("result_dir"):
+            book_pipeline = (book_row or {}).get("pipeline") or {}
+            if (
+                not book_row
+                or book_pipeline.get("next_stage") != "post_stage3"
+                or not book_row.get("result_dir")
+            ):
                 complete = False
                 continue
             index_path = Path(runtime.config.processed_dir) / Path(str(book_row["result_dir"])).name / "retrieval_index.jsonl"
@@ -3210,7 +3215,7 @@ async def documents() -> dict:
             pipeline["machine_embedding_reason"] = "manual_not_assigned_to_machine"
             pipeline["machine_embedding_rows"] = 0
 
-        if pipeline.get("stage3_ready"):
+        if pipeline.get("next_stage") == "post_stage3":
             if not owner:
                 pipeline["next_stage"] = "assign_machine"
                 pipeline["blocked_reason"] = "Assign this manual to its physical machine before hybrid retrieval."
@@ -5483,7 +5488,11 @@ async def _retrieval_books() -> list[dict]:
             "postprocess_job_id": int(job.get("id") or 0),
             "source_filename": source_name,
             "result_dir": result_dir.name,
-            "index_ready": bool(stage3_info.get("ready") and retrieval_index_path.is_file()),
+            "index_ready": bool(
+                pending_human_review == 0
+                and stage3_info.get("ready")
+                and retrieval_index_path.is_file()
+            ),
             "stage2c_current": bool(stage2c_info.get("ready")),
             "stage2c_reason": stage2c_info.get("reason"),
             "stage3_current": bool(stage3_info.get("ready")),
@@ -5505,7 +5514,11 @@ async def _retrieval_books() -> list[dict]:
             # Single-book scopes remain available for lexical inspection only.
             "hybrid_index_ready": False,
             "hybrid_index_status": {"ready": False, "scope": "equipment", "reason": "machine_scoped_embeddings"},
-            "visual_index_ready": (result_dir / "visual_evidence_index.jsonl").is_file(),
+            "visual_index_ready": bool(
+                pending_human_review == 0
+                and stage3_info.get("ready")
+                and (result_dir / "visual_evidence_index.jsonl").is_file()
+            ),
             "readiness": book_readiness(
                 correction_current=bool(stage2c_info.get("ready")),
                 verification_ready=all(item.get("status") == "completed" for item in verification_rows_for_stage2c(verification_rows, artifact_sweep_required=bool(getattr(runtime.config, "stage2b_artifact_sweep_required_for_finalize", True)))),
