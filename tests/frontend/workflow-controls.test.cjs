@@ -10,7 +10,7 @@ function library(){
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
 test('summary clicks filter the actual library without a scope error',async()=>{const h=library();await settle();h.card.click();assert.equal(h.el('book-filter').value,'attention');assert.match(h.el('book-list').innerHTML,/Broken/);assert.doesNotMatch(h.el('book-list').innerHTML,/ui29-test-rag/);});
 test('search readiness does not certify book validation',async()=>{const h=library();await settle();assert.match(h.el('book-list').innerHTML,/Search available/);assert.doesNotMatch(h.el('book-list').innerHTML,/RAG ready/);});
-test('verifier audit is shown as an operator blocker before Stage 3',async()=>{const h=library();await settle();assert.match(h.el('book-list').innerHTML,/2 verifier audit item\(s\) need a decision/);});
+test('verifier audit is shown as an operator blocker before Stage 3',async()=>{const h=library();await settle();assert.match(h.el('book-list').innerHTML,/2 verifier audit items need a decision/);});
 const review=fs.readFileSync('app/static/review-workers.js','utf8');
 const ctx={};vm.runInNewContext(review.slice(review.indexOf('function schedulerState'),review.indexOf('function workerState')),ctx);
 test('scheduler distinguishes stopped, blocked, working and idle dispatch',()=>{
