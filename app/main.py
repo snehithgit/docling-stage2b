@@ -3245,15 +3245,24 @@ async def _apply_document_readiness(row: dict) -> dict:
     return row
 
 
-@app.get("/api/documents")
-async def documents() -> dict:
-    """Unified document library with strict sequential-pipeline readiness."""
-    rows = await asyncio.to_thread(enrich_postprocess_jobs, await runtime.postprocess_store.list_jobs(limit=500))
+async def _build_documents_payload(*, include_readiness: bool) -> dict:
+    """Build canonical library state, optionally including detailed readiness.
+
+    Pipeline sequencing and machine readiness stay identical for both callers.
+    The compact Books summary skips evidence/readiness expansion because that
+    page does not display it; exact/full document APIs still include it.
+    """
+    rows = await asyncio.to_thread(
+        enrich_postprocess_jobs,
+        await runtime.postprocess_store.list_jobs(limit=500),
+    )
     verification_books = {
         int(item["postprocess_job_id"]): item
         for item in await runtime.stage2b_store.list_books()
     }
-    registry = await asyncio.to_thread(load_registry, Path(runtime.config.processed_dir))
+    registry = await asyncio.to_thread(
+        load_registry, Path(runtime.config.processed_dir)
+    )
     owner_by_job: dict[int, dict] = {}
     for equipment in registry.get("equipment") or []:
         for manual in equipment.get("manuals") or []:
@@ -3261,6 +3270,7 @@ async def documents() -> dict:
                 owner_by_job[int(manual.get("postprocess_job_id") or 0)] = equipment
             except (TypeError, ValueError):
                 continue
+
     rows = [
         await _enrich_document_core(
             row, verification_books.get(int(row.get("id") or 0), {})
@@ -3269,10 +3279,14 @@ async def documents() -> dict:
     ]
 
     # Final machine-level readiness is evaluated only after every book has its
-    # current Stage 3 state.  A machine embedding is one persisted corpus made
+    # current Stage 3 state. A machine embedding is one persisted corpus made
     # from all assigned manuals, so one missing/stale manual keeps the whole
     # machine downstream stage blocked instead of silently searching a subset.
-    row_by_job = {int(row.get("id") or 0): row for row in rows if int(row.get("id") or 0) > 0}
+    row_by_job = {
+        int(row.get("id") or 0): row
+        for row in rows
+        if int(row.get("id") or 0) > 0
+    }
     equipment_embedding_status: dict[str, dict] = {}
     for equipment in registry.get("equipment") or []:
         equipment_id = str(equipment.get("equipment_id") or "").strip()
@@ -3301,7 +3315,11 @@ async def documents() -> dict:
             ):
                 complete = False
                 continue
-            index_path = Path(runtime.config.processed_dir) / Path(str(book_row["result_dir"])).name / "retrieval_index.jsonl"
+            index_path = (
+                Path(runtime.config.processed_dir)
+                / Path(str(book_row["result_dir"])).name
+                / "retrieval_index.jsonl"
+            )
             if not index_path.is_file():
                 complete = False
                 continue
@@ -3315,7 +3333,9 @@ async def documents() -> dict:
             }
         else:
             equipment_embedding_status[equipment_id] = equipment_hybrid_index_status(
-                Path(runtime.config.processed_dir), equipment_id, index_paths,
+                Path(runtime.config.processed_dir),
+                equipment_id,
+                index_paths,
                 model=runtime.config.retrieval_embedding_model,
                 document_prefix=runtime.config.retrieval_embedding_document_prefix,
                 manual_types=manual_types,
@@ -3329,13 +3349,20 @@ async def documents() -> dict:
             if owner else None
         )
         _apply_document_machine_state(row, owner, machine_status)
-        await _apply_document_readiness(row)
+        if include_readiness:
+            await _apply_document_readiness(row)
 
     return {
         "documents": rows,
         "pipeline_sequence": dict(runtime.pipeline_sequence_state),
         "equipment_embedding_status": equipment_embedding_status,
     }
+
+
+@app.get("/api/documents")
+async def documents() -> dict:
+    """Full library payload with detailed evidence/search readiness."""
+    return await _build_documents_payload(include_readiness=True)
 
 
 _DOCUMENT_SUMMARY_MAX_AGE_SECONDS = 120.0
@@ -3402,7 +3429,7 @@ async def document_summaries(generation: int | None = None) -> dict:
             return dict(cache["payload"])
 
         start_generation = current_generation
-        full = await documents()
+        full = await _build_documents_payload(include_readiness=False)
         end_generation = _document_summary_generation()
         payload = {
             "documents": [
