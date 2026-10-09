@@ -244,6 +244,32 @@ def test_review_page_uses_shared_shell_queue_and_docling_context():
     assert "Not Pi5" not in html
 
 
+def test_optional_evidence_readiness_can_render_neutral_instead_of_permanent_warning():
+    js = read("readiness.js")
+    css = read("styles.css")
+    assert "const evidenceTone" in js
+    assert "'neutral'" in js
+    assert ".v5-readiness-card.neutral" in css
+
+
+def test_book_workflow_uses_exact_status_endpoint_and_fail_closed_review_ui():
+    js = read("book.js")
+    assert "api(`/api/documents/${jobId}`)" in js
+    assert "api('/api/documents')" not in js
+    assert "load_error:true" in js
+    assert "Status unavailable" in js
+    assert "will not treat an unknown status as complete" in js
+
+
+def test_review_hub_surfaces_optional_evidence_without_making_it_a_blocking_stage():
+    html = read("review-center.html")
+    workflow = read("workflow.html")
+    assert "Evidence &amp; diagrams" in html
+    assert 'href="/technical-evidence"' in html
+    assert "Required review" in workflow
+    assert "optional enrichment step" in workflow
+
+
 def test_book_stage3_completed_state_uses_pipeline_freshness_and_machine_rag_stage():
     html = read("book.html")
     js = read("book.js")

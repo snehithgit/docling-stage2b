@@ -60,6 +60,41 @@ async def test_sequence_advances_clean_zero_route_book_after_discovery(tmp_path,
 
 
 @pytest.mark.asyncio
+async def test_exact_document_endpoint_does_not_list_unrelated_library_jobs(tmp_path, monkeypatch):
+    raw = {"id": 7, "status": "completed", "result_dir": "book", "source_filename": "Manual.pdf"}
+    post_store = SimpleNamespace(get_job=AsyncMock(return_value=raw))
+    stage2b_store = SimpleNamespace(list_books=AsyncMock(return_value=[]))
+    original_runtime = main.runtime
+    main.runtime = SimpleNamespace(
+        config=SimpleNamespace(processed_dir=str(tmp_path)),
+        postprocess_store=post_store,
+        stage2b_store=stage2b_store,
+        pipeline_sequence_state={},
+    )
+    monkeypatch.setattr(main, "enrich_postprocess_jobs", lambda rows: list(rows))
+    monkeypatch.setattr(main, "load_registry", lambda *_args, **_kwargs: {"equipment": []})
+
+    async def enrich(row, _summary):
+        return {**row, "pipeline": {"next_stage": "post_stage3", "stage3_ready": True}}
+
+    async def readiness(row):
+        row["readiness"] = {"search": {"lexical_ready": True}}
+        return row
+
+    monkeypatch.setattr(main, "_enrich_document_core", enrich)
+    monkeypatch.setattr(main, "_apply_document_readiness", readiness)
+    try:
+        result = await main.document_details(7)
+    finally:
+        main.runtime = original_runtime
+
+    post_store.get_job.assert_awaited_once_with(7)
+    assert result["document"]["id"] == 7
+    assert result["document"]["pipeline"]["next_stage"] == "assign_machine"
+    assert result["document"]["readiness"]["search"]["lexical_ready"] is True
+
+
+@pytest.mark.asyncio
 async def test_colab_artifact_counts_include_every_status(tmp_path):
     import sqlite3
     from app.stage2b_store import Stage2BStore

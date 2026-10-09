@@ -3046,6 +3046,205 @@ async def postprocess_status() -> dict:
     }
 
 
+def _document_verification_summary(book: dict) -> dict:
+    return {
+        "pi5_completed": int(book.get("pi5_completed") or 0),
+        "pi5_pending": int(book.get("pi5_pending") or 0),
+        "pi5_processing": int(book.get("pi5_processing") or 0),
+        "pi5_failed": int(book.get("pi5_failed") or 0),
+        "oneplus_completed": int(book.get("oneplus_completed") or 0),
+        "oneplus_pending": int(book.get("oneplus_pending") or 0),
+        "oneplus_processing": int(book.get("oneplus_processing") or 0),
+        "oneplus_failed": int(book.get("oneplus_failed") or 0),
+        **{
+            f"{lane}_{status}": int(book.get(f"{lane}_{status}") or 0)
+            for lane in ("text", "vision", "artifact")
+            for status in ("pending", "processing", "completed", "failed")
+        },
+        **verification_counts(book),
+        "total": int(book.get("total") or 0),
+    }
+
+
+async def _enrich_document_core(row: dict, verification_book: dict) -> dict:
+    """Compute per-book pipeline truth without evaluating unrelated manuals."""
+    row = dict(row)
+    job_id = int(row.get("id") or 0)
+    verification = _document_verification_summary(verification_book or {})
+    row["verification"] = verification
+    pipeline = {
+        "stage2a_ready": row.get("status") == "completed",
+        "stage2b_ready": False,
+        "stage2c_ready": False,
+        "stage3_ready": False,
+        "machine_assigned": False,
+        "machine_id": None,
+        "machine_name": None,
+        "next_stage": "stage2a",
+        "blocked_reason": None,
+    }
+    if row.get("status") == "completed" and row.get("result_dir"):
+        total = verification["total"]
+        result_dir = Path(runtime.config.processed_dir) / Path(
+            str(row.get("result_dir"))
+        ).name
+        await _ensure_table_collapse_compatibility(row, result_dir)
+        structural_review = await asyncio.to_thread(
+            stage2a_human_review_summary, result_dir
+        )
+        row["stage2a_human_review"] = structural_review
+        pipeline["stage2a_human_review_pending"] = int(
+            structural_review.get("blocking_review_required") or 0
+        )
+        verification_rows = (
+            await runtime.stage2b_store.list_book_jobs_raw(job_id)
+            if total else []
+        )
+        discovery_current = getattr(
+            runtime.stage2b_worker, "book_discovery_current", lambda _job_id: False
+        )(job_id)
+        artifact_sweep_required = bool(getattr(
+            runtime.config,
+            "stage2b_artifact_sweep_required_for_finalize",
+            True,
+        ))
+        required_verification = required_verification_state(
+            verification_rows,
+            discovery_current=discovery_current,
+            artifact_sweep_required=artifact_sweep_required,
+            expected_total=total,
+        )
+        pipeline["stage2b_discovery_current"] = bool(discovery_current)
+        pipeline["required_verification"] = required_verification
+        pipeline["required_verification_ready"] = bool(
+            required_verification.get("ready")
+        )
+        pipeline["stage2b_ready"] = bool(required_verification.get("ready"))
+        s2c = stage2c_freshness(
+            result_dir,
+            verification_rows,
+            rule_version=STAGE2C_RULE_VERSION,
+            artifact_sweep_required=artifact_sweep_required,
+        )
+        s3 = stage3_freshness(
+            result_dir,
+            s2c,
+            stage3_rule_version=STAGE3_RULE_VERSION,
+            retrieval_rule_version=RETRIEVAL_RULE_VERSION,
+        )
+        audit_gate = await asyncio.to_thread(
+            verifier_audit_summary,
+            result_dir,
+            text_require_human=bool(runtime.config.stage2c_require_human_review),
+        )
+        audit_pending = int(audit_gate.get("review_required") or 0)
+        audit_blocking = int(audit_gate.get("blocking_review_required") or 0)
+        pipeline["verifier_audit_pending"] = audit_pending
+        pipeline["verifier_audit_blocking"] = audit_blocking
+        pipeline["blocking_reviews"] = (
+            int(structural_review.get("blocking_review_required") or 0)
+            + audit_blocking
+        )
+        pipeline["audit_bypassed"] = bool(
+            audit_gate.get("bypassed_for_testing")
+        )
+        pipeline["stage2c_ready"] = bool(s2c.get("ready"))
+        pipeline["stage3_ready"] = bool(s3.get("ready"))
+        row["stage2c_status"] = s2c.get("status") or row.get("stage2c_status")
+        row["stage3_status"] = s3.get("status") or row.get("stage3_status")
+        row["chunks_available"] = bool(s3.get("ready"))
+        pipeline.update(resolve_pipeline_stage(
+            stage2a_ready=True,
+            verification=required_verification,
+            stage2c_ready=bool(s2c.get("ready")),
+            stage2c_reason=s2c.get("reason"),
+            structural_review_pending=int(
+                structural_review.get("blocking_review_required") or 0
+            ),
+            verifier_audit_pending=audit_pending,
+            verifier_audit_blocking=audit_blocking,
+            audit_bypassed=bool(audit_gate.get("bypassed_for_testing")),
+            stage3_ready=bool(s3.get("ready")),
+            stage3_reason=s3.get("reason"),
+        ))
+    row["pipeline"] = pipeline
+    return row
+
+
+def _apply_document_machine_state(
+    row: dict,
+    owner: dict | None,
+    machine_status: dict | None,
+) -> dict:
+    pipeline = row.get("pipeline") or {}
+    if owner:
+        equipment_id = str(owner.get("equipment_id") or "")
+        pipeline["machine_assigned"] = True
+        pipeline["machine_id"] = equipment_id
+        pipeline["machine_name"] = owner.get("name")
+        status = machine_status or {
+            "ready": False,
+            "reason": "machine_embedding_not_built",
+        }
+        pipeline["machine_embedding_ready"] = bool(status.get("ready"))
+        pipeline["machine_embedding_reason"] = status.get("reason")
+        pipeline["machine_embedding_rows"] = int(status.get("rows") or 0)
+    else:
+        pipeline["machine_embedding_ready"] = False
+        pipeline["machine_embedding_reason"] = "manual_not_assigned_to_machine"
+        pipeline["machine_embedding_rows"] = 0
+
+    # Only a book that cleared every canonical blocker can advance into machine
+    # assignment/embedding/RAG. A physically present old Stage 3 index is not
+    # sufficient when a newer human-review gate is active.
+    if pipeline.get("next_stage") == "post_stage3":
+        if not owner:
+            pipeline["next_stage"] = "assign_machine"
+            pipeline["blocked_reason"] = (
+                "Assign this manual to its physical machine before hybrid retrieval."
+            )
+        elif pipeline.get("machine_embedding_ready"):
+            pipeline["next_stage"] = "rag_ready"
+            pipeline["blocked_reason"] = None
+        else:
+            pipeline["next_stage"] = "machine_embedding"
+            pipeline["blocked_reason"] = (
+                "Machine embeddings are waiting for all assigned manuals to finish "
+                "Stage 3, or are rebuilding after an upstream change."
+            )
+    row["pipeline"] = pipeline
+    return row
+
+
+async def _apply_document_readiness(row: dict) -> dict:
+    result_dir = (
+        Path(runtime.config.processed_dir) / Path(str(row["result_dir"])).name
+        if row.get("result_dir")
+        else None
+    )
+    coverage = (
+        await asyncio.to_thread(evidence_coverage, result_dir)
+        if result_dir is not None
+        else {
+            "status": "not_scanned",
+            "detected": None,
+            "validated": None,
+            "whole_manual_coverage_measured": False,
+        }
+    )
+    pipeline = row.get("pipeline") or {}
+    row["readiness"] = book_readiness(
+        correction_current=bool(pipeline.get("stage2c_ready")),
+        verification_ready=bool(pipeline.get("required_verification_ready")),
+        blocking_reviews=int(pipeline.get("blocking_reviews") or 0),
+        index_current=bool(pipeline.get("stage3_ready")),
+        coverage=coverage,
+        hybrid_ready=bool(pipeline.get("machine_embedding_ready")),
+        audit_bypassed=bool(pipeline.get("audit_bypassed")),
+    )
+    return row
+
+
 @app.get("/api/documents")
 async def documents() -> dict:
     """Unified document library with strict sequential-pipeline readiness."""
@@ -3062,90 +3261,12 @@ async def documents() -> dict:
                 owner_by_job[int(manual.get("postprocess_job_id") or 0)] = equipment
             except (TypeError, ValueError):
                 continue
-    for row in rows:
-        job_id = int(row.get("id") or 0)
-        book = verification_books.get(job_id, {})
-        verification = {
-            "pi5_completed": int(book.get("pi5_completed") or 0),
-            "pi5_pending": int(book.get("pi5_pending") or 0),
-            "pi5_processing": int(book.get("pi5_processing") or 0),
-            "pi5_failed": int(book.get("pi5_failed") or 0),
-            "oneplus_completed": int(book.get("oneplus_completed") or 0),
-            "oneplus_pending": int(book.get("oneplus_pending") or 0),
-            "oneplus_processing": int(book.get("oneplus_processing") or 0),
-            "oneplus_failed": int(book.get("oneplus_failed") or 0),
-            **{f"{lane}_{status}": int(book.get(f"{lane}_{status}") or 0) for lane in ("text", "vision", "artifact") for status in ("pending", "processing", "completed", "failed")},
-            **verification_counts(book),
-            "total": int(book.get("total") or 0),
-        }
-        row["verification"] = verification
-        pipeline = {
-            "stage2a_ready": row.get("status") == "completed",
-            "stage2b_ready": False,
-            "stage2c_ready": False,
-            "stage3_ready": False,
-            "machine_assigned": False,
-            "machine_id": None,
-            "machine_name": None,
-            "next_stage": "stage2a",
-            "blocked_reason": None,
-        }
-        if row.get("status") == "completed" and row.get("result_dir"):
-            total = verification["total"]
-            result_dir = Path(runtime.config.processed_dir) / Path(str(row.get("result_dir"))).name
-            await _ensure_table_collapse_compatibility(row, result_dir)
-            structural_review = await asyncio.to_thread(stage2a_human_review_summary, result_dir)
-            row["stage2a_human_review"] = structural_review
-            pipeline["stage2a_human_review_pending"] = int(structural_review.get("blocking_review_required") or 0)
-            verification_rows = await runtime.stage2b_store.list_book_jobs_raw(job_id) if total else []
-            discovery_current = getattr(runtime.stage2b_worker, "book_discovery_current", lambda _job_id: False)(job_id)
-            artifact_sweep_required = bool(getattr(runtime.config, "stage2b_artifact_sweep_required_for_finalize", True))
-            required_verification = required_verification_state(
-                verification_rows,
-                discovery_current=discovery_current,
-                artifact_sweep_required=artifact_sweep_required,
-                expected_total=total,
-            )
-            pipeline["stage2b_discovery_current"] = bool(discovery_current)
-            pipeline["required_verification"] = required_verification
-            pipeline["required_verification_ready"] = bool(required_verification.get("ready"))
-            pipeline["stage2b_ready"] = bool(required_verification.get("ready"))
-            s2c = stage2c_freshness(
-                result_dir, verification_rows, rule_version=STAGE2C_RULE_VERSION,
-                artifact_sweep_required=artifact_sweep_required,
-            )
-            s3 = stage3_freshness(
-                result_dir, s2c, stage3_rule_version=STAGE3_RULE_VERSION,
-                retrieval_rule_version=RETRIEVAL_RULE_VERSION,
-            )
-            audit_gate = await asyncio.to_thread(
-                verifier_audit_summary, result_dir,
-                text_require_human=bool(runtime.config.stage2c_require_human_review),
-            )
-            audit_pending = int(audit_gate.get("review_required") or 0)
-            audit_blocking = int(audit_gate.get("blocking_review_required") or 0)
-            pipeline["verifier_audit_pending"] = audit_pending
-            pipeline["verifier_audit_blocking"] = audit_blocking
-            pipeline["blocking_reviews"] = int(structural_review.get("blocking_review_required") or 0) + audit_blocking
-            pipeline["audit_bypassed"] = bool(audit_gate.get("bypassed_for_testing"))
-            pipeline["stage2c_ready"] = bool(s2c.get("ready"))
-            pipeline["stage3_ready"] = bool(s3.get("ready"))
-            row["stage2c_status"] = s2c.get("status") or row.get("stage2c_status")
-            row["stage3_status"] = s3.get("status") or row.get("stage3_status")
-            row["chunks_available"] = bool(s3.get("ready"))
-            pipeline.update(resolve_pipeline_stage(
-                stage2a_ready=True,
-                verification=required_verification,
-                stage2c_ready=bool(s2c.get("ready")),
-                stage2c_reason=s2c.get("reason"),
-                structural_review_pending=int(structural_review.get("blocking_review_required") or 0),
-                verifier_audit_pending=audit_pending,
-                verifier_audit_blocking=audit_blocking,
-                audit_bypassed=bool(audit_gate.get("bypassed_for_testing")),
-                stage3_ready=bool(s3.get("ready")),
-                stage3_reason=s3.get("reason"),
-            ))
-        row["pipeline"] = pipeline
+    rows = [
+        await _enrich_document_core(
+            row, verification_books.get(int(row.get("id") or 0), {})
+        )
+        for row in rows
+    ]
 
     # Final machine-level readiness is evaluated only after every book has its
     # current Stage 3 state.  A machine embedding is one persisted corpus made
@@ -3157,7 +3278,10 @@ async def documents() -> dict:
         equipment_id = str(equipment.get("equipment_id") or "").strip()
         if not equipment_id:
             continue
-        manual_items = list(equipment.get("manuals") or [])
+        manual_items = [
+            manual for manual in (equipment.get("manuals") or [])
+            if manual.get("active_for_rag", True)
+        ]
         index_paths: list[Path] = []
         manual_types: dict[int, str] = {}
         complete = bool(manual_items)
@@ -3169,7 +3293,12 @@ async def documents() -> dict:
                 continue
             manual_types[manual_job_id] = str(manual.get("manual_type") or "other")
             book_row = row_by_job.get(manual_job_id)
-            if not book_row or not bool((book_row.get("pipeline") or {}).get("stage3_ready")) or not book_row.get("result_dir"):
+            book_pipeline = (book_row or {}).get("pipeline") or {}
+            if (
+                not book_row
+                or book_pipeline.get("next_stage") != "post_stage3"
+                or not book_row.get("result_dir")
+            ):
                 complete = False
                 continue
             index_path = Path(runtime.config.processed_dir) / Path(str(book_row["result_dir"])).name / "retrieval_index.jsonl"
@@ -3194,47 +3323,149 @@ async def documents() -> dict:
 
     for row in rows:
         job_id = int(row.get("id") or 0)
-        pipeline = row.get("pipeline") or {}
         owner = owner_by_job.get(job_id)
-        if owner:
-            equipment_id = str(owner.get("equipment_id") or "")
-            pipeline["machine_assigned"] = True
-            pipeline["machine_id"] = equipment_id
-            pipeline["machine_name"] = owner.get("name")
-            machine_status = equipment_embedding_status.get(equipment_id, {"ready": False, "reason": "machine_embedding_not_built"})
-            pipeline["machine_embedding_ready"] = bool(machine_status.get("ready"))
-            pipeline["machine_embedding_reason"] = machine_status.get("reason")
-            pipeline["machine_embedding_rows"] = int(machine_status.get("rows") or 0)
-        else:
-            pipeline["machine_embedding_ready"] = False
-            pipeline["machine_embedding_reason"] = "manual_not_assigned_to_machine"
-            pipeline["machine_embedding_rows"] = 0
-
-        if pipeline.get("stage3_ready"):
-            if not owner:
-                pipeline["next_stage"] = "assign_machine"
-                pipeline["blocked_reason"] = "Assign this manual to its physical machine before hybrid retrieval."
-            elif pipeline.get("machine_embedding_ready"):
-                pipeline["next_stage"] = "rag_ready"
-                pipeline["blocked_reason"] = None
-            else:
-                pipeline["next_stage"] = "machine_embedding"
-                pipeline["blocked_reason"] = "Machine embeddings are waiting for all assigned manuals to finish Stage 3, or are rebuilding after an upstream change."
-        row["pipeline"] = pipeline
-        coverage = await asyncio.to_thread(evidence_coverage, Path(runtime.config.processed_dir) / Path(str(row["result_dir"])).name) if row.get("result_dir") else {"status": "not_scanned", "detected": None, "validated": None, "whole_manual_coverage_measured": False}
-        row["readiness"] = book_readiness(
-            correction_current=bool(pipeline.get("stage2c_ready")),
-            verification_ready=bool(pipeline.get("required_verification_ready")),
-            blocking_reviews=int(pipeline.get("blocking_reviews") or 0),
-            index_current=bool(pipeline.get("stage3_ready")), coverage=coverage,
-            hybrid_ready=bool(pipeline.get("machine_embedding_ready")),
-            audit_bypassed=bool(pipeline.get("audit_bypassed")),
+        machine_status = (
+            equipment_embedding_status.get(str(owner.get("equipment_id") or ""))
+            if owner else None
         )
+        _apply_document_machine_state(row, owner, machine_status)
+        await _apply_document_readiness(row)
 
     return {
         "documents": rows,
         "pipeline_sequence": dict(runtime.pipeline_sequence_state),
         "equipment_embedding_status": equipment_embedding_status,
+    }
+
+
+async def _exact_equipment_embedding_status(
+    equipment: dict,
+    verification_books: dict[int, dict],
+    current_row: dict,
+) -> dict:
+    """Evaluate only the manuals assigned to one machine, not the whole library."""
+    manual_items = [
+        manual for manual in (equipment.get("manuals") or [])
+        if manual.get("active_for_rag", True)
+    ]
+    equipment_id = str(equipment.get("equipment_id") or "").strip()
+    if not equipment_id or not manual_items:
+        return {
+            "ready": False,
+            "reason": "machine_has_no_active_manuals",
+            "manual_count": len(manual_items),
+            "ready_manual_count": 0,
+        }
+
+    index_paths: list[Path] = []
+    manual_types: dict[int, str] = {}
+    current_id = int(current_row.get("id") or 0)
+    for manual in manual_items:
+        try:
+            manual_job_id = int(manual.get("postprocess_job_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if manual_job_id <= 0:
+            continue
+        manual_types[manual_job_id] = str(manual.get("manual_type") or "other")
+        if manual_job_id == current_id:
+            book_row = current_row
+        else:
+            raw = await runtime.postprocess_store.get_job(manual_job_id)
+            if not raw:
+                continue
+            enriched = await asyncio.to_thread(enrich_postprocess_jobs, [raw])
+            if not enriched:
+                continue
+            book_row = await _enrich_document_core(
+                enriched[0], verification_books.get(manual_job_id, {})
+            )
+        pipeline = book_row.get("pipeline") or {}
+        if pipeline.get("next_stage") != "post_stage3" or not book_row.get("result_dir"):
+            continue
+        index_path = (
+            Path(runtime.config.processed_dir)
+            / Path(str(book_row["result_dir"])).name
+            / "retrieval_index.jsonl"
+        )
+        if index_path.is_file():
+            index_paths.append(index_path)
+
+    if len(index_paths) != len(manual_items):
+        return {
+            "ready": False,
+            "reason": "machine_waiting_for_all_manual_stage3",
+            "manual_count": len(manual_items),
+            "ready_manual_count": len(index_paths),
+        }
+    return equipment_hybrid_index_status(
+        Path(runtime.config.processed_dir),
+        equipment_id,
+        index_paths,
+        model=runtime.config.retrieval_embedding_model,
+        document_prefix=runtime.config.retrieval_embedding_document_prefix,
+        manual_types=manual_types,
+    )
+
+
+@app.get("/api/documents/{job_id}")
+async def document_details(job_id: int) -> dict:
+    """Exact book status for the Book page without recomputing unrelated manuals."""
+    raw = await runtime.postprocess_store.get_job(job_id)
+    if not raw:
+        raise HTTPException(status_code=404, detail="Book not found.")
+    enriched = await asyncio.to_thread(enrich_postprocess_jobs, [raw])
+    if not enriched:
+        raise HTTPException(status_code=404, detail="Book not found.")
+
+    verification_books = {
+        int(item["postprocess_job_id"]): item
+        for item in await runtime.stage2b_store.list_books()
+    }
+    row = await _enrich_document_core(
+        enriched[0], verification_books.get(int(job_id), {})
+    )
+
+    registry = await asyncio.to_thread(
+        load_registry, Path(runtime.config.processed_dir)
+    )
+    owner = None
+    for equipment in registry.get("equipment") or []:
+        if any(
+            int(manual.get("postprocess_job_id") or 0) == int(job_id)
+            for manual in (equipment.get("manuals") or [])
+            if str(manual.get("postprocess_job_id") or "").isdigit()
+        ):
+            owner = equipment
+            break
+
+    equipment_status: dict[str, dict] = {}
+    machine_status = None
+    if owner:
+        equipment_id = str(owner.get("equipment_id") or "")
+        pipeline = row.get("pipeline") or {}
+        if pipeline.get("next_stage") == "post_stage3":
+            machine_status = await _exact_equipment_embedding_status(
+                owner, verification_books, row
+            )
+        else:
+            machine_status = {
+                "ready": False,
+                "reason": "machine_waiting_for_current_book",
+                "manual_count": len([
+                    manual for manual in (owner.get("manuals") or [])
+                    if manual.get("active_for_rag", True)
+                ]),
+                "ready_manual_count": 0,
+            }
+        equipment_status[equipment_id] = machine_status
+
+    _apply_document_machine_state(row, owner, machine_status)
+    await _apply_document_readiness(row)
+    return {
+        "document": row,
+        "pipeline_sequence": dict(runtime.pipeline_sequence_state),
+        "equipment_embedding_status": equipment_status,
     }
 
 
@@ -5483,7 +5714,11 @@ async def _retrieval_books() -> list[dict]:
             "postprocess_job_id": int(job.get("id") or 0),
             "source_filename": source_name,
             "result_dir": result_dir.name,
-            "index_ready": bool(stage3_info.get("ready") and retrieval_index_path.is_file()),
+            "index_ready": bool(
+                pending_human_review == 0
+                and stage3_info.get("ready")
+                and retrieval_index_path.is_file()
+            ),
             "stage2c_current": bool(stage2c_info.get("ready")),
             "stage2c_reason": stage2c_info.get("reason"),
             "stage3_current": bool(stage3_info.get("ready")),
@@ -5505,7 +5740,11 @@ async def _retrieval_books() -> list[dict]:
             # Single-book scopes remain available for lexical inspection only.
             "hybrid_index_ready": False,
             "hybrid_index_status": {"ready": False, "scope": "equipment", "reason": "machine_scoped_embeddings"},
-            "visual_index_ready": (result_dir / "visual_evidence_index.jsonl").is_file(),
+            "visual_index_ready": bool(
+                pending_human_review == 0
+                and stage3_info.get("ready")
+                and (result_dir / "visual_evidence_index.jsonl").is_file()
+            ),
             "readiness": book_readiness(
                 correction_current=bool(stage2c_info.get("ready")),
                 verification_ready=all(item.get("status") == "completed" for item in verification_rows_for_stage2c(verification_rows, artifact_sweep_required=bool(getattr(runtime.config, "stage2b_artifact_sweep_required_for_finalize", True)))),

@@ -3,6 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from app import main
 
 from app.config import AppConfig
 from app.events import EventBroker
@@ -96,6 +97,20 @@ def test_testing_bypass_keeps_unresolved_audit_visible_but_allows_stage3():
         stage3_ready=False,
     )
     assert state["next_stage"] == "stage3"
+
+
+def test_machine_projection_cannot_override_active_review_gate():
+    row = {
+        "pipeline": {
+            "next_stage": "verifier_audit",
+            "stage3_ready": True,
+            "verifier_audit_blocking": 2,
+        }
+    }
+    owner = {"equipment_id": "eq-1", "name": "Crane"}
+    main._apply_document_machine_state(row, owner, {"ready": True, "rows": 50})
+    assert row["pipeline"]["machine_embedding_ready"] is True
+    assert row["pipeline"]["next_stage"] == "verifier_audit"
 
 
 def test_human_visual_recovery_rows_do_not_change_stage2c_signature_inputs():
