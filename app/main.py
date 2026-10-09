@@ -57,6 +57,8 @@ from .pipeline_state import (
     stage3_freshness,
     migrate_stage3_semantic_signature,
     verification_rows_for_stage2c,
+    required_verification_state,
+    resolve_pipeline_stage,
 )
 from .retrieval import (
     add_benchmark_item,
@@ -2902,53 +2904,58 @@ async def documents() -> dict:
         }
         if row.get("status") == "completed" and row.get("result_dir"):
             total = verification["total"]
-            blockers = sum(verification[key] for key in ("pending", "processing", "failed"))
-            pipeline["stage2b_ready"] = bool(total and blockers == 0 and (verification["completed"] == total))
             result_dir = Path(runtime.config.processed_dir) / Path(str(row.get("result_dir"))).name
             await _ensure_table_collapse_compatibility(row, result_dir)
             structural_review = await asyncio.to_thread(stage2a_human_review_summary, result_dir)
             row["stage2a_human_review"] = structural_review
             pipeline["stage2a_human_review_pending"] = int(structural_review.get("blocking_review_required") or 0)
             verification_rows = await runtime.stage2b_store.list_book_jobs_raw(job_id) if total else []
-            s2c = stage2c_freshness(result_dir, verification_rows, rule_version=STAGE2C_RULE_VERSION, artifact_sweep_required=bool(getattr(runtime.config, "stage2b_artifact_sweep_required_for_finalize", True)))
-            s3 = stage3_freshness(result_dir, s2c, stage3_rule_version=STAGE3_RULE_VERSION, retrieval_rule_version=RETRIEVAL_RULE_VERSION)
-            audit_gate = await asyncio.to_thread(verifier_audit_summary, result_dir, text_require_human=bool(runtime.config.stage2c_require_human_review))
-            pipeline["blocking_reviews"] = int(structural_review.get("blocking_review_required") or 0) + int(audit_gate.get("blocking_review_required") or 0)
+            discovery_current = getattr(runtime.stage2b_worker, "book_discovery_current", lambda _job_id: False)(job_id)
+            artifact_sweep_required = bool(getattr(runtime.config, "stage2b_artifact_sweep_required_for_finalize", True))
+            required_verification = required_verification_state(
+                verification_rows,
+                discovery_current=discovery_current,
+                artifact_sweep_required=artifact_sweep_required,
+            )
+            pipeline["stage2b_discovery_current"] = bool(discovery_current)
+            pipeline["required_verification"] = required_verification
+            pipeline["required_verification_ready"] = bool(required_verification.get("ready"))
+            pipeline["stage2b_ready"] = bool(required_verification.get("ready"))
+            s2c = stage2c_freshness(
+                result_dir, verification_rows, rule_version=STAGE2C_RULE_VERSION,
+                artifact_sweep_required=artifact_sweep_required,
+            )
+            s3 = stage3_freshness(
+                result_dir, s2c, stage3_rule_version=STAGE3_RULE_VERSION,
+                retrieval_rule_version=RETRIEVAL_RULE_VERSION,
+            )
+            audit_gate = await asyncio.to_thread(
+                verifier_audit_summary, result_dir,
+                text_require_human=bool(runtime.config.stage2c_require_human_review),
+            )
+            audit_pending = int(audit_gate.get("review_required") or 0)
+            audit_blocking = int(audit_gate.get("blocking_review_required") or 0)
+            pipeline["verifier_audit_pending"] = audit_pending
+            pipeline["verifier_audit_blocking"] = audit_blocking
+            pipeline["blocking_reviews"] = int(structural_review.get("blocking_review_required") or 0) + audit_blocking
             pipeline["audit_bypassed"] = bool(audit_gate.get("bypassed_for_testing"))
-            required_rows = verification_rows_for_stage2c(verification_rows, artifact_sweep_required=bool(getattr(runtime.config, "stage2b_artifact_sweep_required_for_finalize", True)))
-            pipeline["required_verification_ready"] = all(item.get("status") == "completed" for item in required_rows)
             pipeline["stage2c_ready"] = bool(s2c.get("ready"))
             pipeline["stage3_ready"] = bool(s3.get("ready"))
             row["stage2c_status"] = s2c.get("status") or row.get("stage2c_status")
             row["stage3_status"] = s3.get("status") or row.get("stage3_status")
             row["chunks_available"] = bool(s3.get("ready"))
-            if not pipeline["stage2b_ready"]:
-                pipeline["next_stage"] = "stage2b"
-                if verification["pi5_failed"] + verification["oneplus_failed"]:
-                    pipeline["blocked_reason"] = "Verification has failed routes; retry them before finalization."
-                elif total == 0:
-                    pipeline["blocked_reason"] = "Verification has not been prepared for this book yet."
-                else:
-                    pipeline["blocked_reason"] = "Verification must finish before Stage 2C."
-            elif not pipeline["stage2c_ready"]:
-                pipeline["next_stage"] = "stage2c"
-                pipeline["blocked_reason"] = s2c.get("reason")
-            elif int(pipeline.get("stage2a_human_review_pending") or 0) > 0:
-                pipeline["next_stage"] = "stage2a_human_review"
-                pipeline["blocked_reason"] = f"{int(pipeline['stage2a_human_review_pending'])} structural review item(s) must be resolved before Stage 3."
-            elif not pipeline["stage3_ready"]:
-                pipeline["next_stage"] = "stage3"
-                pipeline["blocked_reason"] = s3.get("reason")
-            else:
-                owner = owner_by_job.get(job_id)
-                if owner:
-                    pipeline["machine_assigned"] = True
-                    pipeline["machine_id"] = owner.get("equipment_id")
-                    pipeline["machine_name"] = owner.get("name")
-                    pipeline["next_stage"] = "machine_embedding"
-                else:
-                    pipeline["next_stage"] = "assign_machine"
-                    pipeline["blocked_reason"] = "Assign this manual to its physical machine before hybrid retrieval."
+            pipeline.update(resolve_pipeline_stage(
+                stage2a_ready=True,
+                verification=required_verification,
+                stage2c_ready=bool(s2c.get("ready")),
+                stage2c_reason=s2c.get("reason"),
+                structural_review_pending=int(structural_review.get("blocking_review_required") or 0),
+                verifier_audit_pending=audit_pending,
+                verifier_audit_blocking=audit_blocking,
+                audit_bypassed=bool(audit_gate.get("bypassed_for_testing")),
+                stage3_ready=bool(s3.get("ready")),
+                stage3_reason=s3.get("reason"),
+            ))
         row["pipeline"] = pipeline
 
     # Final machine-level readiness is evaluated only after every book has its
