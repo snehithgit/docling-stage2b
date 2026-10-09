@@ -1,81 +1,135 @@
-## .40.8A trusted-decision behavior
-
-- Human-verified ledger entries remain authoritative across Stage 2A regeneration.
-- Manual cross-check evidence is non-destructive unless a new READABLE candidate passes the deterministic source-transcription safety gate.
-- Troubleshooting/remedy preservation compares counted obligations, not verb types.
-- Table-cell metadata preserves table/cell plus complete row/column spans; structural binding enforcement at overlay application remains a later correctness follow-up.
-
-## .40.5 rule/freshness behavior
-
-- Stage 2C is not just content-signature gated; its source-fidelity rule version is part of readiness.
-- An unsafe automatic source transcription keeps immutable/original text downstream until reviewed.
-- Canonical Stage 3 chunks remain immutable during retrieval-rule-only upgrades.
-- Retrieval-rule changes rebuild only derived retrieval artifacts, then invalidate the affected complete machine embedding.
-- Benchmark execution must use one explicit/uniquely resolved equipment scope; no normal all-books fallback is allowed.
-
 # Stage-wise book and Machine RAG workflow
 
-Version: `2026.09.21.40.9`
+Version: `5.1.2.0`
 
-## Hard sequence
+This document describes the current operator-visible sequence and the backend
+readiness contract. Raw Docling conversion output remains immutable; later
+corrections and evidence are derived overlays/ledgers.
 
-1. **Docling conversion** — immutable converted ZIP/JSON.
-2. **Stage 2A** — deterministic quality profiling/routing plus per-page OCR-risk; source is not mutated. Human-verified ledger state survives regeneration.
-3. **Normal Stage 2B** — selected text/vision verification. Existing priority bands are refined by review-priority score; every current required normal route must finish successfully.
-4. **Artifact Sweep** — full technical-visual sweep releases only after normal verification is complete according to the configured finalize policy.
-5. **Stage 2C ledger** — correction/enrichment overlay with `stage2c-source-fidelity-v8`; automatic processing cannot override human decisions.
-6. **Verifier Audit gate** — unresolved human-required evidence must be decided, or the book must be explicitly marked bypassed-for-testing; bypass never means accepted.
-7. **Stage 3 HybridChunker** — consumes only completed/current Stage 2C + audit-gate state and stores its input signature.
-8. **Retrieval structural enrichment** — keeps canonical chunks intact while adding table quality metadata, safe same/adjacent-page `TBL-*` reconstruction, and table-header continuation anchors.
-9. **Retrieval index** — deterministic searchable text evidence with full provenance.
-10. **Machine embedding** — one complete corpus across all Current manuals assigned to the physical machine.
-11. **Machine RAG retrieval** — lexical + BGE vector RRF + structured-ID subject guard + weak semantic-intent near-tie signal, scoped only to that machine.
-12. **Optional generation** — mixed `[S#]/[V#]` evidence goes to exactly one explicitly selected Pi5, OnePlus or Groq provider.
+## Canonical hard sequence
 
-No stage may remain “ready” against newer upstream data.
+1. **Ingest / conversion** — create the immutable Docling ZIP/JSON.
+2. **Stage 2A · Analyze** — deterministic quality, OCR-risk, structural,
+   reading-order and routing analysis. Human structural decisions are durable.
+3. **Stage 2B · Verify** — run required Text/Vision verification routes.
+   The Artifact Sweep is part of this dependency when
+   `stage2b_artifact_sweep_required_for_finalize` is enabled. Optional artifact
+   rows do not block Stage 2C.
+4. **Stage 2C · Finalize** — build the authoritative correction/enrichment
+   ledger and overlays from the current Stage 2B generation. Human decisions
+   cannot be silently replaced by machine output.
+5. **Required human review gates** — unresolved Stage 2A structural findings
+   and blocking Verifier Audit findings must be resolved before Stage 3.
+   A testing bypass may allow the verifier gate to be crossed, but it never
+   converts unresolved evidence into accepted evidence.
+6. **Stage 3 · Canonical chunks and retrieval index** — build searchable chunks
+   from the current Stage 2C overlay. Any newer upstream semantic state makes
+   Stage 3 stale.
+7. **Machine assignment + embeddings** — all active manuals assigned to one
+   physical machine must have current, review-clean Stage 3 indexes before the
+   complete machine embedding corpus is considered ready.
+8. **Ask / Machine RAG** — lexical or hybrid retrieval is explicitly scoped to
+   one book for inspection or one configured physical machine for production
+   hybrid RAG. There is no normal all-books fallback.
+
+No downstream stage is allowed to remain production-ready against a newer
+upstream generation or an active blocking human-review gate.
+
+## Optional evidence and diagram enrichment
+
+After Stage 3 exists, **Evidence & diagrams** can be used to improve retrieval
+for diagrams, flowcharts, boxed notes and source items that ordinary text
+chunking may not represent well.
+
+This is not a blanket mandatory stage. A manual can have valid text search
+without every technical image being manually graph-validated.
+
+The evidence contracts are intentionally separate:
+
+- `read_source_rows()` is the broader technical-evidence **candidate** set:
+  Stage 3 text/table rows plus technical Stage 2C visual candidates.
+- `read_search_rows()` is the narrower **actually searchable** set:
+  Stage 3 retrieval rows plus `visual_evidence_index.jsonl` rows admitted to
+  RAG.
+- Source-coverage reporting uses the searchable set, so an unresolved technical
+  picture is not falsely counted as represented in search.
+- A human-validated `V-*` diagram record is rebound by exact evidence identity
+  before its graph nodes/edges can support RAG generation.
+- Active diagram worker identity includes book, evidence entry, picture and job
+  kind; two evidence entries sharing the same source picture cannot reuse the
+  wrong in-flight result.
+
+Evidence coverage is still a source-reference measurement, not proof that every
+semantic fact in the manual has been extracted.
+
+## One pipeline truth
+
+`required_verification_state()` is the canonical Stage 2B dependency
+predicate. It handles required/optional artifact work, zero-route clean books,
+and fails closed when summary counts claim rows exist but the raw verification
+snapshot is temporarily missing.
+
+`resolve_pipeline_stage()` defines the operator-facing order:
+
+`stage2a -> stage2b -> stage2c -> stage2a_human_review -> verifier_audit -> stage3 -> post_stage3`
+
+Machine assignment/embedding/RAG state is projected only from
+`post_stage3`. Therefore a physically present old Stage 3 index or embedding
+cannot overwrite a newer structural/verifier-review blocker.
+
+## Retrieval safety
+
+A book is `index_ready` only when:
+
+- Stage 3 is current;
+- the retrieval index exists; and
+- there are zero blocking structural/verifier human-review decisions.
+
+The same gate applies to visual retrieval rows. Machine hybrid readiness requires
+every active manual assigned to that machine to satisfy the same current
+post-Stage-3 contract. Existing index files are not treated as permission to
+search through a newly detected review blocker.
 
 ## Revision authority
 
-Each assigned manual may be Current/authoritative, Historical, or Draft. Only Current manuals are in the normal machine retrieval/embedding set. Historical/Draft copies remain auditable. Authority must be set from operator knowledge, not guessed from filenames.
+Each assigned manual may be Current/authoritative, Historical or Draft. Only
+active Current manuals belong to the normal machine retrieval/embedding set.
+Authority comes from operator knowledge, not filename guesses.
 
 ## Incremental machine rebuild
 
-If one current manual changes:
-
-- unchanged vectors from other/current rows may be reused when their exact embedding key still matches;
-- only changed/new rows are sent to TEI;
-- the system assembles a full new machine matrix;
-- atomic replacement occurs only after the full corpus exists;
-- Machine RAG is stale/not-ready until that commit completes.
-
-This is an optimization inside a machine corpus, not per-book production retrieval.
+When one current manual changes, unchanged vectors may be reused only when
+their exact embedding keys still match. The system constructs a complete new
+machine matrix and atomically publishes it after the full corpus is ready.
+Machine RAG remains stale/not-ready until that commit completes.
 
 ## Table continuity
 
-Cross-page stitching is allowed only when chunks remain consecutive, share the exact same Docling table ref, and move at most to the adjacent page with fragmentation evidence. Ambiguous different-table-ref page continuations are not silently merged.
+Cross-page stitching is allowed only when chunks remain consecutive, share the
+same Docling table reference and move at most to the adjacent page with
+fragmentation evidence. Ambiguous continuations are not silently merged.
 
-## UI ownership
+## UI ownership and normal operator path
 
-- **My books:** whole-pipeline/machine-readiness overview and next action.
-- **Book workflow:** strict per-book chain to current Stage 3 and machine-RAG readiness.
-- **Extraction checks:** Stage 2A diagnostics.
-- **Verification:** Stage 2B prioritized queues/results/provider controls.
-- **Review:** optional audit/human override.
-- **Machine RAG:** machine/revision management, embedding readiness, search, benchmark and generation.
-- **Chunk Viewer:** current retrieval evidence, full provenance and original page.
+- **Books** — library-level state. Open a book for its single next action.
+- **Book workflow** — canonical per-book sequence and blocker explanation.
+  It uses `/api/documents/{job_id}`, so polling one book does not recompute
+  every unrelated manual in the library.
+- **Processing** — conversion, verification and worker activity.
+- **Review** — all required human decisions plus a normal entry point to
+  Evidence & diagrams.
+- **Evidence & diagrams** — optional post-Stage-3 enrichment, source-coverage
+  inspection and validated diagram work.
+- **Ask** — machine assignment, embeddings, retrieval and grounded generation.
+- **Advanced** — diagnostics, chunk inspection and specialist audit surfaces.
 
-## Full technical-artifact worker pool
+A failed Review/Verifier-Audit status request is displayed as **unknown/error**,
+never as zero unresolved items. Backend gates remain authoritative even when a
+detail panel cannot load.
 
-This is intentionally separate from normal Vision verification. Normal Vision routes use exactly the selected Pi5, OnePlus, or Groq provider. `FULL_TECHNICAL_VISUAL` sweeps are large local batch work and use one shared Pi5 + OnePlus pool. An idle worker atomically claims one pending artifact, finishes it, then asks for another. Faster/healthier devices therefore complete more work naturally. A paused worker claims nothing. Transport/server failures trigger a short per-device cooldown while the other worker continues; the failed row returns to the shared pool and can be completed by either device after its retry delay. A request already in flight is never duplicated; if a device hangs mid-request, the other device continues with the rest of the pool and the stuck row becomes stealable only after the existing request liveness timeout returns it to pending.
+## Artifact worker pool
 
-## `.40.8B` gate visibility
-
-Book workflow exposes the testing audit bypass on every book. It becomes actionable only after current Stage 2B normal + required artifact work completes. The bypass changes gate readiness only; it never marks unresolved evidence accepted.
-
-## `.40.9` evidence/provenance hardening
-
-- Stage 3 canonical semantics are versioned as `stage3-canonical-integrity-v2`; older canonical chunks become stale after upgrade.
-- Applied table-cell correction provenance is attached to chunks that reference the corrected table.
-- Equipment-scoped generation filters every text/visual source before anchor selection.
-- Grounded-answer audit validates each technical claim against its cited evidence; exact visual values/IDs must appear in `visible_text`.
-- Telegram remains a monitoring surface only.
+`FULL_TECHNICAL_VISUAL` sweep jobs use the shared eligible worker pool and are
+separate from ordinary routed Vision verification. Claims are durable; an
+in-flight request is not duplicated. Cooldown/outage handling returns eligible
+work to the pool without downgrading evidence or consuming human authority.
