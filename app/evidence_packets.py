@@ -76,14 +76,35 @@ def bind_evidence(results: list[dict], visuals: list[dict], books: list[dict], p
         matches = []
         if visual:
             refs = set(row.get("doc_items") or [])
-            matches = [r for r in records if refs.intersection(ref for ref in r.get("doc_items", []) if str(ref).startswith("#/pictures/"))]
-            source=sources.get(row.get('visual_evidence_id') or row.get('chunk_id'))
+            source_id = row.get("visual_evidence_id") or row.get("chunk_id")
+            source = sources.get(source_id)
+            exact_matches = [r for r in records if r.get("source_chunk_id") == source_id]
+            picture_matches = [r for r in records if refs.intersection(ref for ref in r.get("doc_items", []) if str(ref).startswith("#/pictures/"))]
+            # V-* evidence has its own source identity. Prefer that exact ledger
+            # record so a different candidate sharing the same picture cannot
+            # donate or block structured relationships accidentally. The
+            # picture-level fallback preserves older pre-V-* ledgers.
+            matches = exact_matches or picture_matches
+            record = exact_matches[0] if len(exact_matches) == 1 else None
+            if record and source:
+                same = all(record.get(k) == source.get(v) for k, v in (
+                    ("source_text", "text"), ("page_numbers", "page_numbers"),
+                    ("doc_items", "doc_items"), ("postprocess_job_id", "postprocess_job_id"),
+                    ("source_filename", "source_filename"),
+                ))
+                if same:
+                    copy["technical_evidence"] = record
+                    copy["technical_source_current"] = current
+                else:
+                    copy["generation_blocked_reason"] = "technical_source_changed"
+            elif len(exact_matches) > 1:
+                copy["generation_blocked_reason"] = "technical_record_ambiguous"
             copy['visual_literal_current']=bool(source and source.get('rag_eligible') and source.get('stage2c_status')=='applied'
                 and not source.get('unresolved') and source.get('visible_text')==row.get('visible_text')
                 and source.get('page_numbers')==row.get('page_numbers') and source.get('doc_items')==row.get('doc_items')
                 and not any(r.get('validation',{}).get('state') in {'rejected','error','superseded'} for r in matches))
             if any(r.get("validation", {}).get("state") in {"rejected", "error"} or (r.get("validation_status") == "needs_visual_parse" and (not current or not is_validated_record(r))) for r in matches):
-                copy["generation_blocked_reason"] = "visual_relationships_unvalidated"
+                copy.setdefault("generation_blocked_reason", "visual_relationships_unvalidated")
         else:
             matches = [r for r in records if r.get("source_chunk_id") == row.get("chunk_id")]
             record = matches[0] if len(matches) == 1 else None

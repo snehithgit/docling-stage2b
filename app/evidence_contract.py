@@ -200,6 +200,23 @@ def read_source_rows(result_dir: Path) -> list[dict]:
     return rows
 
 
+def read_search_rows(result_dir: Path) -> list[dict]:
+    """Return only rows that the live lexical/RAG search can actually retrieve.
+
+    Technical-evidence detection intentionally has a broader source set than
+    search: unresolved technical pictures are candidates for human/AI review,
+    but only visual_evidence_index.jsonl contains visual rows admitted to RAG.
+    Source-coverage accounting must therefore use this narrower contract.
+    """
+    rows = _read_jsonl(result_dir / "retrieval_index.jsonl")
+    rows.extend(_read_jsonl(result_dir / "visual_evidence_index.jsonl"))
+    if any(not isinstance(row.get("chunk_id"), str) or not row["chunk_id"] for row in rows):
+        raise ValueError("Malformed searchable source identity")
+    if len({row["chunk_id"] for row in rows}) != len(rows):
+        raise ValueError("Duplicate searchable source identity")
+    return rows
+
+
 def backup_legacy_ledger(path: Path, original: bytes) -> Path:
     digest = hashlib.sha256(original).hexdigest()
     backup = path.with_name(f"technical_evidence_ledger.v1.{digest[:16]}.json")

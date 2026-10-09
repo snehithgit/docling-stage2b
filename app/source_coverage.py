@@ -12,9 +12,9 @@ def _literal(text):
 
 def coverage_pipeline(document, result_dir):
     """Persist classified recovery work after indexing; never apply raw-source repairs."""
-    from .evidence_contract import read_source_rows, atomic_json
+    from .evidence_contract import read_search_rows, atomic_json
     inputs = _input_stats(result_dir)
-    rows = read_source_rows(result_dir)
+    rows = read_search_rows(result_dir)
     ledger = result_dir / "technical_evidence_ledger.json"
     candidates = json.loads(ledger.read_text(encoding="utf-8")).get("entries", []) if ledger.exists() else []
     from .stage2c import _authoritative_visual_subjects
@@ -97,7 +97,7 @@ def coverage_pipeline(document, result_dir):
 
 
 def _input_stats(result_dir):
-    names = ("retrieval_index.jsonl", "visual_evidence.jsonl", "technical_evidence_ledger.json", "source_manifest.json", "correction_ledger.json", "routes.json", "diagnostics.json")
+    names = ("retrieval_index.jsonl", "visual_evidence.jsonl", "visual_evidence_index.jsonl", "technical_evidence_ledger.json", "source_manifest.json", "correction_ledger.json", "routes.json", "diagnostics.json")
     values={name: [p.stat().st_mtime_ns, p.stat().st_size] if (p := result_dir / name).exists() else None for name in names}
     path=result_dir/'technical_evidence_ledger.json'
     if path.exists():

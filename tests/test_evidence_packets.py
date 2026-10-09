@@ -6,6 +6,7 @@ import pytest
 from app.evidence_packets import bind_evidence, generation_policy
 from app.rag_generation import prepare_generation_sources, build_portable_prompt
 from app.technical_evidence import write_evidence_ledger
+from app.evidence_contract import read_source_rows
 
 
 def row(chunk="C1", text="Alarm oil temperature high above 85°C.", refs=None):
@@ -142,6 +143,69 @@ def test_corrupt_or_missing_contract_cannot_authorize_structured_extraction(tmp_
     (directory / "technical_evidence_ledger.json").write_text(content)
     rows, _ = bind_evidence([r], [], books, tmp_path)
     assert not generation_policy(rows[0])[0]
+
+
+def test_validated_v_visual_graph_is_bound_into_rag_packet(tmp_path, monkeypatch):
+    from app.visual_graph import save_graph, validate_graph
+
+    directory = tmp_path / "book"
+    directory.mkdir()
+    text_row = row("C1", "General terminal information.", refs=["#/texts/1"])
+    (directory / "retrieval_index.jsonl").write_text(json.dumps(text_row) + "\n", encoding="utf-8")
+    raw = {
+        "visual_evidence_id": "V-7-000003",
+        "chunk_id": "V-7-000003",
+        "postprocess_job_id": 7,
+        "result_dir": "book",
+        "source_filename": "Manual.pdf",
+        "source_page": 141,
+        "page_numbers": [141],
+        "picture_index": 3,
+        "docling_ref": "#/pictures/3",
+        "doc_items": ["#/pictures/3"],
+        "category": "terminal_diagram",
+        "visible_text": ["SW1", "Terminal 3"],
+        "visible_objects": [],
+        "summary": "SW1 terminal diagram",
+        "search_text": "terminal diagram SW1 Terminal 3",
+        "text": "terminal diagram SW1 Terminal 3",
+        "verification_verdict": "TECHNICAL_USEFUL",
+        "stage2c_status": "applied",
+        "rag_eligible": True,
+        "unresolved": False,
+    }
+    (directory / "visual_evidence.jsonl").write_text(json.dumps(raw) + "\n", encoding="utf-8")
+    (directory / "visual_evidence_index.jsonl").write_text(json.dumps(raw) + "\n", encoding="utf-8")
+    write_evidence_ledger(directory, read_source_rows(directory))
+    ledger = json.loads((directory / "technical_evidence_ledger.json").read_text(encoding="utf-8"))
+    record = next(item for item in ledger["entries"] if item["source_chunk_id"] == raw["visual_evidence_id"])
+    graph = {
+        "nodes": [
+            {"id": "a", "text": "SW1", "bbox": [0.1, 0.1, 0.3, 0.3]},
+            {"id": "b", "text": "Terminal 3", "bbox": [0.5, 0.1, 0.8, 0.3]},
+        ],
+        "edges": [{"source": "a", "target": "b", "label": "", "direction": "forward"}],
+        "unresolved": [],
+    }
+    extraction = save_graph(
+        directory, record["entry_id"], graph, 3, "1" * 64,
+        record["source_sha256"], "colab:reader", "vision-model",
+    )
+    validate_graph(directory, record["entry_id"], extraction["graph_sha256"], "1" * 64, "Engineer")
+    monkeypatch.setattr("app.visual_graph.current_visual_image", lambda *args, **kwargs: True)
+
+    books = [{"postprocess_job_id": 7, "result_dir": "book", "source_filename": "Manual.pdf"}]
+    _, visuals = bind_evidence([], [raw], books, tmp_path)
+    eligible, reason, validated = generation_policy(visuals[0])
+    assert eligible and reason == "validated_technical_evidence"
+    assert validated and validated["source_chunk_id"] == raw["visual_evidence_id"]
+
+    sources, _ = prepare_generation_sources(
+        [], "How is SW1 connected to Terminal 3?", visual_results=visuals
+    )
+    assert sources[0]["source_kind"] == "visual"
+    assert sources[0]["validated_visual_graph"]["edges"][0]["direction"] == "forward"
+    assert "SW1" in sources[0]["validated_source_literals"]
 
 
 def test_current_applied_visual_labels_can_answer_value_but_not_wiring(tmp_path):

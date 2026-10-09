@@ -35,7 +35,7 @@ class TechnicalVisualJobs:
             db.execute('BEGIN IMMEDIATE')
             for active in db.execute("SELECT id,payload FROM technical_visual_jobs WHERE status IN ('queued','waiting','running')").fetchall():
                 old=json.loads(active['payload'])
-                if all(old.get(k)==payload.get(k) for k in ['book','picture','kind']):return active['id']
+                if all(old.get(k)==payload.get(k) for k in ['book','entry','picture','kind']):return active['id']
             prior = db.execute('SELECT * FROM technical_visual_jobs WHERE dedupe=?', (key,)).fetchone()
             if prior:
                 if prior['status'] in {'failed','cancelled'}:

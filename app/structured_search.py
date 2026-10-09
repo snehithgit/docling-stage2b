@@ -4,7 +4,7 @@ import hashlib
 import json
 from functools import lru_cache
 from pathlib import Path
-from .evidence_contract import normalize_ledger, is_validated_record, source_signature
+from .evidence_contract import normalize_ledger, is_validated_record, source_signature, read_source_rows
 
 DERIVED_FIELDS = ('verified_search_text','verified_evidence_ids','verified_applicability','verified_evidence_fingerprint')
 
@@ -45,7 +45,7 @@ def verified_overlays(rows: list[dict], directory: Path):
     try:
         path=directory/'technical_evidence_ledger.json';stat=path.stat()
         ledger=_ledger(str(path),stat.st_mtime_ns,stat.st_size)
-        current=ledger.get('source_index_signature') == source_signature(rows)
+        current=ledger.get('source_index_signature') == source_signature(read_source_rows(directory))
         records={r.get('source_chunk_id'):r for r in ledger['entries'] if not r.get('superseded')}
     except (OSError, ValueError, TypeError, KeyError):
         current=False; records={}

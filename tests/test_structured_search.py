@@ -4,6 +4,7 @@ import zipfile
 from pathlib import Path
 import pytest
 from app.technical_evidence import write_evidence_ledger
+from app.evidence_contract import read_source_rows
 from app.retrieval import _load_index, search_indices
 from app.visual_graph import save_graph, validate_graph
 from app.hybrid_retrieval import build_equipment_embedding_index, equipment_hybrid_index_status, _document_text
@@ -56,6 +57,28 @@ def test_validated_graph_changes_only_one_embedding_vector(tmp_path,monkeypatch)
  assert second['embedded_vectors']==1 and second['reused_vectors']==1
  assert len(calls[-1])==1 and 'ZX-19' in calls[-1][0]
  assert equipment_hybrid_index_status(tmp_path,'machine-a',[index],model='model-x',manual_types={1:'troubleshooting'})['ready']
+
+
+def test_text_overlay_remains_current_when_ledger_tracks_visual_candidates(tmp_path):
+ directory=tmp_path/'manual';directory.mkdir()
+ row={'chunk_id':'S1','postprocess_job_id':1,'source_filename':'Manual.pdf','page_numbers':[1],
+      'doc_items':['#/tables/0'],'text':'| Parameter | Value |\n| Model | MX-001 |','headings':[]}
+ index=directory/'retrieval_index.jsonl';index.write_text(json.dumps(row)+'\n')
+ visual={'visual_evidence_id':'V-1-000003','postprocess_job_id':1,'source_filename':'Manual.pdf',
+         'source_page':2,'picture_index':3,'docling_ref':'#/pictures/3','category':'engineering_drawing',
+         'search_text':'SW1 terminal diagram','visible_text':['SW1'],'verification_verdict':'TECHNICAL_USEFUL',
+         'stage2c_status':'applied','rag_eligible':True,'unresolved':False}
+ (directory/'visual_evidence.jsonl').write_text(json.dumps(visual)+'\n')
+ write_evidence_ledger(directory,read_source_rows(directory))
+ ledger_path=directory/'technical_evidence_ledger.json';ledger=json.loads(ledger_path.read_text())
+ record=next(item for item in ledger['entries'] if item['source_chunk_id']=='S1')
+ record['validation'].update(state='validated',method='human',actor='Engineer',validated_at=1,
+     provenance_checked=True,source_sha256=record['source_sha256'],structured_fields_checked=True,
+     structured_sha256=record['structured_sha256'])
+ ledger_path.write_text(json.dumps(ledger))
+ indexed=_load_index(index)[0]
+ assert indexed.get('verified_search_text')
+ assert 'MX-001' in indexed['verified_search_text']
 
 
 def test_changed_image_drops_graph_from_search(tmp_path,monkeypatch):
