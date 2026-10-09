@@ -3338,6 +3338,94 @@ async def documents() -> dict:
     }
 
 
+_DOCUMENT_SUMMARY_MAX_AGE_SECONDS = 120.0
+
+
+def _document_summary_generation() -> int:
+    events = getattr(runtime, "events", None)
+    try:
+        return int(getattr(events, "generation", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _compact_document_summary(row: dict) -> dict:
+    """Fields required by the Books page; exact detail stays on /api/documents/{id}."""
+    return {
+        "id": int(row.get("id") or 0),
+        "status": row.get("status"),
+        "source_filename": row.get("source_filename"),
+        "verification": dict(row.get("verification") or {}),
+        "pipeline": dict(row.get("pipeline") or {}),
+    }
+
+
+@app.get("/api/documents/summary")
+async def document_summaries(generation: int | None = None) -> dict:
+    """Compact event-aware Books payload.
+
+    The complete /api/documents calculation is intentionally retained as the
+    source of truth. This endpoint avoids repeating that work on idle polling:
+    app state events invalidate immediately, while a bounded age forces an
+    occasional rebuild to catch out-of-process filesystem/database changes.
+    """
+    now = time.monotonic()
+    current_generation = _document_summary_generation()
+    cache = getattr(runtime, "_document_summary_cache", None)
+    cache_valid = (
+        isinstance(cache, dict)
+        and int(cache.get("generation", -1)) == current_generation
+        and now - float(cache.get("built_at", 0.0)) < _DOCUMENT_SUMMARY_MAX_AGE_SECONDS
+    )
+    if cache_valid:
+        if generation is not None and int(generation) == current_generation:
+            return {"generation": current_generation, "not_modified": True}
+        return dict(cache["payload"])
+
+    lock = getattr(runtime, "_document_summary_lock", None)
+    if lock is None:
+        lock = asyncio.Lock()
+        setattr(runtime, "_document_summary_lock", lock)
+
+    async with lock:
+        now = time.monotonic()
+        current_generation = _document_summary_generation()
+        cache = getattr(runtime, "_document_summary_cache", None)
+        cache_valid = (
+            isinstance(cache, dict)
+            and int(cache.get("generation", -1)) == current_generation
+            and now - float(cache.get("built_at", 0.0)) < _DOCUMENT_SUMMARY_MAX_AGE_SECONDS
+        )
+        if cache_valid:
+            if generation is not None and int(generation) == current_generation:
+                return {"generation": current_generation, "not_modified": True}
+            return dict(cache["payload"])
+
+        start_generation = current_generation
+        full = await documents()
+        end_generation = _document_summary_generation()
+        payload = {
+            "documents": [
+                _compact_document_summary(row)
+                for row in (full.get("documents") or [])
+                if isinstance(row, dict)
+            ],
+            "pipeline_sequence": dict(full.get("pipeline_sequence") or {}),
+            "generation": end_generation,
+            "not_modified": False,
+        }
+        # If state changed while the expensive snapshot was being built, return
+        # it but do not cache it. The next poll will rebuild against the new
+        # generation instead of pinning a mixed-time snapshot.
+        if start_generation == end_generation:
+            setattr(runtime, "_document_summary_cache", {
+                "generation": end_generation,
+                "built_at": time.monotonic(),
+                "payload": payload,
+            })
+        return payload
+
+
 async def _stage2b_book_summary(postprocess_job_id: int) -> dict:
     """Fetch one book's verifier aggregate without scanning every verification book."""
     getter = getattr(runtime.stage2b_store, "get_book_summary", None)
