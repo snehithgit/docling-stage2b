@@ -47,6 +47,7 @@ def required_verification_state(
     *,
     discovery_current: bool,
     artifact_sweep_required: bool = True,
+    expected_total: int | None = None,
 ) -> dict[str, Any]:
     """Canonical Stage 2B dependency state used by sequencing and UI.
 
@@ -61,8 +62,10 @@ def required_verification_state(
         status: sum(str(row.get("status") or "") == status for row in selected)
         for status in ("pending", "processing", "completed", "failed")
     }
+    snapshot_missing = bool(int(expected_total or 0) > 0 and not rows)
     ready = (
-        counts["completed"] == len(selected)
+        not snapshot_missing
+        and counts["completed"] == len(selected)
         and counts["pending"] == 0
         and counts["processing"] == 0
         and counts["failed"] == 0
@@ -75,6 +78,7 @@ def required_verification_state(
         "discovery_current": bool(discovery_current),
         "raw_total": len(rows),
         "excluded_rows": max(0, len(rows) - len(selected)),
+        "snapshot_missing": snapshot_missing,
     }
 
 
