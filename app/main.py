@@ -3469,6 +3469,10 @@ def _build_document_stage_contracts(
     s3_state = dict(s3.get("state") or {})
     stage3_generation = str(s3_state.get("task_id") or "").strip() or None
     stage3_hash = str(s3_state.get("data_hash") or "").strip() or None
+    stage3_blockers = (
+        _stage_contract_blockers(pipeline, "stage2a_human_review", "verifier_audit")
+        or _stage_contract_blockers(pipeline, "stage3")
+    )
     contracts.append(stage_result_contract(
         stage_id="stage3",
         generation_id=stage3_generation,
@@ -3477,8 +3481,8 @@ def _build_document_stage_contracts(
         upstream_generation=s2c_generation,
         status=str(s3.get("status") or "not_built"),
         current=bool(s3.get("ready")),
-        ready_to_advance=bool(s3.get("ready")),
-        blockers=_stage_contract_blockers(pipeline, "stage3"),
+        ready_to_advance=bool(s3.get("ready") and review_blocking == 0),
+        blockers=stage3_blockers,
         data_hash=stage3_hash,
         data_hash_status="persisted_output_hash" if stage3_hash else "legacy_or_not_persisted",
         human_review_required=bool(review_required and review_blocking),
@@ -3494,6 +3498,7 @@ def _build_document_stage_contracts(
             "recorded_retrieval_rule_version": s3.get("recorded_retrieval_rule_version"),
             "retrieval_rule_match": bool(s3.get("retrieval_rule_match")),
             "ranking_only_version_drift": bool(s3.get("ranking_only_version_drift")),
+            "data_hash_basis": s3_state.get("data_hash_basis"),
         },
     ))
     return contracts
@@ -3687,6 +3692,14 @@ def _apply_document_machine_state(
         else "completed" if machine_ready
         else "waiting"
     )
+    machine_contract_blockers = _stage_contract_blockers(
+        row["pipeline"], "assign_machine", "machine_embedding"
+    )
+    if not machine_contract_blockers and str(row["pipeline"].get("next_stage") or "") not in {"rag_ready", "post_stage3"}:
+        machine_contract_blockers = [
+            dict(item) for item in (row["pipeline"].get("blockers") or [])
+            if isinstance(item, dict)
+        ]
     contracts.append(stage_result_contract(
         stage_id="machine_embedding",
         generation_id=corpus_fingerprint,
@@ -3695,13 +3708,15 @@ def _apply_document_machine_state(
         upstream_generation=None,
         status=machine_status_name,
         current=machine_ready,
-        ready_to_advance=machine_ready,
-        blockers=_stage_contract_blockers(
-            row["pipeline"], "assign_machine", "machine_embedding"
+        ready_to_advance=bool(
+            machine_ready and str(row["pipeline"].get("next_stage") or "") == "rag_ready"
         ),
+        blockers=machine_contract_blockers,
         data_hash=corpus_fingerprint,
         data_hash_status="semantic_corpus_fingerprint" if corpus_fingerprint else "not_persisted",
-        human_review_required=False,
+        human_review_required=bool(
+            int(row["pipeline"].get("blocking_reviews") or 0)
+        ),
         reason=pipeline.get("machine_embedding_reason"),
         details={
             "machine_assigned": bool(owner),
