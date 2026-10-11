@@ -59,6 +59,7 @@ from .pipeline_state import (
     verification_rows_for_stage2c,
     required_verification_state,
     resolve_pipeline_stage,
+    attach_pipeline_blockers,
 )
 from .retrieval import (
     add_benchmark_item,
@@ -3167,7 +3168,9 @@ async def _enrich_document_core(row: dict, verification_book: dict) -> dict:
             stage3_ready=bool(s3.get("ready")),
             stage3_reason=s3.get("reason"),
         ))
-    row["pipeline"] = pipeline
+    row["pipeline"] = attach_pipeline_blockers(
+        pipeline, book_status=row.get("status"), entity_id=job_id
+    )
     return row
 
 
@@ -3212,7 +3215,11 @@ def _apply_document_machine_state(
                 "Machine embeddings are waiting for all assigned manuals to finish "
                 "Stage 3, or are rebuilding after an upstream change."
             )
-    row["pipeline"] = pipeline
+    row["pipeline"] = attach_pipeline_blockers(
+        pipeline,
+        book_status=row.get("status"),
+        entity_id=int(row.get("id") or 0) or None,
+    )
     return row
 
 
