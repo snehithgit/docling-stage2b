@@ -1297,6 +1297,27 @@ class Runtime:
         delay = min(1800, max(60, int(previous.get("delay", 30)) * 2))
         retries[(job_id, stage)] = {"delay": delay, "until": time.time() + delay}
 
+    async def _record_pipeline_projection(self, job_id: int, pipeline: dict) -> None:
+        recorder = getattr(self.postprocess_store, "record_pipeline_projection", None)
+        if recorder is None:
+            return
+        projected = attach_pipeline_blockers(
+            pipeline, book_status="completed", entity_id=job_id
+        )
+        blocker = projected.get("primary_blocker") or {}
+        await recorder(
+            job_id,
+            str(projected.get("next_stage") or "stage2a"),
+            blocker_code=blocker.get("code"),
+            blocker_message=blocker.get("message"),
+            context={
+                "stage": projected.get("next_stage"),
+                "machine_id": projected.get("machine_id"),
+                "machine_name": projected.get("machine_name"),
+                "audit_bypassed": bool(projected.get("audit_bypassed")),
+            },
+        )
+
     async def _advance_pipeline_sequence_once(self) -> None:
         """Advance downstream stages only when the immediately prior stage is current.
 
