@@ -1,6 +1,6 @@
 # Stage-wise book and Machine RAG workflow
 
-Version: `5.1.2.2`
+Version: `5.1.3.0`
 
 This document describes the current operator-visible sequence and the backend
 readiness contract. Raw Docling conversion output remains immutable; later
@@ -108,6 +108,12 @@ Machine RAG remains stale/not-ready until that commit completes.
 Cross-page stitching is allowed only when chunks remain consecutive, share the
 same Docling table reference and move at most to the adjacent page with
 fragmentation evidence. Ambiguous continuations are not silently merged.
+
+## Pipeline blocker and transition contract
+
+Every book status now exposes a canonical `pipeline.primary_blocker` and `pipeline.blockers` contract. The blocker names the earliest unresolved stage, severity, whether an operator must act, whether the sequencer can resolve it automatically, and the affected item count. Downstream not-ready states are not duplicated as extra blockers.
+
+The background sequencer appends stage changes to the SQLite `pipeline_transitions` ledger. Read-only status endpoints never write audit history. `/api/pipeline/health` combines compact live book state with the recent durable transition timeline for Errors & diagnostics.
 
 ## UI ownership and normal operator path
 
