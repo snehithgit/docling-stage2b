@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import json
 import uuid
 import logging
@@ -521,6 +522,23 @@ class Stage3ChunkBuilder:
             state["retrieval_excluded_chunks"] = int(retrieval_quality.get("excluded_chunks") or 0)
             state["retrieval_mean_quality_score"] = float(retrieval_quality.get("mean_quality_score") or 0.0)
             state["retrieval_rule_version"] = RETRIEVAL_RULE_VERSION
+            output_hash = hashlib.sha256()
+            for collection_name, collection_rows in (
+                ("chunks", output_rows),
+                ("retrieval", retrieval_rows),
+            ):
+                output_hash.update(collection_name.encode("utf-8"))
+                output_hash.update(b"\0")
+                for output_row in collection_rows:
+                    output_hash.update(json.dumps(
+                        output_row,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8"))
+                    output_hash.update(b"\n")
+            state["data_hash"] = output_hash.hexdigest()
+            state["data_hash_basis"] = "canonical_chunks_and_retrieval_rows_sha256"
             state["retrieval_stitched_table_evidence"] = int(retrieval_quality.get("stitched_table_evidence") or 0)
             state["retrieval_table_data_without_header"] = int(retrieval_quality.get("table_data_without_header_chunks") or 0)
             state["chunk_count"] = len(output_rows)
