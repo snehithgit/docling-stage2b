@@ -20,14 +20,16 @@ function conversionGuidance(job) {
 }
 
 async function refresh() {
-  const [errorsResponse, statusResponse] = await Promise.all([
+  const [errorsResponse, statusResponse, healthResponse] = await Promise.all([
     fetch("/api/errors", { cache: "no-store" }),
     fetch("/api/status", { cache: "no-store" }),
+    fetch("/api/pipeline/health", { cache: "no-store" }),
   ]);
-  if (!errorsResponse.ok || !statusResponse.ok) throw new Error("The error log could not be loaded.");
+  if (!errorsResponse.ok || !statusResponse.ok || !healthResponse.ok) throw new Error("The pipeline diagnostics could not be loaded.");
 
   const errors = await errorsResponse.json();
   const status = await statusResponse.json();
+  const health = await healthResponse.json();
   const failedNav = document.getElementById("failed-nav");
   if (failedNav) failedNav.textContent = status.counts.failed || 0;
 
@@ -51,6 +53,23 @@ async function refresh() {
   $("#diag-stages").textContent = Number((summary.stage2a_failed || 0) + (summary.stage2c_failed || 0) + (summary.stage3_failed || 0)).toLocaleString();
   $("#diag-verification").textContent = Number(summary.verification_failed || 0).toLocaleString();
   $("#diag-audit").textContent = Number(summary.audit_review_required || 0).toLocaleString();
+  $("#diag-blocked").textContent = Number(health.books_needing_operator || 0).toLocaleString();
+  $("#diag-progressing").textContent = Number(health.books_auto_progressing || 0).toLocaleString();
+
+  const blockerRows = health.blockers || [];
+  $("#pipeline-blockers").innerHTML = blockerRows.length ? blockerRows.map(blocker => {
+    const severity = String(blocker.severity || 'active');
+    const role = blocker.operator_action_required ? 'Operator action' : blocker.auto_resolvable ? 'Automatic' : 'Waiting';
+    const count = Number(blocker.count || 0);
+    return `<article class="error-entry"><div><h3>${escapeHtml(blocker.source_filename || `Book #${blocker.postprocess_job_id || '—'}`)}</h3><p class="error-meta">${escapeHtml(String(blocker.stage || '').replaceAll('_',' '))} · ${escapeHtml(role)} · ${escapeHtml(severity)}${count ? ` · ${count} item${count===1?'':'s'}` : ''}</p><p class="error-message">${escapeHtml(blocker.message || blocker.code || 'Pipeline is waiting.')}</p></div><a class="retry-button" href="${escapeHtml(blocker.action_href || `/book?job=${blocker.postprocess_job_id || ''}`)}">Open</a></article>`;
+  }).join('') : '<p class="empty-state">No current pipeline blockers. Ready books and completed stages are omitted.</p>';
+
+  const transitions = health.recent_transitions || [];
+  $("#transition-history").innerHTML = transitions.length ? transitions.slice(0,50).map(item => {
+    const previous = item.previous_stage ? String(item.previous_stage).replaceAll('_',' ') : 'first observed';
+    const current = String(item.new_stage || 'unknown').replaceAll('_',' ');
+    return `<article class="error-entry"><div><h3>${escapeHtml(item.source_filename || `Book #${item.postprocess_job_id || '—'}`)}</h3><p class="error-meta">${displayTime(item.observed_at)} · ${escapeHtml(previous)} → ${escapeHtml(current)}</p>${item.blocker_message ? `<p class="error-message">${escapeHtml(item.blocker_message)}</p>` : ''}</div><a class="retry-button" href="${escapeHtml(item.action_href || `/book?job=${item.postprocess_job_id || ''}`)}">Open book</a></article>`;
+  }).join('') : '<p class="empty-state">No durable pipeline transitions have been recorded yet. They will appear as the sequencer observes stage changes.</p>';
 
   const list = $("#error-list");
   if (!errors.jobs.length) {

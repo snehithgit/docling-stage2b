@@ -59,6 +59,7 @@ from .pipeline_state import (
     verification_rows_for_stage2c,
     required_verification_state,
     resolve_pipeline_stage,
+    attach_pipeline_blockers,
 )
 from .retrieval import (
     add_benchmark_item,
@@ -1296,6 +1297,34 @@ class Runtime:
         delay = min(1800, max(60, int(previous.get("delay", 30)) * 2))
         retries[(job_id, stage)] = {"delay": delay, "until": time.time() + delay}
 
+    async def _record_pipeline_projection(self, job_id: int, pipeline: dict) -> None:
+        recorder = getattr(self.postprocess_store, "record_pipeline_projection", None)
+        if recorder is None:
+            return
+        projected = attach_pipeline_blockers(
+            pipeline, book_status="completed", entity_id=job_id
+        )
+        blocker = projected.get("primary_blocker") or {}
+        try:
+            await recorder(
+                job_id,
+                str(projected.get("next_stage") or "stage2a"),
+                blocker_code=blocker.get("code"),
+                blocker_message=blocker.get("message"),
+                context={
+                    "stage": projected.get("next_stage"),
+                    "machine_id": projected.get("machine_id"),
+                    "machine_name": projected.get("machine_name"),
+                    "audit_bypassed": bool(projected.get("audit_bypassed")),
+                },
+            )
+        except Exception as exc:
+            logger.warning(
+                "Could not record pipeline transition for book %s: %s",
+                job_id,
+                exc,
+            )
+
     async def _advance_pipeline_sequence_once(self) -> None:
         """Advance downstream stages only when the immediately prior stage is current.
 
@@ -1313,6 +1342,7 @@ class Runtime:
             for row in await self.stage2b_store.list_books()
         }
         book_catalog: list[dict] = []
+        pipeline_projection_by_job: dict[int, dict] = {}
         advanced = 0
         self.pipeline_sequence_state["book_errors"] = {}
 
@@ -1343,6 +1373,26 @@ class Runtime:
                 discovery_current = getattr(
                     self.stage2b_worker, "book_discovery_current", lambda _: False
                 )(job_id)
+                fallback_verification = {
+                    "ready": False,
+                    "failed": 0,
+                    "pending": 0,
+                    "processing": 0,
+                    "completed": 0,
+                    "raw_total": total,
+                    "total": total,
+                    "discovery_current": bool(discovery_current),
+                    "snapshot_missing": bool(total),
+                }
+                pipeline_projection_by_job[job_id] = {
+                    **resolve_pipeline_stage(
+                        stage2a_ready=True,
+                        verification=fallback_verification,
+                        stage2c_ready=False,
+                        stage3_ready=False,
+                    ),
+                    "required_verification": fallback_verification,
+                }
 
                 if total or discovery_current:
                     rows = (
@@ -1360,6 +1410,15 @@ class Runtime:
                         artifact_sweep_required=artifact_sweep_required,
                         expected_total=total,
                     )
+                    pipeline_projection_by_job[job_id] = {
+                        **resolve_pipeline_stage(
+                            stage2a_ready=True,
+                            verification=required_verification,
+                            stage2c_ready=False,
+                            stage3_ready=False,
+                        ),
+                        "required_verification": required_verification,
+                    }
 
                     if required_verification.get("ready"):
                         stage2c = await asyncio.to_thread(
@@ -1370,6 +1429,18 @@ class Runtime:
                             artifact_sweep_required=artifact_sweep_required,
                         )
                         if not stage2c.get("ready"):
+                            pipeline_projection_by_job[job_id] = {
+                                **resolve_pipeline_stage(
+                                    stage2a_ready=True,
+                                    verification=required_verification,
+                                    stage2c_ready=False,
+                                    stage2c_reason=stage2c.get("reason"),
+                                    stage3_ready=False,
+                                ),
+                                "required_verification": required_verification,
+                                "stage2c_ready": False,
+                                "stage2c_reason": stage2c.get("reason"),
+                            }
                             running = self.stage2b_worker.stage2c_state_for(job_id) or {}
                             if (
                                 str(running.get("status") or "") not in {"queued", "running"}
@@ -1397,6 +1468,7 @@ class Runtime:
                                 job, result_dir, skip_if_busy=True
                             )
                             if compatibility.get("status") == "busy":
+                                pipeline_projection_by_job.pop(job_id, None)
                                 book_catalog.append({
                                     "postprocess_job_id": job_id,
                                     "result_dir": result_dir.name,
@@ -1417,6 +1489,14 @@ class Runtime:
                                 stage3_ready=False,
                             )
                             if gate.get("next_stage") == "stage2a_human_review":
+                                pipeline_projection_by_job[job_id] = {
+                                    **gate,
+                                    "required_verification": required_verification,
+                                    "stage2c_ready": True,
+                                    "stage2a_human_review_pending": int(
+                                        structural_gate.get("blocking_review_required") or 0
+                                    ),
+                                }
                                 book_catalog.append({
                                     "postprocess_job_id": job_id,
                                     "result_dir": result_dir.name,
@@ -1455,6 +1535,20 @@ class Runtime:
                                 stage3_ready=False,
                             )
                             if gate.get("next_stage") == "verifier_audit":
+                                pipeline_projection_by_job[job_id] = {
+                                    **gate,
+                                    "required_verification": required_verification,
+                                    "stage2c_ready": True,
+                                    "verifier_audit_pending": int(
+                                        audit_gate.get("review_required") or 0
+                                    ),
+                                    "verifier_audit_blocking": int(
+                                        audit_gate.get("blocking_review_required") or 0
+                                    ),
+                                    "audit_bypassed": bool(
+                                        audit_gate.get("bypassed_for_testing")
+                                    ),
+                                }
                                 book_catalog.append({
                                     "postprocess_job_id": job_id,
                                     "result_dir": result_dir.name,
@@ -1478,6 +1572,36 @@ class Runtime:
                             )
                             current_stage3 = bool(stage3.get("ready"))
                             if current_stage3:
+                                pipeline_projection_by_job[job_id] = {
+                                    **resolve_pipeline_stage(
+                                        stage2a_ready=True,
+                                        verification=required_verification,
+                                        stage2c_ready=True,
+                                        structural_review_pending=0,
+                                        verifier_audit_pending=int(
+                                            audit_gate.get("review_required") or 0
+                                        ),
+                                        verifier_audit_blocking=int(
+                                            audit_gate.get("blocking_review_required") or 0
+                                        ),
+                                        audit_bypassed=bool(
+                                            audit_gate.get("bypassed_for_testing")
+                                        ),
+                                        stage3_ready=True,
+                                    ),
+                                    "required_verification": required_verification,
+                                    "stage2c_ready": True,
+                                    "stage3_ready": True,
+                                    "verifier_audit_pending": int(
+                                        audit_gate.get("review_required") or 0
+                                    ),
+                                    "verifier_audit_blocking": int(
+                                        audit_gate.get("blocking_review_required") or 0
+                                    ),
+                                    "audit_bypassed": bool(
+                                        audit_gate.get("bypassed_for_testing")
+                                    ),
+                                }
                                 if locks is not None and not locks.get(job_id).locked():
                                     async with locks.get(job_id), getattr(
                                         self.stage2b_worker,
@@ -1511,6 +1635,22 @@ class Runtime:
                                     stage3_reason=stage3.get("reason"),
                                 )
                                 if gate.get("next_stage") == "stage3":
+                                    pipeline_projection_by_job[job_id] = {
+                                        **gate,
+                                        "required_verification": required_verification,
+                                        "stage2c_ready": True,
+                                        "stage3_ready": False,
+                                        "stage3_reason": stage3.get("reason"),
+                                        "verifier_audit_pending": int(
+                                            audit_gate.get("review_required") or 0
+                                        ),
+                                        "verifier_audit_blocking": int(
+                                            audit_gate.get("blocking_review_required") or 0
+                                        ),
+                                        "audit_bypassed": bool(
+                                            audit_gate.get("bypassed_for_testing")
+                                        ),
+                                    }
                                     running = self.stage3_builder.state_for(job_id) or {}
                                     if (
                                         str(running.get("status") or "")
@@ -1630,6 +1770,79 @@ class Runtime:
                     self.pipeline_sequence_state["last_error"] = (
                         f"{equipment_id}: {exc}"
                     )
+
+        if book_catalog and pipeline_projection_by_job:
+            projection_catalog = equipment_catalog(
+                Path(self.config.processed_dir), book_catalog
+            )
+            owner_by_job: dict[int, dict] = {}
+            for equipment in projection_catalog.get("equipment") or []:
+                for manual in equipment.get("manuals") or []:
+                    if not manual.get("active_for_rag", True):
+                        continue
+                    try:
+                        owner_by_job[int(manual.get("postprocess_job_id") or 0)] = equipment
+                    except (TypeError, ValueError):
+                        continue
+
+            for projected_job_id, projected_pipeline in list(
+                pipeline_projection_by_job.items()
+            ):
+                final_pipeline = dict(projected_pipeline)
+                if final_pipeline.get("next_stage") == "post_stage3":
+                    owner = owner_by_job.get(projected_job_id)
+                    machine_status = None
+                    if owner:
+                        equipment_id = str(owner.get("equipment_id") or "")
+                        selected = resolve_equipment_books(
+                            Path(self.config.processed_dir),
+                            book_catalog,
+                            equipment_id,
+                        )
+                        manual_types = {
+                            int(item.get("postprocess_job_id") or 0): str(
+                                item.get("manual_type") or "other"
+                            )
+                            for item in owner.get("manuals") or []
+                            if int(item.get("postprocess_job_id") or 0) > 0
+                            and item.get("active_for_rag", True)
+                        }
+                        if selected and all(bool(row.get("index_ready")) for row in selected):
+                            index_paths = [
+                                Path(self.config.processed_dir)
+                                / str(row["result_dir"])
+                                / "retrieval_index.jsonl"
+                                for row in selected
+                            ]
+                            machine_status = equipment_hybrid_index_status(
+                                Path(self.config.processed_dir),
+                                equipment_id,
+                                index_paths,
+                                model=self.config.retrieval_embedding_model,
+                                document_prefix=self.config.retrieval_embedding_document_prefix,
+                                manual_types=manual_types,
+                            )
+                        else:
+                            machine_status = {
+                                "ready": False,
+                                "reason": "machine_waiting_for_all_manual_stage3",
+                                "manual_count": len(selected),
+                                "ready_manual_count": sum(
+                                    bool(row.get("index_ready")) for row in selected
+                                ),
+                            }
+                    projected_row = {
+                        "id": projected_job_id,
+                        "status": "completed",
+                        "pipeline": final_pipeline,
+                    }
+                    _apply_document_machine_state(
+                        projected_row, owner, machine_status
+                    )
+                    final_pipeline = projected_row["pipeline"]
+                await Runtime._record_pipeline_projection(
+                    self, projected_job_id, final_pipeline
+                )
 
         self.pipeline_sequence_state.update({
             "current_book": None,
@@ -3149,7 +3362,9 @@ async def _enrich_document_core(row: dict, verification_book: dict) -> dict:
             audit_gate.get("bypassed_for_testing")
         )
         pipeline["stage2c_ready"] = bool(s2c.get("ready"))
+        pipeline["stage2c_reason"] = s2c.get("reason")
         pipeline["stage3_ready"] = bool(s3.get("ready"))
+        pipeline["stage3_reason"] = s3.get("reason")
         row["stage2c_status"] = s2c.get("status") or row.get("stage2c_status")
         row["stage3_status"] = s3.get("status") or row.get("stage3_status")
         row["chunks_available"] = bool(s3.get("ready"))
@@ -3167,7 +3382,9 @@ async def _enrich_document_core(row: dict, verification_book: dict) -> dict:
             stage3_ready=bool(s3.get("ready")),
             stage3_reason=s3.get("reason"),
         ))
-    row["pipeline"] = pipeline
+    row["pipeline"] = attach_pipeline_blockers(
+        pipeline, book_status=row.get("status"), entity_id=job_id
+    )
     return row
 
 
@@ -3212,7 +3429,11 @@ def _apply_document_machine_state(
                 "Machine embeddings are waiting for all assigned manuals to finish "
                 "Stage 3, or are rebuilding after an upstream change."
             )
-    row["pipeline"] = pipeline
+    row["pipeline"] = attach_pipeline_blockers(
+        pipeline,
+        book_status=row.get("status"),
+        entity_id=int(row.get("id") or 0) or None,
+    )
     return row
 
 
@@ -3451,6 +3672,104 @@ async def document_summaries(generation: int | None = None) -> dict:
                 "payload": payload,
             })
         return payload
+
+
+def _pipeline_blocker_action(stage: str, job_id: int) -> str:
+    if stage == "stage2b":
+        return f"/verification?job={job_id}"
+    if stage == "verifier_audit":
+        return f"/vision-audit?book={job_id}"
+    if stage in {"assign_machine", "machine_embedding", "rag_ready"}:
+        return f"/retrieval?job={job_id}"
+    if stage == "stage2a":
+        return f"/quality?job={job_id}"
+    return f"/book?job={job_id}"
+
+
+@app.get("/api/pipeline/health")
+async def pipeline_health() -> dict:
+    """Normalized pipeline blockers plus recent durable stage transitions."""
+    snapshot = await document_summaries()
+    documents = list(snapshot.get("documents") or [])
+    blockers: list[dict] = []
+    by_job: dict[int, dict] = {}
+    for row in documents:
+        try:
+            job_id = int(row.get("id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if job_id <= 0:
+            continue
+        by_job[job_id] = row
+        pipeline = row.get("pipeline") or {}
+        blocker = pipeline.get("primary_blocker")
+        if not isinstance(blocker, dict):
+            continue
+        item = dict(blocker)
+        item["postprocess_job_id"] = job_id
+        item["source_filename"] = row.get("source_filename")
+        item["action_href"] = _pipeline_blocker_action(
+            str(item.get("stage") or pipeline.get("next_stage") or ""),
+            job_id,
+        )
+        blockers.append(item)
+
+    blocker_counts: dict[str, int] = {}
+    severity_counts = {"critical": 0, "attention": 0, "active": 0}
+    stage_counts: dict[str, int] = {}
+    for blocker in blockers:
+        code = str(blocker.get("code") or "unknown")
+        stage = str(blocker.get("stage") or "unknown")
+        severity = str(blocker.get("severity") or "active")
+        blocker_counts[code] = blocker_counts.get(code, 0) + 1
+        stage_counts[stage] = stage_counts.get(stage, 0) + 1
+        severity_counts[severity] = severity_counts.get(severity, 0) + 1
+
+    transitions: list[dict] = []
+    reader = getattr(runtime.postprocess_store, "list_pipeline_transitions", None)
+    if reader is not None:
+        transitions = await reader(limit=100)
+        for transition in transitions:
+            job_id = int(transition.get("postprocess_job_id") or 0)
+            row = by_job.get(job_id) or {}
+            transition["source_filename"] = row.get("source_filename")
+            transition["action_href"] = f"/book?job={job_id}" if job_id else "/"
+
+    return {
+        "schema": "pipeline-health/v1",
+        "generated_at_epoch": time.time(),
+        "books_total": len(documents),
+        "books_ready": sum(
+            str((row.get("pipeline") or {}).get("next_stage") or "") == "rag_ready"
+            for row in documents
+        ),
+        "books_needing_operator": sum(
+            bool(row.get("operator_action_required")) for row in blockers
+        ),
+        "books_auto_progressing": sum(
+            bool(row.get("auto_resolvable")) for row in blockers
+        ),
+        "severity_counts": severity_counts,
+        "stage_counts": stage_counts,
+        "blocker_counts": blocker_counts,
+        "blockers": blockers,
+        "recent_transitions": transitions,
+    }
+
+
+@app.get("/api/pipeline/transitions")
+async def pipeline_transitions(
+    postprocess_job_id: int | None = None,
+    limit: int = 100,
+) -> dict:
+    reader = getattr(runtime.postprocess_store, "list_pipeline_transitions", None)
+    if reader is None:
+        return {"items": [], "total": 0}
+    items = await reader(
+        postprocess_job_id=postprocess_job_id,
+        limit=min(500, max(1, int(limit))),
+    )
+    return {"items": items, "total": len(items)}
 
 
 async def _stage2b_book_summary(postprocess_job_id: int) -> dict:

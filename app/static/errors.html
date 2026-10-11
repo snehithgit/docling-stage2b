@@ -4,8 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Error log · Docling Auto-Convert</title>
-<link rel="stylesheet" href="/assets/styles.css?v=5.1.2.2" />
-<link rel="stylesheet" href="/assets/workflow.css?v=5.1.2.2" />
+<link rel="stylesheet" href="/assets/styles.css?v=5.1.3.0" />
+<link rel="stylesheet" href="/assets/workflow.css?v=5.1.3.0" />
 </head>
 <body class="ui29">
 <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -33,14 +33,18 @@
       <article><span>Stage failures</span><strong id="diag-stages">0</strong></article>
       <article><span>Verifier failures</span><strong id="diag-verification">0</strong></article>
       <article><span>Audit decisions needed</span><strong id="diag-audit">0</strong></article>
+      <article><span>Books needing action</span><strong id="diag-blocked">0</strong></article>
+      <article><span>Auto-progressing</span><strong id="diag-progressing">0</strong></article>
     </section>
     <div id="diagnostics-feedback" class="status-message page-feedback" hidden role="status" aria-live="polite"></div>
     <section class="panel error-panel"><div class="panel-heading"><div class="section-title-row"><span class="section-icon error-section-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 3.8 19h16.4L12 4Z"/><path d="M12 9v4m0 3h.01"/></svg></span><div><p class="eyebrow">Recovery queue</p><h2>Failed conversions</h2></div></div><p class="format-note">Retries preserve the same input file.</p></div><div id="error-list" class="error-list"><p class="empty-state">Loading errors…</p></div></section>
     <section class="panel error-panel"><div class="panel-heading"><div><p class="eyebrow">Pipeline stages</p><h2>Verification & downstream issues</h2></div></div><div id="pipeline-issues" class="error-list"><p class="empty-state">Loading pipeline health…</p></div></section>
+    <section class="panel error-panel"><div class="panel-heading"><div><p class="eyebrow">Canonical state</p><h2>Why books are waiting</h2></div><a class="secondary-button" href="/">Open Books</a></div><div id="pipeline-blockers" class="error-list"><p class="empty-state">Loading canonical blockers…</p></div></section>
+    <section class="panel error-panel"><div class="panel-heading"><div><p class="eyebrow">Audit trail</p><h2>Recent pipeline transitions</h2></div></div><div id="transition-history" class="error-list"><p class="empty-state">Loading transition history…</p></div></section>
     <section class="panel error-panel"><div class="panel-heading"><div><p class="eyebrow">Human gate</p><h2>Verifier Audit attention</h2></div><a class="secondary-button" href="/vision-audit">Open audit</a></div><div id="audit-issues" class="error-list"><p class="empty-state">Loading audit status…</p></div></section>
   </main>
 </div>
-<script src="/assets/nav.js?v=5.1.2.2"></script><script src="/assets/errors.js?v=5.1.2.2"></script>
+<script src="/assets/nav.js?v=5.1.3.0"></script><script src="/assets/errors.js?v=5.1.3.0"></script>
 </body>
 </html>
 
