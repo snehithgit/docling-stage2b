@@ -1335,6 +1335,7 @@ class Runtime:
             for row in await self.stage2b_store.list_books()
         }
         book_catalog: list[dict] = []
+        pipeline_projection_by_job: dict[int, dict] = {}
         advanced = 0
         self.pipeline_sequence_state["book_errors"] = {}
 
@@ -1365,6 +1366,26 @@ class Runtime:
                 discovery_current = getattr(
                     self.stage2b_worker, "book_discovery_current", lambda _: False
                 )(job_id)
+                fallback_verification = {
+                    "ready": False,
+                    "failed": 0,
+                    "pending": 0,
+                    "processing": 0,
+                    "completed": 0,
+                    "raw_total": total,
+                    "total": total,
+                    "discovery_current": bool(discovery_current),
+                    "snapshot_missing": bool(total),
+                }
+                pipeline_projection_by_job[job_id] = {
+                    **resolve_pipeline_stage(
+                        stage2a_ready=True,
+                        verification=fallback_verification,
+                        stage2c_ready=False,
+                        stage3_ready=False,
+                    ),
+                    "required_verification": fallback_verification,
+                }
 
                 if total or discovery_current:
                     rows = (
@@ -1382,6 +1403,15 @@ class Runtime:
                         artifact_sweep_required=artifact_sweep_required,
                         expected_total=total,
                     )
+                    pipeline_projection_by_job[job_id] = {
+                        **resolve_pipeline_stage(
+                            stage2a_ready=True,
+                            verification=required_verification,
+                            stage2c_ready=False,
+                            stage3_ready=False,
+                        ),
+                        "required_verification": required_verification,
+                    }
 
                     if required_verification.get("ready"):
                         stage2c = await asyncio.to_thread(
@@ -1392,6 +1422,18 @@ class Runtime:
                             artifact_sweep_required=artifact_sweep_required,
                         )
                         if not stage2c.get("ready"):
+                            pipeline_projection_by_job[job_id] = {
+                                **resolve_pipeline_stage(
+                                    stage2a_ready=True,
+                                    verification=required_verification,
+                                    stage2c_ready=False,
+                                    stage2c_reason=stage2c.get("reason"),
+                                    stage3_ready=False,
+                                ),
+                                "required_verification": required_verification,
+                                "stage2c_ready": False,
+                                "stage2c_reason": stage2c.get("reason"),
+                            }
                             running = self.stage2b_worker.stage2c_state_for(job_id) or {}
                             if (
                                 str(running.get("status") or "") not in {"queued", "running"}
@@ -1439,6 +1481,14 @@ class Runtime:
                                 stage3_ready=False,
                             )
                             if gate.get("next_stage") == "stage2a_human_review":
+                                pipeline_projection_by_job[job_id] = {
+                                    **gate,
+                                    "required_verification": required_verification,
+                                    "stage2c_ready": True,
+                                    "stage2a_human_review_pending": int(
+                                        structural_gate.get("blocking_review_required") or 0
+                                    ),
+                                }
                                 book_catalog.append({
                                     "postprocess_job_id": job_id,
                                     "result_dir": result_dir.name,
@@ -1477,6 +1527,20 @@ class Runtime:
                                 stage3_ready=False,
                             )
                             if gate.get("next_stage") == "verifier_audit":
+                                pipeline_projection_by_job[job_id] = {
+                                    **gate,
+                                    "required_verification": required_verification,
+                                    "stage2c_ready": True,
+                                    "verifier_audit_pending": int(
+                                        audit_gate.get("review_required") or 0
+                                    ),
+                                    "verifier_audit_blocking": int(
+                                        audit_gate.get("blocking_review_required") or 0
+                                    ),
+                                    "audit_bypassed": bool(
+                                        audit_gate.get("bypassed_for_testing")
+                                    ),
+                                }
                                 book_catalog.append({
                                     "postprocess_job_id": job_id,
                                     "result_dir": result_dir.name,
@@ -1500,6 +1564,36 @@ class Runtime:
                             )
                             current_stage3 = bool(stage3.get("ready"))
                             if current_stage3:
+                                pipeline_projection_by_job[job_id] = {
+                                    **resolve_pipeline_stage(
+                                        stage2a_ready=True,
+                                        verification=required_verification,
+                                        stage2c_ready=True,
+                                        structural_review_pending=0,
+                                        verifier_audit_pending=int(
+                                            audit_gate.get("review_required") or 0
+                                        ),
+                                        verifier_audit_blocking=int(
+                                            audit_gate.get("blocking_review_required") or 0
+                                        ),
+                                        audit_bypassed=bool(
+                                            audit_gate.get("bypassed_for_testing")
+                                        ),
+                                        stage3_ready=True,
+                                    ),
+                                    "required_verification": required_verification,
+                                    "stage2c_ready": True,
+                                    "stage3_ready": True,
+                                    "verifier_audit_pending": int(
+                                        audit_gate.get("review_required") or 0
+                                    ),
+                                    "verifier_audit_blocking": int(
+                                        audit_gate.get("blocking_review_required") or 0
+                                    ),
+                                    "audit_bypassed": bool(
+                                        audit_gate.get("bypassed_for_testing")
+                                    ),
+                                }
                                 if locks is not None and not locks.get(job_id).locked():
                                     async with locks.get(job_id), getattr(
                                         self.stage2b_worker,
@@ -1533,6 +1627,22 @@ class Runtime:
                                     stage3_reason=stage3.get("reason"),
                                 )
                                 if gate.get("next_stage") == "stage3":
+                                    pipeline_projection_by_job[job_id] = {
+                                        **gate,
+                                        "required_verification": required_verification,
+                                        "stage2c_ready": True,
+                                        "stage3_ready": False,
+                                        "stage3_reason": stage3.get("reason"),
+                                        "verifier_audit_pending": int(
+                                            audit_gate.get("review_required") or 0
+                                        ),
+                                        "verifier_audit_blocking": int(
+                                            audit_gate.get("blocking_review_required") or 0
+                                        ),
+                                        "audit_bypassed": bool(
+                                            audit_gate.get("bypassed_for_testing")
+                                        ),
+                                    }
                                     running = self.stage3_builder.state_for(job_id) or {}
                                     if (
                                         str(running.get("status") or "")
