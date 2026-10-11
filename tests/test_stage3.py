@@ -125,6 +125,8 @@ async def test_stage3_uses_remote_docling_ip_and_applies_overlays_in_memory(tmp_
     assert status["chunk_count"] == 1
     assert status["raw_docling_immutable"] is True
     assert status["retrieval_searchable_chunks"] == 1
+    assert len(status["data_hash"]) == 64
+    assert status["data_hash_basis"] == "canonical_chunks_and_retrieval_rows_sha256"
     assert (result_dir / "retrieval_index.jsonl").is_file()
     quality = json.loads((result_dir / "retrieval_quality.json").read_text())
     assert quality["searchable_chunks"] == 1
