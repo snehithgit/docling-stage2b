@@ -3632,18 +3632,18 @@ def _apply_document_machine_state(
     machine_status: dict | None,
 ) -> dict:
     pipeline = row.get("pipeline") or {}
+    effective_machine_status = machine_status or {
+        "ready": False,
+        "reason": "machine_embedding_not_built" if owner else "manual_not_assigned_to_machine",
+    }
     if owner:
         equipment_id = str(owner.get("equipment_id") or "")
         pipeline["machine_assigned"] = True
         pipeline["machine_id"] = equipment_id
         pipeline["machine_name"] = owner.get("name")
-        status = machine_status or {
-            "ready": False,
-            "reason": "machine_embedding_not_built",
-        }
-        pipeline["machine_embedding_ready"] = bool(status.get("ready"))
-        pipeline["machine_embedding_reason"] = status.get("reason")
-        pipeline["machine_embedding_rows"] = int(status.get("rows") or 0)
+        pipeline["machine_embedding_ready"] = bool(effective_machine_status.get("ready"))
+        pipeline["machine_embedding_reason"] = effective_machine_status.get("reason")
+        pipeline["machine_embedding_rows"] = int(effective_machine_status.get("rows") or 0)
     else:
         pipeline["machine_embedding_ready"] = False
         pipeline["machine_embedding_reason"] = "manual_not_assigned_to_machine"
@@ -3672,6 +3672,73 @@ def _apply_document_machine_state(
         book_status=row.get("status"),
         entity_id=int(row.get("id") or 0) or None,
     )
+
+    contracts = [
+        dict(item) for item in (row.get("stage_contracts") or [])
+        if isinstance(item, dict)
+        and str(item.get("stage_id") or "") not in {"machine_embedding", "rag"}
+    ]
+    corpus_fingerprint = (
+        str(effective_machine_status.get("corpus_fingerprint") or "").strip() or None
+    )
+    machine_ready = bool(pipeline.get("machine_embedding_ready"))
+    machine_status_name = (
+        "unassigned" if not owner
+        else "completed" if machine_ready
+        else "waiting"
+    )
+    contracts.append(stage_result_contract(
+        stage_id="machine_embedding",
+        generation_id=corpus_fingerprint,
+        created_at=effective_machine_status.get("created_at_epoch"),
+        source_signature=corpus_fingerprint,
+        upstream_generation=None,
+        status=machine_status_name,
+        current=machine_ready,
+        ready_to_advance=machine_ready,
+        blockers=_stage_contract_blockers(
+            row["pipeline"], "assign_machine", "machine_embedding"
+        ),
+        data_hash=corpus_fingerprint,
+        data_hash_status="semantic_corpus_fingerprint" if corpus_fingerprint else "not_persisted",
+        human_review_required=False,
+        reason=pipeline.get("machine_embedding_reason"),
+        details={
+            "machine_assigned": bool(owner),
+            "machine_id": pipeline.get("machine_id"),
+            "machine_name": pipeline.get("machine_name"),
+            "rows": int(pipeline.get("machine_embedding_rows") or 0),
+            "manual_count": effective_machine_status.get("manual_count"),
+            "ready_manual_count": effective_machine_status.get("ready_manual_count"),
+            "model": effective_machine_status.get("model"),
+            "scope": "equipment",
+        },
+    ))
+    rag_ready = str(row["pipeline"].get("next_stage") or "") == "rag_ready"
+    contracts.append(stage_result_contract(
+        stage_id="rag",
+        generation_id=corpus_fingerprint,
+        created_at=effective_machine_status.get("created_at_epoch"),
+        source_signature=corpus_fingerprint,
+        upstream_generation=corpus_fingerprint,
+        status="ready" if rag_ready else "blocked",
+        current=rag_ready,
+        ready_to_advance=rag_ready,
+        blockers=list(row["pipeline"].get("blockers") or []),
+        data_hash=corpus_fingerprint,
+        data_hash_status="semantic_corpus_fingerprint" if corpus_fingerprint else "not_persisted",
+        human_review_required=bool(
+            int(row["pipeline"].get("blocking_reviews") or 0)
+        ),
+        reason=None if rag_ready else row["pipeline"].get("blocked_reason"),
+        details={
+            "machine_id": pipeline.get("machine_id"),
+            "machine_name": pipeline.get("machine_name"),
+            "retrieval_scope": "equipment",
+            "single_book_hybrid_allowed": False,
+        },
+    ))
+    row["stage_contracts"] = contracts
     return row
 
 
