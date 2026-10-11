@@ -180,3 +180,52 @@ async def test_pipeline_health_aggregates_normalized_blockers_and_transitions(mo
     assert result["blockers"][0]["action_href"] == "/vision-audit?book=1"
     assert result["recent_transitions"][0]["source_filename"] == "Needs Review.pdf"
     transition_reader.assert_awaited_once_with(limit=100)
+
+
+@pytest.mark.asyncio
+async def test_sequencer_records_zero_route_book_transition_without_blocking_pipeline(tmp_path, monkeypatch):
+    directory = tmp_path / "Manual__job15__run0"
+    directory.mkdir()
+    job = {
+        "id": 32,
+        "conversion_job_id": 15,
+        "status": "completed",
+        "result_dir": directory.name,
+        "source_filename": "Manual.pdf",
+    }
+    recorder = AsyncMock(return_value=True)
+    worker = SimpleNamespace(
+        book_discovery_current=lambda job_id: job_id == 32,
+        stage2c_state_for=lambda job_id: {},
+        start_stage2c_backfill=AsyncMock(return_value={"accepted": True}),
+    )
+    runtime = SimpleNamespace(
+        config=SimpleNamespace(
+            processed_dir=str(tmp_path),
+            stage2c_auto_finalize_after_stage2b=True,
+            retrieval_hybrid_enabled=False,
+        ),
+        postprocess_store=SimpleNamespace(
+            list_jobs=AsyncMock(return_value=[job]),
+            record_pipeline_projection=recorder,
+        ),
+        stage2b_store=SimpleNamespace(
+            list_books=AsyncMock(return_value=[{"postprocess_job_id": 32, "total": 0}]),
+            list_book_jobs_raw=AsyncMock(return_value=[]),
+        ),
+        stage2b_worker=worker,
+        pipeline_sequence_state={},
+        events=SimpleNamespace(notify=lambda *args, **kwargs: None),
+    )
+    monkeypatch.setattr(main, "repair_identity_metadata", lambda *args, **kwargs: {})
+    monkeypatch.setattr(main, "stage2c_freshness", lambda *args, **kwargs: {"ready": False, "reason": "stage2c_not_built"})
+    monkeypatch.setattr(main, "equipment_catalog", lambda *args, **kwargs: {"equipment": [], "unassigned_books": []})
+
+    await main.Runtime._advance_pipeline_sequence_once(runtime)
+
+    worker.start_stage2c_backfill.assert_awaited_once_with(32)
+    recorder.assert_awaited_once()
+    args = recorder.await_args.args
+    kwargs = recorder.await_args.kwargs
+    assert args[:2] == (32, "stage2c")
+    assert kwargs["blocker_code"] == "stage2c_not_current"
