@@ -1305,18 +1305,25 @@ class Runtime:
             pipeline, book_status="completed", entity_id=job_id
         )
         blocker = projected.get("primary_blocker") or {}
-        await recorder(
-            job_id,
-            str(projected.get("next_stage") or "stage2a"),
-            blocker_code=blocker.get("code"),
-            blocker_message=blocker.get("message"),
-            context={
-                "stage": projected.get("next_stage"),
-                "machine_id": projected.get("machine_id"),
-                "machine_name": projected.get("machine_name"),
-                "audit_bypassed": bool(projected.get("audit_bypassed")),
-            },
-        )
+        try:
+            await recorder(
+                job_id,
+                str(projected.get("next_stage") or "stage2a"),
+                blocker_code=blocker.get("code"),
+                blocker_message=blocker.get("message"),
+                context={
+                    "stage": projected.get("next_stage"),
+                    "machine_id": projected.get("machine_id"),
+                    "machine_name": projected.get("machine_name"),
+                    "audit_bypassed": bool(projected.get("audit_bypassed")),
+                },
+            )
+        except Exception as exc:
+            logger.warning(
+                "Could not record pipeline transition for book %s: %s",
+                job_id,
+                exc,
+            )
 
     async def _advance_pipeline_sequence_once(self) -> None:
         """Advance downstream stages only when the immediately prior stage is current.
@@ -1461,6 +1468,7 @@ class Runtime:
                                 job, result_dir, skip_if_busy=True
                             )
                             if compatibility.get("status") == "busy":
+                                pipeline_projection_by_job.pop(job_id, None)
                                 book_catalog.append({
                                     "postprocess_job_id": job_id,
                                     "result_dir": result_dir.name,
@@ -1762,6 +1770,79 @@ class Runtime:
                     self.pipeline_sequence_state["last_error"] = (
                         f"{equipment_id}: {exc}"
                     )
+
+        if book_catalog and pipeline_projection_by_job:
+            projection_catalog = equipment_catalog(
+                Path(self.config.processed_dir), book_catalog
+            )
+            owner_by_job: dict[int, dict] = {}
+            for equipment in projection_catalog.get("equipment") or []:
+                for manual in equipment.get("manuals") or []:
+                    if not manual.get("active_for_rag", True):
+                        continue
+                    try:
+                        owner_by_job[int(manual.get("postprocess_job_id") or 0)] = equipment
+                    except (TypeError, ValueError):
+                        continue
+
+            for projected_job_id, projected_pipeline in list(
+                pipeline_projection_by_job.items()
+            ):
+                final_pipeline = dict(projected_pipeline)
+                if final_pipeline.get("next_stage") == "post_stage3":
+                    owner = owner_by_job.get(projected_job_id)
+                    machine_status = None
+                    if owner:
+                        equipment_id = str(owner.get("equipment_id") or "")
+                        selected = resolve_equipment_books(
+                            Path(self.config.processed_dir),
+                            book_catalog,
+                            equipment_id,
+                        )
+                        manual_types = {
+                            int(item.get("postprocess_job_id") or 0): str(
+                                item.get("manual_type") or "other"
+                            )
+                            for item in owner.get("manuals") or []
+                            if int(item.get("postprocess_job_id") or 0) > 0
+                            and item.get("active_for_rag", True)
+                        }
+                        if selected and all(bool(row.get("index_ready")) for row in selected):
+                            index_paths = [
+                                Path(self.config.processed_dir)
+                                / str(row["result_dir"])
+                                / "retrieval_index.jsonl"
+                                for row in selected
+                            ]
+                            machine_status = equipment_hybrid_index_status(
+                                Path(self.config.processed_dir),
+                                equipment_id,
+                                index_paths,
+                                model=self.config.retrieval_embedding_model,
+                                document_prefix=self.config.retrieval_embedding_document_prefix,
+                                manual_types=manual_types,
+                            )
+                        else:
+                            machine_status = {
+                                "ready": False,
+                                "reason": "machine_waiting_for_all_manual_stage3",
+                                "manual_count": len(selected),
+                                "ready_manual_count": sum(
+                                    bool(row.get("index_ready")) for row in selected
+                                ),
+                            }
+                    projected_row = {
+                        "id": projected_job_id,
+                        "status": "completed",
+                        "pipeline": final_pipeline,
+                    }
+                    _apply_document_machine_state(
+                        projected_row, owner, machine_status
+                    )
+                    final_pipeline = projected_row["pipeline"]
+                await Runtime._record_pipeline_projection(
+                    self, projected_job_id, final_pipeline
+                )
 
         self.pipeline_sequence_state.update({
             "current_book": None,
