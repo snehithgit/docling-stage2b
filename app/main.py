@@ -3319,6 +3319,186 @@ def _latest_verification_time(rows: list[dict]) -> str | None:
     return values[-1] if values else None
 
 
+def _build_document_stage_contracts(
+    row: dict,
+    pipeline: dict,
+    *,
+    result_dir: Path | None = None,
+    verification_rows: list[dict] | None = None,
+    required_verification: dict | None = None,
+    stage2c_info: dict | None = None,
+    stage3_info: dict | None = None,
+    structural_review: dict | None = None,
+    audit_gate: dict | None = None,
+) -> list[dict]:
+    """Project strict read-only contracts from existing authoritative state."""
+    job_id = int(row.get("id") or 0)
+    result_name = Path(result_dir).name if result_dir is not None else None
+    source_hash = str(row.get("output_sha256") or "").strip() or None
+    pipeline_blockers = pipeline.get("blockers") or []
+    contracts = [
+        stage_result_contract(
+            stage_id="stage2a",
+            generation_id=result_name,
+            created_at=row.get("completed_at") or row.get("started_at") or row.get("created_at"),
+            source_signature=source_hash,
+            upstream_generation=str(row.get("conversion_job_id") or "") or None,
+            status=str(row.get("status") or "unknown"),
+            current=bool(row.get("status") == "completed" and result_name),
+            ready_to_advance=bool(pipeline.get("stage2a_ready")),
+            blockers=_stage_contract_blockers(pipeline, "stage2a"),
+            data_hash=None,
+            data_hash_status="not_persisted",
+            human_review_required=bool(int(pipeline.get("stage2a_human_review_pending") or 0)),
+            details={
+                "postprocess_job_id": job_id,
+                "result_dir": result_name,
+                "raw_docling_immutable": True,
+            },
+        )
+    ]
+    if result_dir is None or row.get("status") != "completed":
+        return contracts
+
+    rows = list(verification_rows or [])
+    required = dict(required_verification or {})
+    generations = _verification_generation_ids(rows)
+    verification_hash = (
+        (stage2c_info or {}).get("verification_signature")
+        or (stage2c_info or {}).get("recorded_verification_signature")
+    )
+    stage2b_generation = generations[0] if len(generations) == 1 else None
+    contracts.append(stage_result_contract(
+        stage_id="stage2b",
+        generation_id=stage2b_generation,
+        created_at=_latest_verification_time(rows),
+        source_signature=source_hash,
+        upstream_generation=result_name,
+        status=_verification_contract_status(required),
+        current=bool(required.get("discovery_current") and not required.get("snapshot_missing")),
+        ready_to_advance=bool(required.get("ready")),
+        blockers=_stage_contract_blockers(pipeline, "stage2b"),
+        data_hash=verification_hash,
+        data_hash_status="verification_signature" if verification_hash else "not_persisted",
+        human_review_required=False,
+        details={
+            "generation_ids": generations,
+            "mixed_generations": len(generations) > 1,
+            "required_total": int(required.get("total") or 0),
+            "raw_total": int(required.get("raw_total") or 0),
+            "pending": int(required.get("pending") or 0),
+            "processing": int(required.get("processing") or 0),
+            "completed": int(required.get("completed") or 0),
+            "failed": int(required.get("failed") or 0),
+            "discovery_current": bool(required.get("discovery_current")),
+            "snapshot_missing": bool(required.get("snapshot_missing")),
+        },
+    ))
+
+    s2c = dict(stage2c_info or {})
+    s2c_state = dict(s2c.get("state") or {})
+    s2c_hash = s2c.get("semantic_output_signature") or s2c.get("output_signature")
+    s2c_generation = s2c_hash or s2c.get("recorded_verification_signature")
+    contracts.append(stage_result_contract(
+        stage_id="stage2c",
+        generation_id=s2c_generation,
+        created_at=s2c_state.get("completed_at_epoch") or s2c_state.get("started_at_epoch"),
+        source_signature=s2c.get("verification_signature"),
+        upstream_generation=stage2b_generation or verification_hash,
+        status=str(s2c.get("status") or "not_built"),
+        current=bool(s2c.get("ready")),
+        ready_to_advance=bool(s2c.get("ready")),
+        blockers=_stage_contract_blockers(pipeline, "stage2c"),
+        data_hash=s2c_hash,
+        data_hash_status="semantic_output_signature" if s2c.get("semantic_output_signature") else "output_signature" if s2c.get("output_signature") else "not_persisted",
+        human_review_required=False,
+        rule_version=s2c.get("rule_version"),
+        recorded_rule_version=s2c.get("recorded_rule_version"),
+        reason=s2c.get("reason"),
+        details={
+            "verification_signature": s2c.get("verification_signature"),
+            "recorded_verification_signature": s2c.get("recorded_verification_signature"),
+            "signature_route_count": int(s2c.get("signature_route_count") or 0),
+            "publication_blocker_count": int(s2c.get("publication_blocker_count") or 0),
+            "publication_blocker_job_ids": list(s2c.get("publication_blocker_job_ids") or []),
+        },
+    ))
+
+    structural = dict(structural_review or {})
+    audit = dict(audit_gate or {})
+    structural_pending = int(structural.get("blocking_review_required") or 0)
+    audit_pending = int(audit.get("review_required") or 0)
+    audit_blocking = int(audit.get("blocking_review_required") or 0)
+    review_required = structural_pending + audit_pending
+    review_blocking = structural_pending + audit_blocking
+    bypassed = bool(audit.get("bypassed_for_testing"))
+    review_status = (
+        "blocked" if review_blocking
+        else "bypassed_for_testing" if bypassed and audit_pending
+        else "completed"
+    )
+    contracts.append(stage_result_contract(
+        stage_id="review_gate",
+        generation_id=s2c_generation,
+        created_at=s2c_state.get("completed_at_epoch"),
+        source_signature=s2c_hash,
+        upstream_generation=s2c_generation,
+        status=review_status,
+        current=bool(s2c.get("ready")),
+        ready_to_advance=bool(s2c.get("ready") and review_blocking == 0),
+        blockers=_stage_contract_blockers(
+            pipeline, "stage2a_human_review", "verifier_audit"
+        ),
+        data_hash=s2c_hash,
+        data_hash_status="bound_to_stage2c_authority" if s2c_hash else "not_persisted",
+        human_review_required=bool(review_required),
+        reason=(
+            "human_review_required" if review_blocking
+            else "testing_bypass" if bypassed and audit_pending
+            else None
+        ),
+        details={
+            "structural_review_pending": structural_pending,
+            "verifier_audit_pending": audit_pending,
+            "verifier_audit_blocking": audit_blocking,
+            "audit_bypassed": bypassed,
+        },
+    ))
+
+    s3 = dict(stage3_info or {})
+    s3_state = dict(s3.get("state") or {})
+    stage3_generation = str(s3_state.get("task_id") or "").strip() or None
+    stage3_hash = str(s3_state.get("data_hash") or "").strip() or None
+    contracts.append(stage_result_contract(
+        stage_id="stage3",
+        generation_id=stage3_generation,
+        created_at=s3_state.get("completed_at_epoch") or s3_state.get("started_at_epoch"),
+        source_signature=s3.get("stage2c_signature"),
+        upstream_generation=s2c_generation,
+        status=str(s3.get("status") or "not_built"),
+        current=bool(s3.get("ready")),
+        ready_to_advance=bool(s3.get("ready")),
+        blockers=_stage_contract_blockers(pipeline, "stage3"),
+        data_hash=stage3_hash,
+        data_hash_status="persisted_output_hash" if stage3_hash else "legacy_or_not_persisted",
+        human_review_required=bool(review_required and review_blocking),
+        rule_version=s3.get("stage3_rule_version"),
+        recorded_rule_version=s3.get("recorded_stage3_rule_version"),
+        reason=s3.get("reason"),
+        details={
+            "recorded_stage2c_signature": s3.get("recorded_stage2c_signature"),
+            "canonical_ready": bool(s3.get("canonical_ready")),
+            "chunks_available": bool(s3.get("chunks_available")),
+            "retrieval_index_available": bool(s3.get("retrieval_index_available")),
+            "retrieval_rule_version": s3.get("retrieval_rule_version"),
+            "recorded_retrieval_rule_version": s3.get("recorded_retrieval_rule_version"),
+            "retrieval_rule_match": bool(s3.get("retrieval_rule_match")),
+            "ranking_only_version_drift": bool(s3.get("ranking_only_version_drift")),
+        },
+    ))
+    return contracts
+
+
 async def _enrich_document_core(row: dict, verification_book: dict) -> dict:
     """Compute per-book pipeline truth without evaluating unrelated manuals."""
     row = dict(row)
