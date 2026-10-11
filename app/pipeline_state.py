@@ -12,6 +12,57 @@ from typing import Any, Iterable
 HUMAN_VISUAL_RECOVERY_CODE = "HUMAN_VISUAL_EVIDENCE_RECOVERY"
 
 
+STAGE_CONTRACT_SCHEMA = "pipeline-stage/v1"
+
+
+def stage_result_contract(
+    *,
+    stage_id: str,
+    generation_id: str | None,
+    created_at: str | float | int | None,
+    source_signature: str | None,
+    upstream_generation: str | None,
+    status: str,
+    current: bool,
+    ready_to_advance: bool,
+    blockers: list[dict[str, Any]] | None = None,
+    data_hash: str | None = None,
+    data_hash_status: str | None = None,
+    human_review_required: bool = False,
+    rule_version: str | None = None,
+    recorded_rule_version: str | None = None,
+    reason: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Normalize authoritative stage state without creating another state store.
+
+    Missing legacy hashes or generations remain None with explicit diagnostic
+    metadata rather than being inferred from timestamps or filenames.
+    """
+    normalized_blockers = [
+        dict(item) for item in (blockers or []) if isinstance(item, dict)
+    ]
+    return {
+        "schema": STAGE_CONTRACT_SCHEMA,
+        "stage_id": str(stage_id),
+        "generation_id": str(generation_id) if generation_id not in {None, ""} else None,
+        "created_at": created_at,
+        "source_signature": str(source_signature) if source_signature not in {None, ""} else None,
+        "upstream_generation": str(upstream_generation) if upstream_generation not in {None, ""} else None,
+        "status": str(status or "unknown"),
+        "current": bool(current),
+        "ready_to_advance": bool(ready_to_advance),
+        "blockers": normalized_blockers,
+        "data_hash": str(data_hash) if data_hash not in {None, ""} else None,
+        "data_hash_status": str(data_hash_status or ("available" if data_hash else "not_persisted")),
+        "human_review_required": bool(human_review_required),
+        "rule_version": str(rule_version) if rule_version not in {None, ""} else None,
+        "recorded_rule_version": str(recorded_rule_version) if recorded_rule_version not in {None, ""} else None,
+        "reason": str(reason) if reason not in {None, ""} else None,
+        "details": dict(details or {}),
+    }
+
+
 def _sha256_parts(parts: Iterable[bytes]) -> str:
     h = hashlib.sha256()
     for part in parts:
