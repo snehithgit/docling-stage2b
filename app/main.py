@@ -4215,6 +4215,28 @@ async def document_details(job_id: int) -> dict:
     }
 
 
+@app.get("/api/documents/{job_id}/contracts")
+async def document_stage_contracts(job_id: int) -> dict:
+    """Strict read-only stage contracts for one book.
+
+    This endpoint projects existing authoritative database/artifact state. It
+    does not persist, advance, retry, or otherwise mutate the pipeline.
+    """
+    detail = await document_details(job_id)
+    row = detail["document"]
+    contracts = [
+        dict(item) for item in (row.get("stage_contracts") or [])
+        if isinstance(item, dict)
+    ]
+    return {
+        "schema": "pipeline-stage-set/v1",
+        "postprocess_job_id": int(job_id),
+        "source_filename": row.get("source_filename"),
+        "next_stage": (row.get("pipeline") or {}).get("next_stage"),
+        "contracts": contracts,
+    }
+
+
 @app.post("/api/stage2c/books/{postprocess_job_id}/correction-suggestions")
 async def stage2c_correction_suggestions(postprocess_job_id: int) -> dict:
     try:
