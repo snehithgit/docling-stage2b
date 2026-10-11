@@ -88,6 +88,21 @@ class PostprocessStore:
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_postprocess_status ON postprocess_jobs(status)"
             )
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS pipeline_transitions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    postprocess_job_id INTEGER NOT NULL,
+                    observed_at TEXT NOT NULL,
+                    previous_stage TEXT,
+                    new_stage TEXT NOT NULL,
+                    blocker_code TEXT,
+                    blocker_message TEXT,
+                    context_json TEXT
+                )"""
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_pipeline_transitions_job ON pipeline_transitions(postprocess_job_id, id DESC)"
+            )
 
     async def recover_interrupted(self) -> int:
         return await self._run(self._recover_interrupted_sync)
@@ -453,9 +468,114 @@ class PostprocessStore:
             if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='review_assistant_jobs'").fetchone():
                 connection.execute("DELETE FROM review_assistant_jobs WHERE postprocess_job_id=?", (job_id,))
             connection.execute("DELETE FROM verification_jobs WHERE postprocess_job_id=?", (job_id,))
+            if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pipeline_transitions'").fetchone():
+                connection.execute("DELETE FROM pipeline_transitions WHERE postprocess_job_id=?", (job_id,))
             connection.execute("DELETE FROM postprocess_jobs WHERE id=?", (job_id,))
             connection.execute("DELETE FROM jobs WHERE id=?", (conversion_job_id,))
             return dict(row)
+
+    async def record_pipeline_projection(
+        self,
+        postprocess_job_id: int,
+        new_stage: str,
+        *,
+        blocker_code: str | None = None,
+        blocker_message: str | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> bool:
+        return bool(await self._run(
+            self._record_pipeline_projection_sync,
+            int(postprocess_job_id),
+            str(new_stage),
+            blocker_code,
+            blocker_message,
+            dict(context or {}),
+        ))
+
+    def _record_pipeline_projection_sync(
+        self,
+        postprocess_job_id: int,
+        new_stage: str,
+        blocker_code: str | None,
+        blocker_message: str | None,
+        context: dict[str, Any],
+    ) -> int:
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            previous = connection.execute(
+                """SELECT new_stage, blocker_code, blocker_message
+                   FROM pipeline_transitions
+                   WHERE postprocess_job_id=?
+                   ORDER BY id DESC LIMIT 1""",
+                (postprocess_job_id,),
+            ).fetchone()
+            normalized_code = str(blocker_code or "") or None
+            normalized_message = str(blocker_message or "")[:2000] or None
+            if previous is not None and (
+                str(previous["new_stage"] or "") == new_stage
+                and (str(previous["blocker_code"] or "") or None) == normalized_code
+                and (str(previous["blocker_message"] or "") or None) == normalized_message
+            ):
+                return 0
+            previous_stage = str(previous["new_stage"] or "") if previous is not None else None
+            cursor = connection.execute(
+                """INSERT INTO pipeline_transitions (
+                       postprocess_job_id, observed_at, previous_stage, new_stage,
+                       blocker_code, blocker_message, context_json
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    postprocess_job_id,
+                    utcnow(),
+                    previous_stage,
+                    new_stage,
+                    normalized_code,
+                    normalized_message,
+                    json.dumps(context, ensure_ascii=False, sort_keys=True),
+                ),
+            )
+            return int(cursor.rowcount)
+
+    async def list_pipeline_transitions(
+        self,
+        postprocess_job_id: int | None = None,
+        *,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        return await self._run(
+            self._list_pipeline_transitions_sync,
+            int(postprocess_job_id) if postprocess_job_id is not None else None,
+            max(1, int(limit)),
+        )
+
+    def _list_pipeline_transitions_sync(
+        self,
+        postprocess_job_id: int | None,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        with self._connection() as connection:
+            if postprocess_job_id is None:
+                rows = connection.execute(
+                    """SELECT * FROM pipeline_transitions
+                       ORDER BY id DESC LIMIT ?""",
+                    (limit,),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """SELECT * FROM pipeline_transitions
+                       WHERE postprocess_job_id=?
+                       ORDER BY id DESC LIMIT ?""",
+                    (postprocess_job_id, limit),
+                ).fetchall()
+            output = []
+            for row in rows:
+                item = dict(row)
+                try:
+                    item["context"] = json.loads(item.pop("context_json") or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    item["context"] = {}
+                    item.pop("context_json", None)
+                output.append(item)
+            return output
 
     async def list_jobs(self, limit: int = 100) -> list[dict[str, Any]]:
         return await self._run(self._list_jobs_sync, limit)
