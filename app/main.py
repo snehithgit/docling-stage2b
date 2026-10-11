@@ -60,6 +60,7 @@ from .pipeline_state import (
     required_verification_state,
     resolve_pipeline_stage,
     attach_pipeline_blockers,
+    stage_result_contract,
 )
 from .retrieval import (
     add_benchmark_item,
@@ -3277,6 +3278,45 @@ def _document_verification_summary(book: dict) -> dict:
         **verification_counts(book),
         "total": int(book.get("total") or 0),
     }
+
+
+def _stage_contract_blockers(pipeline: dict, *stage_ids: str) -> list[dict]:
+    allowed = {str(stage) for stage in stage_ids}
+    return [
+        dict(item) for item in (pipeline.get("blockers") or [])
+        if isinstance(item, dict) and str(item.get("stage") or "") in allowed
+    ]
+
+
+def _verification_contract_status(state: dict) -> str:
+    if int(state.get("failed") or 0) > 0:
+        return "failed"
+    if state.get("snapshot_missing"):
+        return "incomplete"
+    if int(state.get("processing") or 0) > 0:
+        return "processing"
+    if int(state.get("pending") or 0) > 0:
+        return "pending"
+    if state.get("ready"):
+        return "completed"
+    return "waiting"
+
+
+def _verification_generation_ids(rows: list[dict]) -> list[str]:
+    return sorted({
+        str(row.get("generation") or "").strip()
+        for row in rows
+        if str(row.get("generation") or "").strip()
+    })
+
+
+def _latest_verification_time(rows: list[dict]) -> str | None:
+    values = sorted(
+        str(row.get("completed_at") or "").strip()
+        for row in rows
+        if str(row.get("completed_at") or "").strip()
+    )
+    return values[-1] if values else None
 
 
 async def _enrich_document_core(row: dict, verification_book: dict) -> dict:
