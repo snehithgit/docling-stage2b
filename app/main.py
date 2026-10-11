@@ -3485,7 +3485,7 @@ def _build_document_stage_contracts(
         blockers=stage3_blockers,
         data_hash=stage3_hash,
         data_hash_status="persisted_output_hash" if stage3_hash else "legacy_or_not_persisted",
-        human_review_required=bool(review_required and review_blocking),
+        human_review_required=bool(review_required),
         rule_version=s3.get("stage3_rule_version"),
         recorded_rule_version=s3.get("recorded_stage3_rule_version"),
         reason=s3.get("reason"),
@@ -3715,7 +3715,8 @@ def _apply_document_machine_state(
         data_hash=corpus_fingerprint,
         data_hash_status="semantic_corpus_fingerprint" if corpus_fingerprint else "not_persisted",
         human_review_required=bool(
-            int(row["pipeline"].get("blocking_reviews") or 0)
+            int(row["pipeline"].get("stage2a_human_review_pending") or 0)
+            or int(row["pipeline"].get("verifier_audit_pending") or 0)
         ),
         reason=pipeline.get("machine_embedding_reason"),
         details={
@@ -3743,7 +3744,8 @@ def _apply_document_machine_state(
         data_hash=corpus_fingerprint,
         data_hash_status="semantic_corpus_fingerprint" if corpus_fingerprint else "not_persisted",
         human_review_required=bool(
-            int(row["pipeline"].get("blocking_reviews") or 0)
+            int(row["pipeline"].get("stage2a_human_review_pending") or 0)
+            or int(row["pipeline"].get("verifier_audit_pending") or 0)
         ),
         reason=None if rag_ready else row["pipeline"].get("blocked_reason"),
         details={
