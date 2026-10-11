@@ -127,6 +127,28 @@ def resolve_pipeline_stage(
         "audit_bypassed": bool(audit_bypassed),
     }
 
+def _pipeline_reason_message(code: object, stage_label: str) -> str:
+    value = str(code or "").strip()
+    messages = {
+        "stage2c_not_built": "Stage 2C finalization has not been built yet.",
+        "stage2c_stale_after_verification": "Stage 2C is stale because required verification changed.",
+        "stage2c_rule_version_stale": "Stage 2C must be rebuilt with the current correction rules.",
+        "stage2c_outputs_missing": "Stage 2C output files are missing and must be rebuilt.",
+        "stage2c_publication_incomplete": "Stage 2C could not publish every required correction entry.",
+        "stage3_not_built": "Stage 3 canonical chunks have not been built yet.",
+        "stage3_stale_after_stage2c": "Stage 3 is stale because Stage 2C changed.",
+        "stage3_rule_version_stale": "Stage 3 must be rebuilt with the current chunking rules.",
+        "stage3_retrieval_rule_version_stale": "Stage 3 retrieval artifacts must be rebuilt with the current retrieval rules.",
+        "stage3_chunks_missing": "Stage 3 chunk output is missing and must be rebuilt.",
+        "stage3_retrieval_index_missing": "The Stage 3 retrieval index is missing and must be rebuilt.",
+    }
+    if value in messages:
+        return messages[value]
+    if value:
+        return f"{stage_label} is not current ({value.replace('_', ' ')})."
+    return f"{stage_label} is not current."
+
+
 def pipeline_blockers(pipeline: dict[str, Any], *, book_status: str | None = None) -> list[dict[str, Any]]:
     """Return the canonical current blocker contract for one book."""
     next_stage = str(pipeline.get("next_stage") or "stage2a")
@@ -162,7 +184,8 @@ def pipeline_blockers(pipeline: dict[str, Any], *, book_status: str | None = Non
                    reason or "Required verification is still pending.",
                    operator=False, automatic=True, count=waiting)
     if next_stage == "stage2c":
-        message = reason or "Stage 2C is not current."
+        raw_reason = pipeline.get("stage2c_reason") or reason
+        message = _pipeline_reason_message(raw_reason, "Stage 2C")
         hard = any(token in message.casefold() for token in ("failed", "error", "incomplete"))
         return one("stage2c_not_current", "stage2c", "critical" if hard else "active",
                    message, operator=hard, automatic=not hard,
@@ -178,7 +201,8 @@ def pipeline_blockers(pipeline: dict[str, Any], *, book_status: str | None = Non
                    reason or "Verifier audit requires a human decision before Stage 3.",
                    operator=True, automatic=False, count=count)
     if next_stage == "stage3":
-        message = reason or "Stage 3 chunks are not current."
+        raw_reason = pipeline.get("stage3_reason") or reason
+        message = _pipeline_reason_message(raw_reason, "Stage 3")
         hard = any(token in message.casefold() for token in ("failed", "error", "incomplete"))
         return one("stage3_not_current", "stage3", "critical" if hard else "active",
                    message, operator=hard, automatic=not hard,
