@@ -3516,6 +3516,13 @@ async def _enrich_document_core(row: dict, verification_book: dict) -> dict:
         "next_stage": "stage2a",
         "blocked_reason": None,
     }
+    result_dir: Path | None = None
+    verification_rows: list[dict] = []
+    required_verification: dict = {}
+    s2c: dict = {}
+    s3: dict = {}
+    structural_review: dict = {}
+    audit_gate: dict = {}
     if row.get("status") == "completed" and row.get("result_dir"):
         total = verification["total"]
         result_dir = Path(runtime.config.processed_dir) / Path(
@@ -3604,6 +3611,17 @@ async def _enrich_document_core(row: dict, verification_book: dict) -> dict:
         ))
     row["pipeline"] = attach_pipeline_blockers(
         pipeline, book_status=row.get("status"), entity_id=job_id
+    )
+    row["stage_contracts"] = _build_document_stage_contracts(
+        row,
+        row["pipeline"],
+        result_dir=result_dir,
+        verification_rows=verification_rows,
+        required_verification=required_verification,
+        stage2c_info=s2c,
+        stage3_info=s3,
+        structural_review=structural_review,
+        audit_gate=audit_gate,
     )
     return row
 
