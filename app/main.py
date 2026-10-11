@@ -3672,6 +3672,104 @@ async def document_summaries(generation: int | None = None) -> dict:
         return payload
 
 
+def _pipeline_blocker_action(stage: str, job_id: int) -> str:
+    if stage == "stage2b":
+        return f"/verification?job={job_id}"
+    if stage == "verifier_audit":
+        return f"/vision-audit?book={job_id}"
+    if stage in {"assign_machine", "machine_embedding", "rag_ready"}:
+        return f"/retrieval?job={job_id}"
+    if stage == "stage2a":
+        return f"/quality?job={job_id}"
+    return f"/book?job={job_id}"
+
+
+@app.get("/api/pipeline/health")
+async def pipeline_health() -> dict:
+    """Normalized pipeline blockers plus recent durable stage transitions."""
+    snapshot = await document_summaries()
+    documents = list(snapshot.get("documents") or [])
+    blockers: list[dict] = []
+    by_job: dict[int, dict] = {}
+    for row in documents:
+        try:
+            job_id = int(row.get("id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if job_id <= 0:
+            continue
+        by_job[job_id] = row
+        pipeline = row.get("pipeline") or {}
+        blocker = pipeline.get("primary_blocker")
+        if not isinstance(blocker, dict):
+            continue
+        item = dict(blocker)
+        item["postprocess_job_id"] = job_id
+        item["source_filename"] = row.get("source_filename")
+        item["action_href"] = _pipeline_blocker_action(
+            str(item.get("stage") or pipeline.get("next_stage") or ""),
+            job_id,
+        )
+        blockers.append(item)
+
+    blocker_counts: dict[str, int] = {}
+    severity_counts = {"critical": 0, "attention": 0, "active": 0}
+    stage_counts: dict[str, int] = {}
+    for blocker in blockers:
+        code = str(blocker.get("code") or "unknown")
+        stage = str(blocker.get("stage") or "unknown")
+        severity = str(blocker.get("severity") or "active")
+        blocker_counts[code] = blocker_counts.get(code, 0) + 1
+        stage_counts[stage] = stage_counts.get(stage, 0) + 1
+        severity_counts[severity] = severity_counts.get(severity, 0) + 1
+
+    transitions: list[dict] = []
+    reader = getattr(runtime.postprocess_store, "list_pipeline_transitions", None)
+    if reader is not None:
+        transitions = await reader(limit=100)
+        for transition in transitions:
+            job_id = int(transition.get("postprocess_job_id") or 0)
+            row = by_job.get(job_id) or {}
+            transition["source_filename"] = row.get("source_filename")
+            transition["action_href"] = f"/book?job={job_id}" if job_id else "/"
+
+    return {
+        "schema": "pipeline-health/v1",
+        "generated_at_epoch": time.time(),
+        "books_total": len(documents),
+        "books_ready": sum(
+            str((row.get("pipeline") or {}).get("next_stage") or "") == "rag_ready"
+            for row in documents
+        ),
+        "books_needing_operator": sum(
+            bool(row.get("operator_action_required")) for row in blockers
+        ),
+        "books_auto_progressing": sum(
+            bool(row.get("auto_resolvable")) for row in blockers
+        ),
+        "severity_counts": severity_counts,
+        "stage_counts": stage_counts,
+        "blocker_counts": blocker_counts,
+        "blockers": blockers,
+        "recent_transitions": transitions,
+    }
+
+
+@app.get("/api/pipeline/transitions")
+async def pipeline_transitions(
+    postprocess_job_id: int | None = None,
+    limit: int = 100,
+) -> dict:
+    reader = getattr(runtime.postprocess_store, "list_pipeline_transitions", None)
+    if reader is None:
+        return {"items": [], "total": 0}
+    items = await reader(
+        postprocess_job_id=postprocess_job_id,
+        limit=min(500, max(1, int(limit))),
+    )
+    return {"items": items, "total": len(items)}
+
+
 async def _stage2b_book_summary(postprocess_job_id: int) -> dict:
     """Fetch one book's verifier aggregate without scanning every verification book."""
     getter = getattr(runtime.stage2b_store, "get_book_summary", None)
