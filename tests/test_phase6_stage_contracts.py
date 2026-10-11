@@ -340,3 +340,31 @@ async def test_contract_endpoint_is_read_only_projection(monkeypatch):
     assert result["schema"] == "pipeline-stage-set/v1"
     assert result["next_stage"] == "stage3"
     assert result["contracts"][0]["stage_id"] == "stage3"
+
+
+def test_testing_bypass_preserves_human_review_requirement_without_blocking_advance():
+    pipeline = {
+        "stage2a_ready": True,
+        "stage2b_ready": True,
+        "stage2c_ready": True,
+        "stage3_ready": True,
+        "stage2a_human_review_pending": 0,
+        "verifier_audit_pending": 2,
+        "verifier_audit_blocking": 0,
+        "blocking_reviews": 0,
+        "audit_bypassed": True,
+        "next_stage": "post_stage3",
+        "blocked_reason": None,
+    }
+    contracts = _by_stage(_contracts(
+        pipeline,
+        audit={"review_required": 2, "blocking_review_required": 0, "bypassed_for_testing": True},
+    ))
+    review = contracts["review_gate"]
+    stage3 = contracts["stage3"]
+    assert review["status"] == "bypassed_for_testing"
+    assert review["human_review_required"] is True
+    assert review["ready_to_advance"] is True
+    assert review["blockers"] == []
+    assert stage3["human_review_required"] is True
+    assert stage3["ready_to_advance"] is True
