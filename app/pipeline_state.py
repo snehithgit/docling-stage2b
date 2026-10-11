@@ -127,6 +127,87 @@ def resolve_pipeline_stage(
         "audit_bypassed": bool(audit_bypassed),
     }
 
+def pipeline_blockers(pipeline: dict[str, Any], *, book_status: str | None = None) -> list[dict[str, Any]]:
+    """Return the canonical current blocker contract for one book."""
+    next_stage = str(pipeline.get("next_stage") or "stage2a")
+    verification = pipeline.get("required_verification") or {}
+    reason = str(pipeline.get("blocked_reason") or "").strip()
+
+    def one(code, stage, severity, message, *, operator, automatic, count=0, details=None):
+        return [{"blocker_type": "pipeline", "code": code, "severity": severity,
+                 "stage": stage, "message": message,
+                 "operator_action_required": bool(operator),
+                 "auto_resolvable": bool(automatic),
+                 "count": max(0, int(count or 0)),
+                 "details": dict(details or {})}]
+
+    if next_stage == "stage2a":
+        failed = str(book_status or "") == "failed"
+        return one("stage2a_failed" if failed else "stage2a_in_progress", "stage2a",
+                   "critical" if failed else "active",
+                   reason or ("Extraction analysis failed and needs operator attention." if failed else "Extraction analysis is still running."),
+                   operator=failed, automatic=not failed)
+    if next_stage == "stage2b":
+        failed = int(verification.get("failed") or 0)
+        if failed:
+            return one("stage2b_verification_failed", "stage2b", "critical",
+                       reason or "Required verification has failed routes.",
+                       operator=True, automatic=False, count=failed)
+        if verification.get("snapshot_missing"):
+            return one("stage2b_snapshot_missing", "stage2b", "attention",
+                       reason or "The required verification snapshot is incomplete.",
+                       operator=True, automatic=False, count=int(verification.get("total") or 0))
+        waiting = int(verification.get("pending") or 0) + int(verification.get("processing") or 0)
+        return one("stage2b_verification_pending", "stage2b", "active",
+                   reason or "Required verification is still pending.",
+                   operator=False, automatic=True, count=waiting)
+    if next_stage == "stage2c":
+        message = reason or "Stage 2C is not current."
+        hard = any(token in message.casefold() for token in ("failed", "error", "incomplete"))
+        return one("stage2c_not_current", "stage2c", "critical" if hard else "active",
+                   message, operator=hard, automatic=not hard,
+                   details={"reason": pipeline.get("stage2c_reason")})
+    if next_stage == "stage2a_human_review":
+        return one("stage2a_structural_review_required", next_stage, "attention",
+                   reason or "Structural source review is required before Stage 3.",
+                   operator=True, automatic=False,
+                   count=int(pipeline.get("stage2a_human_review_pending") or 0))
+    if next_stage == "verifier_audit":
+        count = int(pipeline.get("verifier_audit_blocking") or pipeline.get("verifier_audit_pending") or 0)
+        return one("verifier_audit_required", next_stage, "attention",
+                   reason or "Verifier audit requires a human decision before Stage 3.",
+                   operator=True, automatic=False, count=count)
+    if next_stage == "stage3":
+        message = reason or "Stage 3 chunks are not current."
+        hard = any(token in message.casefold() for token in ("failed", "error", "incomplete"))
+        return one("stage3_not_current", "stage3", "critical" if hard else "active",
+                   message, operator=hard, automatic=not hard,
+                   details={"reason": pipeline.get("stage3_reason")})
+    if next_stage == "assign_machine":
+        return one("manual_not_assigned_to_machine", next_stage, "attention",
+                   reason or "Assign this manual to its physical machine before hybrid retrieval.",
+                   operator=True, automatic=False)
+    if next_stage == "machine_embedding":
+        return one("machine_embedding_not_ready", next_stage, "active",
+                   reason or "Machine embeddings are missing, stale, or waiting for all assigned manuals.",
+                   operator=False, automatic=True,
+                   details={"machine_id": pipeline.get("machine_id"),
+                            "machine_name": pipeline.get("machine_name"),
+                            "reason": pipeline.get("machine_embedding_reason")})
+    return []
+
+
+def attach_pipeline_blockers(pipeline: dict[str, Any], *, book_status: str | None = None, entity_id: int | str | None = None) -> dict[str, Any]:
+    pipeline = dict(pipeline)
+    blockers = pipeline_blockers(pipeline, book_status=book_status)
+    if entity_id is not None:
+        for blocker in blockers:
+            blocker["entity_id"] = entity_id
+    pipeline["blockers"] = blockers
+    pipeline["primary_blocker"] = blockers[0] if blockers else None
+    return pipeline
+
+
 def verification_signature(rows: list[dict[str, Any]]) -> str:
     """Stable signature of the current Stage 2B outputs for one book."""
     normalized: list[dict[str, Any]] = []
