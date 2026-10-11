@@ -1,6 +1,6 @@
 # Stage-wise book and Machine RAG workflow
 
-Version: `5.1.3.0`
+Version: `5.1.4.0`
 
 This document describes the current operator-visible sequence and the backend
 readiness contract. Raw Docling conversion output remains immutable; later
@@ -108,6 +108,23 @@ Machine RAG remains stale/not-ready until that commit completes.
 Cross-page stitching is allowed only when chunks remain consecutive, share the
 same Docling table reference and move at most to the adjacent page with
 fragmentation evidence. Ambiguous continuations are not silently merged.
+
+## Strict stage-result contract
+
+Exact/full document state now exposes read-only `stage_contracts` using schema
+`pipeline-stage/v1`. Each contract includes a stage id, generation identity
+when the authoritative stage persisted one, creation/completion time,
+source/upstream signatures, status/current/readiness flags, canonical blockers,
+a data hash (or an explicit missing/legacy hash status), human-review
+requirements, rule versions, and diagnostic details.
+
+The contract is a projection over the existing database and stage artifacts; it
+is not a second state machine. Compact Books summaries omit the full contracts.
+`GET /api/documents/{job_id}/contracts` exposes them directly.
+
+New Stage 3 builds persist one SHA-256 over the canonical chunk rows and
+retrieval rows at build time. Existing legacy Stage 3 output is not rehashed on
+status polling and remains valid with `data_hash=null` until rebuilt.
 
 ## Pipeline blocker and transition contract
 
