@@ -33,6 +33,16 @@ def test_error_retry_keeps_stable_label_and_inline_feedback():
     assert 'data-retry-feedback' in js
 
 
+def test_diagnostics_uses_canonical_pipeline_health_contract():
+    html = read("errors.html")
+    js = read("errors.js")
+    assert "/api/pipeline/health" in js
+    assert 'id="pipeline-blockers"' in html
+    assert 'id="transition-history"' in html
+    assert "Books needing action" in html
+    assert "Auto-progressing" in html
+
+
 def test_quality_page_uses_user_facing_copy():
     html = read("quality.html")
     js = read("quality.js")
