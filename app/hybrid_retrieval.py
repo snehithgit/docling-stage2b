@@ -391,15 +391,32 @@ def equipment_embedding_artifact_dir(processed_dir: Path, equipment_id: str, mod
     return Path(processed_dir) / "equipment_embedding_index" / safe_equipment / _safe_model_name(model)
 
 
+def _current_equipment_generation_dir(processed_dir: Path, equipment_id: str, model: str) -> Path | None:
+    artifact_dir = equipment_embedding_artifact_dir(processed_dir, equipment_id, model)
+    ptr_path = artifact_dir / "current.json"
+    try:
+        import json
+        gen = json.loads(ptr_path.read_text(encoding="utf-8"))["generation"]
+        return artifact_dir / gen
+    except Exception:
+        return None
+
+
 def _equipment_meta_path(processed_dir: Path, equipment_id: str, model: str) -> Path:
+    gen_dir = _current_equipment_generation_dir(processed_dir, equipment_id, model)
+    if gen_dir: return gen_dir / "metadata.json"
     return equipment_embedding_artifact_dir(processed_dir, equipment_id, model) / "metadata.json"
 
 
 def _equipment_vectors_path(processed_dir: Path, equipment_id: str, model: str) -> Path:
+    gen_dir = _current_equipment_generation_dir(processed_dir, equipment_id, model)
+    if gen_dir: return gen_dir / "vectors.f32"
     return equipment_embedding_artifact_dir(processed_dir, equipment_id, model) / "vectors.f32"
 
 
 def _equipment_rows_path(processed_dir: Path, equipment_id: str, model: str) -> Path:
+    gen_dir = _current_equipment_generation_dir(processed_dir, equipment_id, model)
+    if gen_dir: return gen_dir / "rows.jsonl"
     return equipment_embedding_artifact_dir(processed_dir, equipment_id, model) / "rows.jsonl"
 
 
@@ -453,6 +470,7 @@ def _equipment_fingerprint(
     manual_types: dict[int, str] | None = None,
 ) -> str:
     h = hashlib.sha256()
+    h.update(b"v2\0")
     h.update(str(equipment_id).encode("utf-8")); h.update(b"\0")
     h.update(str(model).encode("utf-8")); h.update(b"\0")
     h.update(str(document_prefix or "").encode("utf-8")); h.update(b"\0")
@@ -467,6 +485,7 @@ def _equipment_fingerprint(
 
 def _row_embedding_key(row: dict[str, Any], *, model: str, document_prefix: str) -> str:
     h = hashlib.sha256()
+    h.update(b"v2\0")
     h.update(str(model).encode("utf-8")); h.update(b"\0")
     h.update(str(document_prefix or "").encode("utf-8")); h.update(b"\0")
     h.update(str(row.get("postprocess_job_id") or "").encode("utf-8")); h.update(b"\0")
@@ -755,18 +774,26 @@ def build_equipment_embedding_index(
     }
     # Prepare the complete generation before taking the publication lock.
     generation_token = uuid.uuid4().hex
-    tmp_vec = vec_path.with_suffix(vec_path.suffix + f".{generation_token}.tmp")
-    matrix.tofile(tmp_vec)
-    tmp_rows = rows_path.with_suffix(rows_path.suffix + f".{generation_token}.tmp")
-    with tmp_rows.open("w", encoding="utf-8") as handle:
+    gen_dir = artifact_dir / generation_token
+    gen_dir.mkdir(parents=True, exist_ok=True)
+
+    new_vec_path = gen_dir / "vectors.f32"
+    matrix.tofile(new_vec_path)
+
+    new_rows_path = gen_dir / "rows.jsonl"
+    with new_rows_path.open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-    tmp_meta = meta_path.with_suffix(meta_path.suffix + f".{generation_token}.tmp")
-    tmp_meta.write_text(json.dumps(metadata, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    new_meta_path = gen_dir / "metadata.json"
+    new_meta_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    ptr_path = artifact_dir / "current.json"
+    tmp_ptr = ptr_path.with_suffix(".tmp")
+    tmp_ptr.write_text(json.dumps({"generation": generation_token}) + "\n", encoding="utf-8")
+
     with _EQUIPMENT_INDEX_SWAP_LOCK:
-        tmp_vec.replace(vec_path)
-        tmp_rows.replace(rows_path)
-        tmp_meta.replace(meta_path)
+        tmp_ptr.replace(ptr_path)
         _load_equipment_vectors_cached.cache_clear()
         _load_equipment_rows_cached.cache_clear()
     return {
