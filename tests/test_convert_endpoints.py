@@ -35,6 +35,12 @@ class ConvertEndpointTests(unittest.TestCase):
         asyncio.run(cls.main.runtime.store.initialize())
         cls.main.runtime.worker.start = AsyncMock()
         cls.main.runtime.worker.stop = AsyncMock()
+        cls.main.runtime.postprocess_worker.start = AsyncMock()
+        cls.main.runtime.postprocess_worker.stop = AsyncMock()
+        cls.main.runtime.stage2b_worker.start = AsyncMock()
+        cls.main.runtime.stage2b_worker.stop = AsyncMock()
+        cls.main.runtime.telegram_bot.start = AsyncMock()
+        cls.main.runtime.telegram_bot.stop = AsyncMock()
 
     @classmethod
     def tearDownClass(cls):

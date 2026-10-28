@@ -60,10 +60,10 @@
 
 ### Separately tracked correctness work before final production benchmark
 
-- [ ] Atomic immutable machine embedding/index generations with one committed current-generation pointer.
-- [ ] Explicit embedding-rule version/fingerprint so embedding input/format changes invalidate machine indexes correctly.
-- [ ] Docling forgotten-task/404 recovery that clears the dead task ID and resubmits conversion safely.
-- [ ] Enforce persisted table structural binding when a table-cell overlay is consumed; do not infer moves from repeated values.
+- [x] Atomic immutable machine embedding/index generations with one committed current-generation pointer.
+- [x] Explicit embedding-rule version/fingerprint so embedding input/format changes invalidate machine indexes correctly.
+- [x] Docling forgotten-task/404 recovery that clears the dead task ID and resubmits conversion safely.
+- [x] Enforce persisted table structural binding when a table-cell overlay is consumed; do not infer moves from repeated values.
 
 ### Acceptance after the separate correctness work
 

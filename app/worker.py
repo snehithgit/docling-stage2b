@@ -458,7 +458,10 @@ class ConversionWorker:
                     self._events.notify("processing_long_running")
                 try:
                     poll_result = await self._client.poll(task_id)
-                except DoclingApiError:
+                except DoclingApiError as e:
+                    if "HTTP 404" in str(e):
+                        await self._store.clear_task_id(job["id"])
+                        raise DoclingApiError("Docling Serve task was not found (404). Task ID cleared.") from e
                     consecutive_poll_errors += 1
                     if consecutive_poll_errors >= config.poll_max_consecutive_errors:
                         raise

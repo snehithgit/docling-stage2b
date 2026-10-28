@@ -304,7 +304,14 @@ class Stage3ChunkBuilder:
                 # trail instead of silently dropping table-cell provenance.
                 for table_index, table_entries in table_corrections.items():
                     if f"#/tables/{table_index}" in refs:
-                        corrected_refs.extend(table_entries)
+                        chunk_text = str(row.get("text") or "")
+                        chunk_raw_text = str(row.get("raw_text") or "")
+                        filtered_entries = [
+                            entry for entry in table_entries
+                            if str(entry.get("corrected_text") or "") in chunk_text
+                            or str(entry.get("corrected_text") or "") in chunk_raw_text
+                        ]
+                        corrected_refs.extend(filtered_entries)
                 # A table may be split into several chunks; keep provenance on
                 # each fragment but never duplicate the same ledger entry inside
                 # one chunk.
