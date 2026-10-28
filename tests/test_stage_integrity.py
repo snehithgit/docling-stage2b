@@ -91,3 +91,17 @@ def test_route_discovery_includes_books_beyond_first_thousand(tmp_path):
         assert await worker.sync_routes_once() == 1001
         assert await worker.sync_routes_once() == 0
     asyncio.run(run())
+
+def test_archive_skips_malformed_and_undecodable_json(tmp_path):
+    from app.archive import select_docling_document
+    path = tmp_path / 'bad_jsons.zip'
+    document = {'texts': [{'text': 'manual'}]}
+    with zipfile.ZipFile(path, 'w') as archive:
+        archive.writestr('broken.json', '{')
+        archive.writestr('undecodable.json', b'\xff\xfe\x00\x00')
+        archive.writestr('book.json', json.dumps(document))
+
+    with zipfile.ZipFile(path) as archive:
+        doc, name = select_docling_document(archive)
+        assert doc == document
+        assert name == 'book.json'
